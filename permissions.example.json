@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this to permissions.json to pre-approve or block tools without prompting. Each entry is a tool name (e.g. 'edit_file') or 'run_command:<prefix>' to match shell commands by prefix. A deny rule always wins over an allow rule. Delete permissions.json to go back to prompting for everything.",
+  "allow": [
+    "run_command:git status",
+    "run_command:git diff",
+    "run_command:git log"
+  ],
+  "deny": [
+    "run_command:rm",
+    "run_command:del",
+    "run_command:rmdir",
+    "run_command:format",
+    "run_command:shutdown"
+  ]
+}

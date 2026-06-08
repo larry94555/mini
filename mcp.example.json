@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy this file to mcp.json to turn on MCP. imini launches each server below as a child process, discovers its tools, and exposes them to the model (gated behind the permission prompt). Delete mcp.json to turn MCP off. These examples need Node (npx) or Python (uvx) installed.",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    }
+  }
+}
