@@ -37,7 +37,7 @@ public class SubAgent {
         Tool fetch = builtins.webFetch();
         webTools.put(search.name, search);
         webTools.put(fetch.name, fetch);
-        // gate == null: the sub-agent has only read-only tools, so no permission gate is needed.
-        return engine.run(SYSTEM_PROMPT, task, webTools, null, "sub");
+        // AUTO mode: the sub-agent has only read-only tools, so nothing needs approval anyway.
+        return engine.run(SYSTEM_PROMPT, task, webTools, PermissionService.Mode.AUTO, "sub");
     }
 }

@@ -6,80 +6,91 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import com.example.imini.PermissionService.Decision;
+import com.example.imini.PermissionService.Mode;
 
 /**
  * THE HARNESS, shared by the main agent and the sub-agent. think -> act -> observe loop.
  *
- * Three stop conditions protect against runaway behavior:
- *   - MAX_ITERATIONS  : the model only gets so many turns;
- *   - a wall-clock deadline (agent.deadline-seconds): the whole run is time-budgeted;
- *   - duplicate-call detection: if the model asks for the exact same tool+args repeatedly, the
- *     harness stops re-running it and nudges (then bails) instead of looping forever.
+ * Tier 2 additions:
+ *   - PERMISSION MODES via PermissionService (ASK / AUTO / PLAN). In PLAN mode mutating tools are
+ *     recorded but never executed, and the proposed plan is appended to the answer.
+ *   - PARALLEL TOOLS: within a single model turn, read-only tool calls run concurrently; mutating
+ *     calls run inline (so permission prompts stay sequential).
+ *   - TOOL-OUTPUT TRIMMING: each result is condensed by ContextManager before entering history.
  *
- * (Per-generation runaway -- the "Live Updates" repetition -- is bounded inside LlamaClient.)
+ * Stop conditions (unchanged): MAX_ITERATIONS, a wall-clock deadline, and duplicate-call detection.
  */
 @Component
 public class AgentEngine {
 
-    private static final int MAX_ITERATIONS = 10;
-    private static final int MAX_DUP_STRIKES = 3;   // repeated identical calls before we give up
+    private static final int MAX_ITERATIONS = 12;
+    private static final int MAX_DUP_STRIKES = 3;
 
     private static final Pattern TOOL_CALL_TAG =
             Pattern.compile("<tool_call>\\s*(\\{.*?})\\s*</tool_call>", Pattern.DOTALL);
 
     private final LlamaClient llama;
     private final ContextManager context;
+    private final PermissionService permissions;
     private final ObjectMapper mapper = new ObjectMapper();
+
+    // unbounded so nested sub-agents (which also submit here) can't deadlock a fixed pool
+    private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "imini-tool");
+        t.setDaemon(true);
+        return t;
+    });
 
     @Value("${agent.stream:true}")
     private boolean stream;
     @Value("${agent.deadline-seconds:120}")
     private int deadlineSeconds;
+    @Value("${agent.parallel-tools:true}")
+    private boolean parallelTools;
 
-    public AgentEngine(LlamaClient llama, ContextManager context) {
+    public AgentEngine(LlamaClient llama, ContextManager context, PermissionService permissions) {
         this.llama = llama;
         this.context = context;
+        this.permissions = permissions;
     }
 
     /** One-shot: builds [system, user] and returns just the answer. */
-    public String run(String systemPrompt,
-                      String userMessage,
-                      Map<String, Tool> tools,
-                      PermissionGate gate,
-                      String label) throws Exception {
+    public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
+                      Mode mode, String label) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(msg("system", systemPrompt));
         messages.add(msg("user", userMessage));
-        return converse(messages, tools, gate, label).answer();
+        return converse(messages, tools, mode, label).answer();
     }
 
-    /**
-     * Multi-turn: runs the loop over an existing history (which must already include the system
-     * message and the latest user message) and returns both the answer and the final history so a
-     * session can be persisted.
-     */
-    public AgentResult converse(List<Map<String, Object>> startingMessages,
-                                Map<String, Tool> tools,
-                                PermissionGate gate,
-                                String label) throws Exception {
+    /** Multi-turn: runs over an existing history; returns answer + final history for persistence. */
+    public AgentResult converse(List<Map<String, Object>> startingMessages, Map<String, Tool> tools,
+                                Mode mode, String label) throws Exception {
 
         List<Map<String, Object>> messages = new ArrayList<>(startingMessages);
         List<Map<String, Object>> specs = specsFor(tools);
 
         long deadline = System.nanoTime() + deadlineSeconds * 1_000_000_000L;
         Map<String, Integer> callCounts = new HashMap<>();
+        List<String> plan = new ArrayList<>();
         int dupStrikes = 0;
 
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             if (System.nanoTime() > deadline) {
                 System.out.println("\n[guard:" + label + "] time budget of " + deadlineSeconds + "s exceeded.");
                 return new AgentResult("[stopped: exceeded the " + deadlineSeconds + "s time budget without "
-                        + "reaching a final answer. The task may be too large, or the model may be stuck.]", messages);
+                        + "reaching a final answer.]" + planSuffix(plan), messages);
             }
 
             messages = context.compactIfNeeded(messages, label);
@@ -97,49 +108,120 @@ public class AgentEngine {
             List<Map<String, Object>> toolCalls = extractToolCalls(assistant);
             if (toolCalls.isEmpty()) {
                 String answer = contentOf(assistant);
-                return new AgentResult(
-                        (answer == null || answer.isBlank()) ? "[model returned no text]" : answer, messages);
+                if (answer == null || answer.isBlank()) answer = "[model returned no text]";
+                return new AgentResult(answer + planSuffix(plan), messages);
             }
 
+            // Resolve every call up front.
+            List<CallInfo> infos = new ArrayList<>();
             for (Map<String, Object> call : toolCalls) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> fn = (Map<String, Object>) call.get("function");
                 String name = String.valueOf(fn.get("name"));
                 String id = call.get("id") == null ? null : String.valueOf(call.get("id"));
                 Map<String, Object> args = parseArgs(fn.get("arguments"));
+                infos.add(new CallInfo(name, id, args, tools.get(name)));
+            }
 
-                String signature = name + "|" + args;
-                int count = callCounts.merge(signature, 1, Integer::sum);
-
-                String result;
-                Tool tool = tools.get(name);
-                if (tool == null) {
-                    result = "ERROR: unknown tool '" + name + "'";
-                } else if (count > 2) {
-                    // already executed this exact call twice; don't run it again
-                    dupStrikes++;
-                    result = "NOTE: you already called '" + name + "' with these exact arguments "
-                            + (count - 1) + " time(s) and got the same result. Do NOT call it again. "
-                            + "Answer the user with the information you already have.";
-                    System.out.println("[guard:" + label + "] suppressed duplicate call to " + name);
-                } else if (tool.mutating && (gate == null || !gate.confirm(name, args))) {
-                    result = gate == null
-                            ? "DENIED: mutating tools are not allowed in this context."
-                            : "DENIED: the user did not approve this action.";
-                } else {
-                    System.out.println("[" + label + ":tool] " + name + " " + args);
-                    result = tool.executor.apply(args);
+            // Start read-only calls in parallel.
+            Map<CallInfo, Future<String>> futures = new IdentityHashMap<>();
+            if (parallelTools) {
+                for (CallInfo ci : infos) {
+                    if (ci.tool != null && !ci.tool.mutating) {
+                        futures.put(ci, pool.submit(() -> safeExec(ci.tool, ci.args)));
+                    }
                 }
-                messages.add(toolResult(id, name, result));
+            }
+
+            boolean parallelNote = parallelTools && futures.size() > 1;
+
+            // Process in original order so each tool_result lines up with its call.
+            for (CallInfo ci : infos) {
+                String result;
+                if (ci.tool == null) {
+                    result = "ERROR: unknown tool '" + ci.name + "'";
+                } else if (!ci.tool.mutating) {
+                    System.out.println("[" + label + ":tool] " + ci.name + " " + ci.args
+                            + (parallelNote ? " (parallel)" : ""));
+                    Future<String> f = futures.get(ci);
+                    result = (f != null) ? join(f) : safeExec(ci.tool, ci.args);
+                } else {
+                    String signature = ci.name + "|" + ci.args;
+                    int count = callCounts.merge(signature, 1, Integer::sum);
+                    if (count > 2) {
+                        dupStrikes++;
+                        result = "NOTE: you already called '" + ci.name + "' with these exact arguments "
+                                + (count - 1) + " time(s). Do NOT call it again; answer with what you have.";
+                        System.out.println("[guard:" + label + "] suppressed duplicate call to " + ci.name);
+                    } else {
+                        Decision d = permissions.decide(ci.name, true, ci.args, mode);
+                        switch (d.kind()) {
+                            case ALLOW -> {
+                                System.out.println("[" + label + ":tool] " + ci.name + " " + ci.args);
+                                result = safeExec(ci.tool, ci.args);
+                            }
+                            case DENY -> result = "DENIED: " + d.note() + ".";
+                            case RECORD_PLAN -> {
+                                String desc = ci.name + " " + ci.args;
+                                plan.add(desc);
+                                System.out.println("[" + label + ":plan] would run " + desc);
+                                result = "[plan mode] Recorded (not executed): " + desc
+                                        + ". Continue planning; do not assume it ran.";
+                            }
+                            default -> result = "DENIED.";
+                        }
+                    }
+                }
+                messages.add(toolResult(ci.id, ci.name, context.condenseToolResult(result)));
             }
 
             if (dupStrikes >= MAX_DUP_STRIKES) {
                 System.out.println("\n[guard:" + label + "] too many repeated calls; stopping.");
-                return new AgentResult("[stopped: the model kept repeating the same tool call without making "
-                        + "progress, so the harness ended the run to avoid an endless loop.]", messages);
+                return new AgentResult("[stopped: the model kept repeating the same tool call.]"
+                        + planSuffix(plan), messages);
             }
         }
-        return new AgentResult("[stopped: reached " + MAX_ITERATIONS + " iterations without a final answer]", messages);
+        return new AgentResult("[stopped: reached " + MAX_ITERATIONS + " iterations without a final answer]"
+                + planSuffix(plan), messages);
+    }
+
+    private String planSuffix(List<String> plan) {
+        if (plan.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n\nProposed plan (PLAN MODE - nothing was executed):");
+        for (String p : plan) sb.append("\n  - ").append(p);
+        sb.append("\n\nRe-send this request with mode \"ask\" or \"auto\" to carry it out.");
+        return sb.toString();
+    }
+
+    private String safeExec(Tool tool, Map<String, Object> args) {
+        try {
+            return tool.executor.apply(args);
+        } catch (Exception e) {
+            return "ERROR: " + e.getMessage();
+        }
+    }
+
+    private String join(Future<String> f) {
+        try {
+            return f.get();
+        } catch (Exception e) {
+            return "ERROR: " + e.getMessage();
+        }
+    }
+
+    /** A resolved tool call. */
+    private static final class CallInfo {
+        final String name;
+        final String id;
+        final Map<String, Object> args;
+        final Tool tool;
+
+        CallInfo(String name, String id, Map<String, Object> args, Tool tool) {
+            this.name = name;
+            this.id = id;
+            this.args = args;
+            this.tool = tool;
+        }
     }
 
     // ---------------------------------------------------------------------

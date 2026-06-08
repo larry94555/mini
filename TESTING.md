@@ -156,3 +156,67 @@ the prompt more explicit (the prompts below already name the tool to be reliable
 | Undo last edit | `rewind.bat` |
 | List sessions | open `http://localhost:8080/sessions` |
 | List rewind points | open `http://localhost:8080/checkpoints` |
+
+---
+
+# Tier 2 features
+
+These build on the setup above (app running, second terminal for `ask.bat`/`chat.bat`).
+
+## 11. Plan mode (propose without executing)
+
+- **Setup:** create a small `notes.txt` (see Test 3). Leave `agent.auto-approve=false`.
+- **Run:** `plan.bat "In notes.txt change Status: draft to Status: final, then create a file done.txt that says ok."`
+- **Observe:** the console shows `[main:plan] would run edit_file ...` / `... write_file ...` and the
+  answer ends with a **Proposed plan (PLAN MODE - nothing was executed)** list. Confirm `notes.txt`
+  is unchanged and `done.txt` was NOT created.
+- **Then execute for real:** `ask.bat "In notes.txt change Status: draft to Status: final."` and approve.
+
+## 12. Permission rules + remembered decisions
+
+- **Allow rule (no prompt):** copy `permissions.example.json` to `permissions.json`, restart, then
+  `ask.bat "Run the command: git status"`. Because `run_command:git status` is in `allow`, it runs
+  with **no** permission prompt. (Run inside a git repo, or expect git's "not a repository" message.)
+- **Deny rule (hard block):** `ask.bat "Run the command: rm -rf ."` -> the tool is **denied by rule**;
+  nothing executes, regardless of how you answer.
+- **Remember a decision:** with no matching rule, `ask.bat "Run the command: echo hello"` prompts;
+  answer **`a`** (always). Ask the same again -> it runs with no prompt this time.
+
+## 13. Workspace confinement
+
+- **Setup:** `agent.confine-to-workspace=true` (default).
+- **Run:** `ask.bat "Write the text hi into the file C:\\Windows\\imini-test.txt"`
+- **Observe:** the write is **denied** with "target path is outside the workspace", even though
+  `edit/write` would normally just prompt. A write to a path inside the imini folder is allowed
+  (after the normal prompt). This is a hard boundary that even `auto` mode respects.
+
+## 14. Todo / planning tool
+
+- **Run:** `ask.bat "Plan a 3-step approach to add a license header to all .java files, using todo_write. Don't do the work, just record the plan."`
+- **Observe:** console prints `[todo] updated:` with a checklist; the model marks items
+  pending/in_progress. View the current list anytime at `http://localhost:8080/todos`.
+- **Note:** on a 3B model you may need to name the tool explicitly ("using todo_write").
+
+## 15. Parallel read-only tools
+
+- **Setup:** `agent.parallel-tools=true` (default), internet access.
+- **Run:** `ask.bat "Fetch https://text.npr.org and https://lite.cnn.com, then tell me one headline from each."`
+- **Observe:** in the console the two `web_fetch` lines are tagged `(parallel)` and the fetches
+  overlap rather than running strictly one-after-another. (Set `agent.parallel-tools=false` and
+  re-run to feel the difference.) Two `delegate_research` calls in one turn likewise run as parallel
+  sub-agents.
+
+## 16. Accurate tokens + durable memory + tool-output trimming
+
+- **Accurate tokens:** with `llama-server` up, compaction now triggers on the **real** token count
+  from `/tokenize` (it silently falls back to chars/4 only if that endpoint is unreachable).
+- **Durable memory:** set `agent.compact-token-threshold=1200`, restart, then in one session:
+  1. `chat.bat mem1 "My project is codenamed Bluebird and ships in March. List ten facts about birds."`
+  2. `chat.bat mem1 "List ten facts about rivers."`
+  3. `chat.bat mem1 "What is my project codename and ship month?"`
+  Watch for `[compaction:main] ... folded ... into memory ...`; step 3 still answers **Bluebird /
+  March** because that fact was folded into the persistent `[MEMORY]` note. Restore the threshold to 6000.
+- **Tool-output trimming:** set `agent.max-tool-result-chars=500`, restart, then
+  `ask.bat "Use web_fetch on https://text.npr.org and summarize it."` -> the tool result is trimmed
+  to head+tail with a `...[N chars ... trimmed]...` marker before the model sees it, so a huge page
+  can't blow the context. Restore to 4000.

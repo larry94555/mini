@@ -40,14 +40,17 @@ public class BuiltinTools {
             .build();
 
     private final CheckpointStore checkpoints;
+    private final TodoStore todos;
 
-    public BuiltinTools(CheckpointStore checkpoints) {
+    public BuiltinTools(CheckpointStore checkpoints, TodoStore todos) {
         this.checkpoints = checkpoints;
+        this.todos = todos;
     }
 
     /** Tools available to the main agent. */
     public List<Tool> all() {
-        return List.of(readFile(), view(), listDir(), writeFile(), editFile(), runCommand(), webFetch());
+        return List.of(readFile(), view(), listDir(), writeFile(), editFile(),
+                runCommand(), webFetch(), todoWrite());
     }
 
     // ---------------------------------------------------------------------
@@ -156,6 +159,58 @@ public class BuiltinTools {
                 checkpoints.snapshot(p);
                 Files.writeString(p, content.replace(oldStr, newStr));
                 return "Edited " + p.toAbsolutePath() + " (1 replacement; snapshot saved for rewind).";
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // Planning tool
+    // ---------------------------------------------------------------------
+
+    public Tool todoWrite() {
+        // schema: { todos: [ { content: string, status: pending|in_progress|completed } ] }
+        Map<String, Object> item = new LinkedHashMap<>();
+        Map<String, Object> itemProps = new LinkedHashMap<>();
+        itemProps.put("content", strProp("What needs to be done."));
+        Map<String, Object> statusProp = new LinkedHashMap<>();
+        statusProp.put("type", "string");
+        statusProp.put("enum", List.of("pending", "in_progress", "completed"));
+        statusProp.put("description", "pending | in_progress | completed");
+        itemProps.put("status", statusProp);
+        item.put("type", "object");
+        item.put("properties", itemProps);
+        item.put("required", List.of("content", "status"));
+
+        Map<String, Object> todosProp = new LinkedHashMap<>();
+        todosProp.put("type", "array");
+        todosProp.put("items", item);
+        todosProp.put("description", "The COMPLETE task list (always pass the whole list).");
+
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("todos", todosProp);
+
+        return new Tool("todo_write",
+                "Record or update your task checklist for a multi-step task. Always pass the FULL list. "
+                        + "Use it to plan before you start and to mark steps in_progress/completed as you go.",
+                schema(props, "todos"), false, args -> {
+            try {
+                Object raw = args.get("todos");
+                List<TodoStore.Item> items = new ArrayList<>();
+                if (raw instanceof List<?> list) {
+                    for (Object o : list) {
+                        if (o instanceof Map<?, ?> m) {
+                            String content = String.valueOf(m.get("content"));
+                            Object st = m.get("status");
+                            items.add(new TodoStore.Item(content, st == null ? "pending" : String.valueOf(st)));
+                        }
+                    }
+                }
+                todos.set(items);
+                String rendered = todos.render();
+                System.out.println("[todo] updated:\n" + rendered);
+                return "Updated todo list:\n" + rendered;
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
