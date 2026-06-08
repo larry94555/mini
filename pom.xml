@@ -12,9 +12,9 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>mini-agent</artifactId>
-    <version>0.1.0</version>
-    <name>mini-agent</name>
+    <artifactId>imini</artifactId>
+    <version>0.2.0</version>
+    <name>imini</name>
     <description>A minimal Claude Code-style agent harness over a local llama-server</description>
 
     <properties>
@@ -22,10 +22,15 @@
     </properties>
 
     <dependencies>
-        <!-- Brings embedded Tomcat + Jackson (ObjectMapper) + java.net.http is in the JDK -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- HTML parsing / main-article extraction -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.18.1</version>
         </dependency>
     </dependencies>
 
