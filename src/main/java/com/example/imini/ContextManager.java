@@ -117,7 +117,7 @@ public class ContextManager {
         req.add(role("user", "EXISTING NOTES:\n" + (oldMemory.isBlank() ? "(none yet)" : oldMemory)
                 + "\n\nNEW CONVERSATION:\n" + transcript));
 
-        Map<String, Object> resp = llama.chat(req, null); // no tools while summarizing
+        Map<String, Object> resp = llama.summaryChat(req); // routed to the cheap summary model
         Object c = resp.get("content");
         String notes = c == null ? "" : String.valueOf(c).trim();
         return notes.isBlank() ? (oldMemory.isBlank() ? "(no notes)" : oldMemory) : notes;

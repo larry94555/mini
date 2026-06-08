@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,14 +23,11 @@ import com.example.imini.PermissionService.Mode;
 /**
  * THE HARNESS, shared by the main agent and the sub-agent. think -> act -> observe loop.
  *
- * Tier 2 additions:
- *   - PERMISSION MODES via PermissionService (ASK / AUTO / PLAN). In PLAN mode mutating tools are
- *     recorded but never executed, and the proposed plan is appended to the answer.
- *   - PARALLEL TOOLS: within a single model turn, read-only tool calls run concurrently; mutating
- *     calls run inline (so permission prompts stay sequential).
- *   - TOOL-OUTPUT TRIMMING: each result is condensed by ContextManager before entering history.
+ * Tier 2: permission modes (ASK/AUTO/PLAN), parallel read-only tools, tool-output trimming.
+ * Tier 3: interruptibility + steering (main loop only), and prompt-injection fencing of untrusted
+ *         tool output.
  *
- * Stop conditions (unchanged): MAX_ITERATIONS, a wall-clock deadline, and duplicate-call detection.
+ * Stop conditions: MAX_ITERATIONS, wall-clock deadline, duplicate-call detection, user interrupt.
  */
 @Component
 public class AgentEngine {
@@ -43,9 +41,9 @@ public class AgentEngine {
     private final LlamaClient llama;
     private final ContextManager context;
     private final PermissionService permissions;
+    private final InterruptService interrupt;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // unbounded so nested sub-agents (which also submit here) can't deadlock a fixed pool
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "imini-tool");
         t.setDaemon(true);
@@ -59,13 +57,14 @@ public class AgentEngine {
     @Value("${agent.parallel-tools:true}")
     private boolean parallelTools;
 
-    public AgentEngine(LlamaClient llama, ContextManager context, PermissionService permissions) {
+    public AgentEngine(LlamaClient llama, ContextManager context,
+                       PermissionService permissions, InterruptService interrupt) {
         this.llama = llama;
         this.context = context;
         this.permissions = permissions;
+        this.interrupt = interrupt;
     }
 
-    /** One-shot: builds [system, user] and returns just the answer. */
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
                       Mode mode, String label) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
@@ -74,12 +73,12 @@ public class AgentEngine {
         return converse(messages, tools, mode, label).answer();
     }
 
-    /** Multi-turn: runs over an existing history; returns answer + final history for persistence. */
     public AgentResult converse(List<Map<String, Object>> startingMessages, Map<String, Tool> tools,
                                 Mode mode, String label) throws Exception {
 
         List<Map<String, Object>> messages = new ArrayList<>(startingMessages);
         List<Map<String, Object>> specs = specsFor(tools);
+        boolean interactive = "main".equals(label); // only the main loop honors interrupt/steer
 
         long deadline = System.nanoTime() + deadlineSeconds * 1_000_000_000L;
         Map<String, Integer> callCounts = new HashMap<>();
@@ -89,21 +88,38 @@ public class AgentEngine {
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             if (System.nanoTime() > deadline) {
                 System.out.println("\n[guard:" + label + "] time budget of " + deadlineSeconds + "s exceeded.");
-                return new AgentResult("[stopped: exceeded the " + deadlineSeconds + "s time budget without "
-                        + "reaching a final answer.]" + planSuffix(plan), messages);
+                return new AgentResult("[stopped: exceeded the " + deadlineSeconds + "s time budget.]"
+                        + planSuffix(plan), messages);
+            }
+
+            if (interactive) {
+                for (String s : interrupt.drainSteer()) {
+                    messages.add(msg("user", "[steering from user] " + s));
+                    System.out.println("[steer:" + label + "] injected: " + s);
+                }
+                if (interrupt.consumeStop()) {
+                    System.out.println("\n[interrupt:" + label + "] stopped before model call.");
+                    return new AgentResult("[stopped: interrupted by the user]" + planSuffix(plan), messages);
+                }
             }
 
             messages = context.compactIfNeeded(messages, label);
 
+            BooleanSupplier cancel = interactive ? interrupt::isStopRequested : () -> false;
             Map<String, Object> assistant;
             if (stream) {
                 System.out.print("\n[" + label + " thinking] ");
-                assistant = llama.chatStream(messages, specs, token -> System.out.print(token));
+                assistant = llama.chatStream(messages, specs, token -> System.out.print(token), cancel);
                 System.out.println();
             } else {
                 assistant = llama.chat(messages, specs);
             }
             messages.add(assistant);
+
+            if (interactive && interrupt.consumeStop()) {
+                System.out.println("\n[interrupt:" + label + "] stopped during generation.");
+                return new AgentResult("[stopped: interrupted by the user mid-response]" + planSuffix(plan), messages);
+            }
 
             List<Map<String, Object>> toolCalls = extractToolCalls(assistant);
             if (toolCalls.isEmpty()) {
@@ -112,7 +128,6 @@ public class AgentEngine {
                 return new AgentResult(answer + planSuffix(plan), messages);
             }
 
-            // Resolve every call up front.
             List<CallInfo> infos = new ArrayList<>();
             for (Map<String, Object> call : toolCalls) {
                 @SuppressWarnings("unchecked")
@@ -123,7 +138,6 @@ public class AgentEngine {
                 infos.add(new CallInfo(name, id, args, tools.get(name)));
             }
 
-            // Start read-only calls in parallel.
             Map<CallInfo, Future<String>> futures = new IdentityHashMap<>();
             if (parallelTools) {
                 for (CallInfo ci : infos) {
@@ -132,10 +146,8 @@ public class AgentEngine {
                     }
                 }
             }
-
             boolean parallelNote = parallelTools && futures.size() > 1;
 
-            // Process in original order so each tool_result lines up with its call.
             for (CallInfo ci : infos) {
                 String result;
                 if (ci.tool == null) {
@@ -172,7 +184,13 @@ public class AgentEngine {
                         }
                     }
                 }
-                messages.add(toolResult(ci.id, ci.name, context.condenseToolResult(result)));
+
+                // trim, then fence untrusted (web / MCP) content against prompt injection
+                String finalResult = context.condenseToolResult(result);
+                if (ci.tool != null && ci.tool.untrusted) {
+                    finalResult = Untrusted.wrap(ci.name, finalResult);
+                }
+                messages.add(toolResult(ci.id, ci.name, finalResult));
             }
 
             if (dupStrikes >= MAX_DUP_STRIKES) {
@@ -209,7 +227,6 @@ public class AgentEngine {
         }
     }
 
-    /** A resolved tool call. */
     private static final class CallInfo {
         final String name;
         final String id;

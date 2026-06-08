@@ -253,7 +253,7 @@ public class BuiltinTools {
         props.put("url", strProp("Absolute http(s) URL to fetch."));
         return new Tool("web_fetch",
                 "Fetch a web page and return the main article region as clean text (jsoup).",
-                schema(props, "url"), false, args -> {
+                schema(props, "url"), false, true /* untrusted output */, args -> {
             try {
                 String url = str(args, "url");
                 HttpResponse<String> resp = http.send(get(url), HttpResponse.BodyHandlers.ofString());
@@ -278,7 +278,7 @@ public class BuiltinTools {
         props.put("query", strProp("Search query."));
         return new Tool("web_search",
                 "Search the web (DuckDuckGo) and return the top results with titles, URLs, and snippets.",
-                schema(props, "query"), false, args -> {
+                schema(props, "query"), false, true /* untrusted output */, args -> {
             try {
                 String q = str(args, "query");
                 String url = "https://html.duckduckgo.com/html/?q="
