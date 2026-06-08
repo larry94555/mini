@@ -16,9 +16,10 @@ public class ToolRegistry {
 
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
-    public ToolRegistry(BuiltinTools builtins, SubAgent subAgent) {
+    public ToolRegistry(BuiltinTools builtins, SubAgent subAgent, McpManager mcp) {
         for (Tool t : builtins.all()) register(t);
         register(delegateTool(subAgent));
+        for (Tool t : mcp.tools()) register(t);   // external MCP-server tools (off unless mcp.json exists)
     }
 
     private void register(Tool t) {

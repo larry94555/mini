@@ -46,15 +46,29 @@ public class AgentEngine {
         this.context = context;
     }
 
+    /** One-shot: builds [system, user] and returns just the answer. */
     public String run(String systemPrompt,
                       String userMessage,
                       Map<String, Tool> tools,
                       PermissionGate gate,
                       String label) throws Exception {
-
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(msg("system", systemPrompt));
         messages.add(msg("user", userMessage));
+        return converse(messages, tools, gate, label).answer();
+    }
+
+    /**
+     * Multi-turn: runs the loop over an existing history (which must already include the system
+     * message and the latest user message) and returns both the answer and the final history so a
+     * session can be persisted.
+     */
+    public AgentResult converse(List<Map<String, Object>> startingMessages,
+                                Map<String, Tool> tools,
+                                PermissionGate gate,
+                                String label) throws Exception {
+
+        List<Map<String, Object>> messages = new ArrayList<>(startingMessages);
         List<Map<String, Object>> specs = specsFor(tools);
 
         long deadline = System.nanoTime() + deadlineSeconds * 1_000_000_000L;
@@ -64,8 +78,8 @@ public class AgentEngine {
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             if (System.nanoTime() > deadline) {
                 System.out.println("\n[guard:" + label + "] time budget of " + deadlineSeconds + "s exceeded.");
-                return "[stopped: exceeded the " + deadlineSeconds + "s time budget without reaching a "
-                        + "final answer. The task may be too large, or the model may be stuck.]";
+                return new AgentResult("[stopped: exceeded the " + deadlineSeconds + "s time budget without "
+                        + "reaching a final answer. The task may be too large, or the model may be stuck.]", messages);
             }
 
             messages = context.compactIfNeeded(messages, label);
@@ -83,7 +97,8 @@ public class AgentEngine {
             List<Map<String, Object>> toolCalls = extractToolCalls(assistant);
             if (toolCalls.isEmpty()) {
                 String answer = contentOf(assistant);
-                return (answer == null || answer.isBlank()) ? "[model returned no text]" : answer;
+                return new AgentResult(
+                        (answer == null || answer.isBlank()) ? "[model returned no text]" : answer, messages);
             }
 
             for (Map<String, Object> call : toolCalls) {
@@ -120,11 +135,11 @@ public class AgentEngine {
 
             if (dupStrikes >= MAX_DUP_STRIKES) {
                 System.out.println("\n[guard:" + label + "] too many repeated calls; stopping.");
-                return "[stopped: the model kept repeating the same tool call without making progress, "
-                        + "so the harness ended the run to avoid an endless loop.]";
+                return new AgentResult("[stopped: the model kept repeating the same tool call without making "
+                        + "progress, so the harness ended the run to avoid an endless loop.]", messages);
             }
         }
-        return "[stopped: reached " + MAX_ITERATIONS + " iterations without a final answer]";
+        return new AgentResult("[stopped: reached " + MAX_ITERATIONS + " iterations without a final answer]", messages);
     }
 
     // ---------------------------------------------------------------------

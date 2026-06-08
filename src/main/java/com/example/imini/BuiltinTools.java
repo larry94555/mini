@@ -22,14 +22,14 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Builds the individual Tool instances. Separated from ToolRegistry so the SubAgent can grab just
- * the web tools without pulling in the registry (which depends on the SubAgent -- separating these
- * avoids a dependency cycle).
+ * Builds the individual Tool instances.
  *
- *   all()        -> the tools the MAIN agent uses (file, shell, web_fetch). NOT web_search:
- *                   open-ended searching is delegated to the sub-agent on purpose.
- *   webFetch()   -> jsoup-based page fetch + main-article extraction
- *   webSearch()  -> DuckDuckGo HTML search, parsed with jsoup (given only to the sub-agent)
+ *   all()        -> tools the MAIN agent uses: read_file, view, list_dir, write_file, edit_file,
+ *                   run_command, web_fetch. (web_search is delegated to the sub-agent.)
+ *   webFetch()   -> jsoup page fetch + main-article extraction
+ *   webSearch()  -> DuckDuckGo HTML search (given only to the sub-agent)
+ *
+ * write_file and edit_file snapshot the target through CheckpointStore first, so edits can be rewound.
  */
 @Component
 public class BuiltinTools {
@@ -39,13 +39,19 @@ public class BuiltinTools {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
+    private final CheckpointStore checkpoints;
+
+    public BuiltinTools(CheckpointStore checkpoints) {
+        this.checkpoints = checkpoints;
+    }
+
     /** Tools available to the main agent. */
     public List<Tool> all() {
-        return List.of(readFile(), listDir(), writeFile(), runCommand(), webFetch());
+        return List.of(readFile(), view(), listDir(), writeFile(), editFile(), runCommand(), webFetch());
     }
 
     // ---------------------------------------------------------------------
-    // File + shell tools
+    // File tools
     // ---------------------------------------------------------------------
 
     public Tool readFile() {
@@ -55,6 +61,30 @@ public class BuiltinTools {
                 schema(props, "path"), false, args -> {
             try {
                 return truncate(Files.readString(Path.of(str(args, "path"))), 6000);
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    public Tool view() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("path", strProp("File to view."));
+        props.put("start_line", intProp("Optional 1-based first line to show."));
+        props.put("end_line", intProp("Optional 1-based last line to show (inclusive)."));
+        return new Tool("view",
+                "Read a text file with line numbers (optionally a line range). Use this before edit_file "
+                        + "so you can copy an exact, unique snippet to replace.",
+                schema(props, "path"), false, args -> {
+            try {
+                List<String> lines = Files.readAllLines(Path.of(str(args, "path")));
+                int start = Math.max(1, intArg(args, "start_line", 1));
+                int end = Math.min(lines.size(), intArg(args, "end_line", lines.size()));
+                StringBuilder sb = new StringBuilder();
+                for (int i = start; i <= end; i++) {
+                    sb.append(String.format("%6d\t%s%n", i, lines.get(i - 1)));
+                }
+                return sb.length() == 0 ? "(empty or range out of bounds)" : truncate(sb.toString(), 8000);
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
@@ -85,18 +115,56 @@ public class BuiltinTools {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("path", strProp("Path to create or overwrite."));
         props.put("content", strProp("Full UTF-8 content to write."));
-        return new Tool("write_file", "Create or overwrite a text file. Mutating: requires approval.",
+        return new Tool("write_file",
+                "Create or overwrite a whole file. For changing part of an existing file, prefer edit_file. "
+                        + "Mutating: requires approval.",
                 schema(props, "path", "content"), true, args -> {
             try {
                 Path p = Path.of(str(args, "path"));
+                checkpoints.snapshot(p);                       // save before overwriting
                 if (p.getParent() != null) Files.createDirectories(p.getParent());
                 Files.writeString(p, str(args, "content"));
-                return "Wrote " + p.toAbsolutePath();
+                return "Wrote " + p.toAbsolutePath() + " (snapshot saved for rewind).";
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
         });
     }
+
+    public Tool editFile() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("path", strProp("File to edit."));
+        props.put("old_str", strProp("Exact text to find. Must appear EXACTLY ONCE in the file."));
+        props.put("new_str", strProp("Text to replace it with."));
+        return new Tool("edit_file",
+                "Replace a unique, exact snippet in a file with new text. Fails if the snippet is missing "
+                        + "or appears more than once. Snapshots the file first so it can be rewound. "
+                        + "Mutating: requires approval.",
+                schema(props, "path", "old_str", "new_str"), true, args -> {
+            try {
+                Path p = Path.of(str(args, "path"));
+                String content = Files.readString(p);
+                String oldStr = str(args, "old_str");
+                String newStr = str(args, "new_str");
+                if (oldStr.isEmpty()) return "ERROR: old_str must not be empty.";
+                int count = countOccurrences(content, oldStr);
+                if (count == 0) return "ERROR: old_str was not found in " + p + ".";
+                if (count > 1) {
+                    return "ERROR: old_str appears " + count + " times in " + p
+                            + "; include more surrounding text so it is unique.";
+                }
+                checkpoints.snapshot(p);
+                Files.writeString(p, content.replace(oldStr, newStr));
+                return "Edited " + p.toAbsolutePath() + " (1 replacement; snapshot saved for rewind).";
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // Shell tool
+    // ---------------------------------------------------------------------
 
     public Tool runCommand() {
         Map<String, Object> props = new LinkedHashMap<>();
@@ -192,15 +260,13 @@ public class BuiltinTools {
 
     private HttpRequest get(String url) {
         return HttpRequest.newBuilder(URI.create(url))
-                .header("User-Agent",
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) mini-agent/0.2")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) mini-agent/0.3")
                 .header("Accept", "text/html")
                 .timeout(Duration.ofSeconds(20))
                 .GET()
                 .build();
     }
 
-    /** DuckDuckGo wraps result links as //duckduckgo.com/l/?uddg=<encoded-real-url>. Unwrap it. */
     private static String decodeDdg(String href) {
         if (href == null) return "";
         int i = href.indexOf("uddg=");
@@ -213,6 +279,15 @@ public class BuiltinTools {
         } catch (Exception e) {
             return href;
         }
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int n = 0, from = 0, idx;
+        while ((idx = haystack.indexOf(needle, from)) >= 0) {
+            n++;
+            from = idx + needle.length();
+        }
+        return n;
     }
 
     private static Map<String, Object> schema(Map<String, Object> properties, String... required) {
@@ -230,9 +305,26 @@ public class BuiltinTools {
         return p;
     }
 
+    private static Map<String, Object> intProp(String description) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("type", "integer");
+        p.put("description", description);
+        return p;
+    }
+
     private static String str(Map<String, Object> args, String key) {
         Object v = args.get(key);
         return v == null ? "" : String.valueOf(v);
+    }
+
+    private static int intArg(Map<String, Object> args, String key, int dflt) {
+        Object v = args.get(key);
+        if (v instanceof Number n) return n.intValue();
+        try {
+            return v == null ? dflt : Integer.parseInt(String.valueOf(v).trim());
+        } catch (Exception e) {
+            return dflt;
+        }
     }
 
     private static String truncate(String s, int max) {
