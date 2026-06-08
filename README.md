@@ -1,78 +1,137 @@
-# mini-agent — a low-end Claude Code, in ~5 small classes
+# imini — a low-end Claude Code (learning project)
 
-A minimal tool-using agent harness over a local `llama-server` running
-`Qwen/Qwen2.5-3B-Instruct`. It mirrors the architecture of a real coding agent stripped to
-the load-bearing parts so you can see exactly which work is the **harness** and which is the
-**model**.
+A minimal but real agent harness over a local `llama-server` running
+`Qwen/Qwen2.5-3B-Instruct`. It exists to make the boundary between **the model** (reasoning) and
+**the harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API key.
 
-## What's here
+For first-time install (Java + llama-server), see **INSTALL.md**.
+For hands-on tests of every feature, see **TESTING.md**.
 
-| File | Role | Maps to, in Claude Code... |
-|------|------|----------------------------|
-| `LlamaServerManager.java` | Launches & supervises `llama-server` | process/runtime bootstrap |
-| `LlamaClient.java` | Calls `/v1/chat/completions` | the model — a stateless function |
-| `Tool.java` / `ToolRegistry.java` | 5 tools + their JSON specs | the 40+ tools |
-| `PermissionGate.java` | Approve mutating actions | the (huge) permission subsystem |
-| `AgentLoop.java` | The think→act→observe loop | the "query engine" / orchestrator |
-| `AgentController.java` | `POST /ask` | the REPL / SDK entry point |
+---
 
-The loop is ~50 lines. That is the whole point: the agent-ness is small; the intelligence is
-in the model weights, not in this repo.
+## What it does
 
-## Prerequisites
+You send a question; the harness gives the model a set of tools and runs a think -> act -> observe
+loop until the model answers. The model decides *what* to do; the harness *does* it.
 
-1. **`llama-server.exe`** from llama.cpp on your `PATH` (the build that supports `--jinja` and
-   `-hf` auto-download). On first run it pulls the Qwen2.5-3B GGUF from Hugging Face.
-2. **JDK 17+** and **Maven**.
+Capabilities:
 
-## Run
+- **Tools** - read/view/list files, write and **edit** files, run shell commands, fetch web pages.
+- **Streaming** - watch the model think token by token in the console.
+- **Context compaction** - long histories are summarized automatically to fit the window.
+- **Sessions** - multi-turn conversations that persist to disk and resume after a restart.
+- **Checkpoint / rewind** - every file edit is snapshotted and can be undone.
+- **Sub-agent** - open-ended research is delegated to a second loop with isolated context.
+- **MCP client** - optionally load tools from external Model Context Protocol servers.
+- **Permission gate** - mutating actions ask for approval first.
+- **Runaway guards** - caps on generation length, wall-clock time, repetition, and repeated calls.
 
-```bash
-mvn spring-boot:run
+---
+
+## File map
+
+| File | Role |
+|------|------|
+| `MiniAgentApplication.java` | Spring Boot entry point |
+| `LlamaServerManager.java` | launches & supervises `llama-server`, waits for `/health` |
+| `LlamaClient.java` | model calls: `chat` (blocking) and `chatStream` (SSE) + runaway guards |
+| `AgentEngine.java` | the shared loop: streaming, compaction, time budget, duplicate-call detection |
+| `ContextManager.java` | token estimate + summarize-and-trim compaction |
+| `BuiltinTools.java` | tool factories: read_file, view, list_dir, write_file, edit_file, run_command, web_fetch, web_search |
+| `HtmlExtractor.java` | jsoup main-article extraction |
+| `CheckpointStore.java` | snapshot-before-edit + rewind |
+| `SessionStore.java` | per-session history, persisted to `.imini/sessions/` |
+| `SubAgent.java` | research sub-agent (web-only tools) |
+| `McpManager.java` | optional MCP client (stdio JSON-RPC) |
+| `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
+| `AgentLoop.java` | main agent: `run` (one-shot) and `chat` (session) |
+| `AgentController.java` | REST endpoints |
+| `PermissionGate.java` | approve mutating tools |
+| `Tool.java`, `AgentResult.java` | value types |
+
+Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager; BuiltinTools -> CheckpointStore;
+SubAgent -> AgentEngine, BuiltinTools; ToolRegistry -> BuiltinTools, SubAgent, McpManager;
+AgentLoop -> AgentEngine, ToolRegistry, PermissionGate, SessionStore;
+AgentController -> AgentLoop, SessionStore, CheckpointStore.
+
+---
+
+## Run (Windows)
+
+```bat
+run.bat
 ```
 
-On startup the app launches `llama-server` (logs go to `llama-server.log`), waits for
-`/health`, then serves the agent on `http://localhost:8080`.
+It checks Java, warns if `llama-server.exe` is missing, installs a local Maven if you don't have
+one, then `mvn spring-boot:run`. The first launch downloads the ~2 GB model (progress in
+`llama-server.log`). You're up when you see `llama-server is ready.` and
+`Started MiniAgentApplication`. The app listens on http://localhost:8080 ; llama-server on 8081.
 
-Ask it something:
+Helper scripts: `ask.bat "question"` (one-shot), `chat.bat SESSION "message"` (multi-turn),
+`rewind.bat` (undo last edit).
 
-```bash
-curl -X POST http://localhost:8080/ask ^
-  -H "Content-Type: application/json" ^
-  -d "{\"question\":\"What is the current top story on FoxNews.com?\"}"
+---
+
+## HTTP endpoints
+
+| Method & path | Body | Purpose |
+|---------------|------|---------|
+| `POST /ask` | `{"question":"..."}` | one-shot, no memory |
+| `POST /chat` | `{"sessionId":"...?","message":"..."}` | multi-turn; returns sessionId to reuse |
+| `GET /sessions` | - | list known session ids |
+| `POST /rewind` | - | undo the most recent file edit |
+| `GET /checkpoints` | - | list available rewind points |
+
+---
+
+## Tools the model can call
+
+| Tool | Mutating? | Notes |
+|------|-----------|-------|
+| `read_file` | no | read a file |
+| `view` | no | read with line numbers (range optional) - use before editing |
+| `list_dir` | no | list a directory |
+| `write_file` | yes | overwrite a whole file (snapshots first) |
+| `edit_file` | yes | exact, unique-match replacement (snapshots first) |
+| `run_command` | yes | run a shell command |
+| `web_fetch` | no | fetch a page, jsoup main-article text |
+| `delegate_research` | no | hand an open-ended task to the sub-agent |
+| `web_search` | no | sub-agent only (DuckDuckGo) |
+| `<server>_<tool>` | yes | any tools discovered from MCP servers |
+
+---
+
+## Configuration (`application.properties`)
+
+```
+server.port=8080                    # this app's REST API
+agent.auto-approve=false            # true skips permission prompts
+agent.stream=true                   # stream model tokens to the console
+agent.compact-token-threshold=6000  # when to summarize old turns
+agent.compact-keep-recent=6         # recent messages kept verbatim
+agent.max-tokens=1024               # cap per single generation
+agent.deadline-seconds=120          # wall-clock budget per /ask or /chat
+agent.stream-max-chars=12000        # stream length backstop
+agent.stream-max-seconds=90         # stream time backstop
 ```
 
-(Use `\` line-continuations instead of `^` on macOS/Linux.)
+`.imini/` holds runtime state: `sessions/`, `checkpoints/`, and any `mcp-<server>.log` files.
 
-For a mutating request, watch the **server console** — the permission gate will prompt
-`Allow? (y/N)`. Set `agent.auto-approve=true` in `application.properties` to skip it.
+---
 
-## What happens for "top story on FoxNews.com"
+## MCP (optional, off by default)
 
-1. Harness sends your question + the 5 tool specs to the model.
-2. Model decides it needs live data and asks for `web_fetch(url=\"https://www.foxnews.com\")`.
-3. Harness runs the HTTP GET, strips the HTML to text (mechanical), truncates it, returns it.
-4. Harness feeds that text back; model reads it and **decides which item is the top story** and
-   writes the answer.
-5. Model returns text with no tool call → harness returns it to you.
+Copy `mcp.example.json` to `mcp.json` and point it at any MCP server you have. On startup imini
+launches each server, discovers its tools, and registers them. With no `mcp.json`, MCP is simply
+off. See TESTING.md for a worked example.
 
-The only "HTML interpretation" the code does is deleting tags (step 3). Choosing the headline
-(step 4) is entirely the model.
+---
 
-## Known limitations (deliberately — these are the next lessons)
+## Caveats (it's a learning kit)
 
-- **3B model.** Tool-calling reliability is modest. `AgentLoop.extractToolCalls` includes a
-  fallback parser for `<tool_call>...</tool_call>` text, but expect occasional misfires.
-- **Crude HTML stripping.** Swap the regex in `ToolRegistry.htmlToText` for `jsoup` for real pages.
-- **No context compaction.** With `--ctx-size 8192`, long runs will overflow. Real harnesses
-  summarize/trim old turns — a great thing to add next.
-- **No streaming, one conversation at a time, no sandboxing.** `run_command` executes whatever
-  the model asks (after approval) on your machine — keep `auto-approve=false`.
-- **Single tool round budget** capped at 10 iterations to prevent runaway loops.
-
-## Good next exercises
-
-1. Add context compaction when the message list passes ~6k tokens.
-2. Add streaming so you see the model think in real time.
-3. Add a second "sub-agent" loop and have the main loop delegate a search to it.
-4. Replace the regex HTML strip with `jsoup` and pass only the main article region.
+- The 3B model's tool-calling is imperfect; phrasing a prompt to name the tool helps. The engine
+  has a `<tool_call>` text fallback and several runaway guards.
+- `web_search` scrapes DuckDuckGo HTML - fine for learning, brittle for production.
+- `run_command` and MCP tools execute real actions (after approval). Keep `auto-approve=false`.
+- The MCP read is synchronous; a server that never replies can block that request thread.
+- Token counting is chars/4; compaction is single-pass.
