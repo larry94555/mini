@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * One tool the model can call. The {@code mutating} flag is what the PermissionGate keys off:
+ * One tool the model can call. The {@code mutating} flag is what PermissionService keys off:
  * read-only tools run automatically; mutating ones require approval. The executor is plain Java --
  * THIS is where the harness actually does work in the real world. The model never runs any of it;
  * it only asks for it by name.

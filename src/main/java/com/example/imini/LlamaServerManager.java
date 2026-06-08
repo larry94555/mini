@@ -15,7 +15,7 @@ import java.net.http.HttpResponse;
  * Launches and supervises llama-server. This is your original @PostConstruct with three changes:
  *
  *  1. Logs go to a file instead of inheritIO(). inheritIO() also wires the child's STDIN to the
- *     JVM's stdin, which then fights the PermissionGate for keyboard input. Redirecting output to
+ *     JVM's stdin, which then fights the permission prompt for keyboard input. Redirecting output to
  *     a file keeps the console clean for permission prompts and avoids the stdin tug-of-war.
  *  2. waitUntilReady() polls /health so the first request doesn't race the model load.
  *  3. @PreDestroy kills the child when the Spring context shuts down.

@@ -195,6 +195,36 @@ public class LlamaClient {
     }
 
     // ---------------------------------------------------------------------
+    // Accurate token counting (Tier 2)
+    // ---------------------------------------------------------------------
+
+    private static final String TOKENIZE_ENDPOINT = "http://localhost:8081/tokenize";
+
+    /**
+     * Ask llama-server how many tokens a piece of text really is. Returns -1 on any failure so the
+     * caller can fall back to an estimate.
+     */
+    @SuppressWarnings("unchecked")
+    public int countTokens(String text) {
+        try {
+            String body = mapper.writeValueAsString(Map.of("content", text == null ? "" : text));
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(TOKENIZE_ENDPOINT))
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 != 2) return -1;
+            Map<String, Object> json = mapper.readValue(resp.body(), Map.class);
+            Object tokens = json.get("tokens");
+            return (tokens instanceof List<?> l) ? l.size() : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 
