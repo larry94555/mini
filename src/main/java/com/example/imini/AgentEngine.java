@@ -55,6 +55,8 @@ public class AgentEngine {
     private boolean stream;
     @Value("${agent.deadline-seconds:120}")
     private int deadlineSeconds;
+    @Value("${agent.deadline-action:ask}")
+    private String deadlineAction;
     @Value("${agent.parallel-tools:true}")
     private boolean parallelTools;
 
@@ -89,9 +91,16 @@ public class AgentEngine {
 
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             if (System.nanoTime() > deadline) {
-                System.out.println("\n[guard:" + label + "] time budget of " + deadlineSeconds + "s exceeded.");
-                return new AgentResult("[stopped: exceeded the " + deadlineSeconds + "s time budget.]"
-                        + planSuffix(plan), messages);
+                boolean extend = interactive && "ask".equalsIgnoreCase(deadlineAction)
+                        && permissions.confirmContinue(deadlineSeconds);
+                if (extend) {
+                    deadline = System.nanoTime() + deadlineSeconds * 1_000_000_000L;
+                    System.out.println("[deadline:" + label + "] extended by " + deadlineSeconds + "s by the user.");
+                } else {
+                    System.out.println("\n[guard:" + label + "] time budget of " + deadlineSeconds + "s reached; stopping.");
+                    return new AgentResult("[stopped: reached the " + deadlineSeconds + "s time budget.]"
+                            + planSuffix(plan), messages);
+                }
             }
 
             if (interactive) {

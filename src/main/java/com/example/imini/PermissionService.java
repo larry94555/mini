@@ -118,6 +118,21 @@ public class PermissionService {
         }
     }
 
+    /**
+     * Asked when a run hits its time budget: lets the user grant another window or let it stop.
+     * Returns false (stop) if no console is attached, so a detached run still terminates.
+     */
+    public boolean confirmContinue(int seconds) {
+        System.out.println("\n[deadline] This run has used its " + seconds + "s time budget.");
+        System.out.print("[deadline] Continue for another " + seconds + "s? (y = yes, N = stop): ");
+        try {
+            String line = in.readLine();
+            return line != null && line.trim().equalsIgnoreCase("y");
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** A rule matches a tool by exact name, or "run_command:<prefix>" by command prefix. */
     private boolean matches(Set<String> rules, String tool, Map<String, Object> args) {
         if (rules.contains(tool)) return true;

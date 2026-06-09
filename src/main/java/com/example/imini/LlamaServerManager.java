@@ -2,6 +2,7 @@ package com.example.imini;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
@@ -10,58 +11,141 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 /**
- * Launches and supervises llama-server. This is your original @PostConstruct with three changes:
+ * Launches and supervises llama-server. Now fully config-driven (Model serving & performance,
+ * roadmap step 1):
  *
- *  1. Logs go to a file instead of inheritIO(). inheritIO() also wires the child's STDIN to the
- *     JVM's stdin, which then fights the permission prompt for keyboard input. Redirecting output to
- *     a file keeps the console clean for permission prompts and avoids the stdin tug-of-war.
- *  2. waitUntilReady() polls /health so the first request doesn't race the model load.
- *  3. @PreDestroy kills the child when the Spring context shuts down.
+ *   - PROFILES (llama.profile = small | medium | large) pick a model + context size; small = 3B
+ *     (Qwen), medium = 7B (Qwen), large = 8B (Llama-3.1). Any field can be overridden individually.
+ *   - PREFIX/KV-CACHE REUSE via llama.cache-reuse (--cache-reuse) + cache_prompt on requests.
+ *   - GPU OFFLOAD via llama.gpu-layers (-ngl); THREADS via llama.threads.
+ *   - CONTINUOUS BATCHING via llama.parallel (-np / --parallel slots) so one server can handle
+ *     several requests concurrently.
+ *   - SPECULATIVE DECODING and any other advanced flags via llama.extra-args (passed through).
+ *   - VERSION PINNING via llama.binary (path to a specific llama-server) and local models via
+ *     llama.model-path (-m) instead of -hf download.
+ *   - HEALTH WATCHDOG: a background thread re-checks /health and auto-restarts a dead server.
+ *
+ * Set llama.manage-server=false to use an already-running external llama-server.
  */
 @Component
 public class LlamaServerManager {
 
-    private Process llamaProcess;
+    @Value("${llama.manage-server:true}") private boolean manageServer;
+    @Value("${llama.binary:llama-server.exe}") private String binary;
+    @Value("${llama.profile:small}") private String profile;
+    @Value("${llama.hf-model:}") private String hfModel;
+    @Value("${llama.model-path:}") private String modelPath;
+    @Value("${llama.alias:qwen2.5-3b-instruct}") private String alias;
+    @Value("${llama.host:0.0.0.0}") private String host;
+    @Value("${llama.port:8081}") private int port;
+    @Value("${llama.ctx-size:0}") private int ctxSize;
+    @Value("${llama.gpu-layers:-1}") private int gpuLayers;
+    @Value("${llama.threads:0}") private int threads;
+    @Value("${llama.parallel:1}") private int parallel;
+    @Value("${llama.extra-args:}") private String extraArgs;
+    @Value("${llama.auto-restart:true}") private boolean autoRestart;
+    @Value("${llama.health-interval-seconds:15}") private int healthInterval;
+    @Value("${llama.cache-reuse:256}") private int cacheReuse;            // KV-cache chunk reuse (latency)
+    @Value("${llama.draft-hf-model:}") private String draftHf;            // speculative decoding (HF draft)
+    @Value("${llama.draft-model-path:}") private String draftPath;        // speculative decoding (local draft)
+    @Value("${llama.draft-tokens:16}") private int draftTokens;
+    @Value("${llama.draft-gpu-layers:-1}") private int draftGpuLayers;
+
+    private final HttpClient http = HttpClient.newHttpClient();
+    private volatile Process proc;
+    private volatile boolean shuttingDown = false;
+    private List<String> command;
+    private Thread watchdog;
 
     @PostConstruct
-    public void startLlamaServer() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "llama-server.exe",
-                    "-hf", "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M",
-                    "--host", "0.0.0.0",
-                    "--port", "8081",
-                    "--ctx-size", "8192",
-                    "--threads", "8",
-                    "-ngl", "0",
-                    "--alias", "qwen2.5-3b-instruct",
-                    "--jinja");           // <-- enables the model's chat template, incl. tool calling
+    public void start() {
+        if (!manageServer) {
+            System.out.println("[llama] manage-server=false; expecting an external llama-server on port " + port);
+            return;
+        }
+        this.command = buildCommand();
+        System.out.println("[llama] launching: " + String.join(" ", command));
+        launch();
+        waitUntilReady();
+        if (healthy()) {
+            startWatchdog();
+        } else {
+            System.out.println("[llama] not healthy yet; watchdog NOT started (avoid restart-storm during model download).");
+        }
+    }
 
+    private List<String> buildCommand() {
+        int ctx = ctxSize > 0 ? ctxSize : profileCtx(profile);
+        int ngl = gpuLayers >= 0 ? gpuLayers : 0;                       // default CPU-only
+        int t = threads > 0 ? threads : Runtime.getRuntime().availableProcessors();
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(binary);
+        if (!modelPath.isBlank()) {
+            cmd.add("-m");
+            cmd.add(modelPath);                                         // local GGUF
+        } else {
+            cmd.add("-hf");
+            cmd.add(hfModel.isBlank() ? profileModel(profile) : hfModel); // download from HF (model:quant)
+        }
+        cmd.add("--host"); cmd.add(host);
+        cmd.add("--port"); cmd.add(String.valueOf(port));
+        cmd.add("-c"); cmd.add(String.valueOf(ctx));
+        cmd.add("-t"); cmd.add(String.valueOf(t));
+        cmd.add("-ngl"); cmd.add(String.valueOf(ngl));
+        cmd.add("--parallel"); cmd.add(String.valueOf(Math.max(1, parallel)));
+        cmd.add("--alias"); cmd.add(alias);
+        cmd.add("--jinja");
+        if (cacheReuse > 0) {
+            cmd.add("--cache-reuse");                                      // reuse KV-cache chunks across requests
+            cmd.add(String.valueOf(cacheReuse));
+        }
+        if (!draftPath.isBlank() || !draftHf.isBlank()) {                 // speculative decoding (draft model)
+            if (!draftPath.isBlank()) { cmd.add("-md"); cmd.add(draftPath); }
+            else { cmd.add("-hfd"); cmd.add(draftHf); }
+            cmd.add("--draft-max"); cmd.add(String.valueOf(Math.max(1, draftTokens)));
+            if (draftGpuLayers >= 0) { cmd.add("-ngld"); cmd.add(String.valueOf(draftGpuLayers)); }
+        }
+        if (extraArgs != null && !extraArgs.isBlank()) {
+            for (String a : extraArgs.trim().split("\\s+")) cmd.add(a);   // e.g. speculative decoding flags
+        }
+        return cmd;
+    }
+
+    private void launch() {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectOutput(new File("llama-server.log"));
             pb.redirectError(new File("llama-server.log"));
-            this.llamaProcess = pb.start();
-            System.out.println("llama-server starting on port 8081 (logs -> llama-server.log)...");
-            waitUntilReady();
+            this.proc = pb.start();
+            System.out.println("[llama] started on port " + port + " (profile=" + profile
+                    + ", parallel=" + Math.max(1, parallel) + ", logs -> llama-server.log)");
         } catch (IOException e) {
-            System.err.println("Failed to start llama-server: " + e.getMessage());
+            System.err.println("[llama] failed to start: " + e.getMessage());
+        }
+    }
+
+    private boolean healthy() {
+        try {
+            HttpResponse<String> r = http.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/health")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            return r.statusCode() == 200;
+        } catch (Exception e) {
+            return false;
         }
     }
 
     private void waitUntilReady() {
-        HttpClient http = HttpClient.newHttpClient();
-        for (int i = 0; i < 120; i++) {
-            try {
-                HttpResponse<String> r = http.send(
-                        HttpRequest.newBuilder(URI.create("http://localhost:8081/health")).GET().build(),
-                        HttpResponse.BodyHandlers.ofString());
-                if (r.statusCode() == 200) {
-                    System.out.println("llama-server is ready.");
-                    return;
-                }
-            } catch (Exception ignore) {
-                // not up yet
+        for (int i = 0; i < 600; i++) {
+            if (healthy()) {
+                System.out.println("[llama] ready.");
+                return;
             }
             try {
                 Thread.sleep(1000);
@@ -70,14 +154,51 @@ public class LlamaServerManager {
                 return;
             }
         }
-        System.out.println("llama-server not ready after 120s; check llama-server.log");
+        System.out.println("[llama] not ready after 600s; check llama-server.log");
+    }
+
+    private void startWatchdog() {
+        if (!autoRestart) return;
+        watchdog = new Thread(() -> {
+            while (!shuttingDown) {
+                try {
+                    Thread.sleep(Math.max(5, healthInterval) * 1000L);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                if (shuttingDown) return;
+                boolean alive = proc != null && proc.isAlive();
+                if (!alive || !healthy()) {
+                    System.out.println("[llama] watchdog: server unhealthy; restarting...");
+                    launch();
+                    waitUntilReady();
+                }
+            }
+        }, "llama-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+        System.out.println("[llama] watchdog on (checks every " + Math.max(5, healthInterval) + "s).");
+    }
+
+    private String profileModel(String p) {
+        return switch (p == null ? "" : p.toLowerCase(Locale.ROOT)) {
+            case "medium" -> "Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M";       // 7B
+            case "large" -> "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M"; // 8B, non-Qwen
+            default -> "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M";             // small = 3B
+        };
+    }
+
+    private int profileCtx(String p) {
+        return 8192; // all profiles default to 8192; raise with llama.ctx-size
     }
 
     @PreDestroy
     public void stop() {
-        if (llamaProcess != null && llamaProcess.isAlive()) {
-            llamaProcess.destroy();
-            System.out.println("llama-server stopped.");
+        shuttingDown = true;
+        if (watchdog != null) watchdog.interrupt();
+        if (proc != null && proc.isAlive()) {
+            proc.destroy();
+            System.out.println("[llama] stopped.");
         }
     }
 }
