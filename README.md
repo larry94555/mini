@@ -26,6 +26,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | 3 | Project memory | `IMINI.md`/`CLAUDE.md`/`AGENTS.md` folded into the system prompt |
 | 3 | Prompt-injection hardening | untrusted web/MCP output is fenced as data, not instructions |
 | 3 | Cheap-model routing | send summarization to a smaller model/server |
+| 3 | Hooks | run shell commands before/after tool use (`hooks.json`) |
+| 3 | Slash commands | custom `/name` prompt templates (`commands/*.md`) |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -48,6 +50,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `PermissionService.java` | allow/deny rules, remembered decisions, confinement, plan mode |
 | `InterruptService.java` | interrupt + steering signals |
 | `ProjectContext.java` | loads project-memory file into the system prompt |
+| `HookService.java` | pre/post tool shell hooks (`hooks.json`) |
+| `SlashCommands.java` | custom slash commands (`commands/*.md`) |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -55,10 +59,10 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `AgentController.java` | REST endpoints |
 | `Tool.java`, `AgentResult.java` | value types |
 
-Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager, PermissionService, InterruptService;
+Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager, PermissionService, InterruptService, HookService;
 BuiltinTools -> CheckpointStore, TodoStore; SubAgent -> AgentEngine, BuiltinTools;
 ToolRegistry -> BuiltinTools, SubAgent, McpManager;
-AgentLoop -> AgentEngine, ToolRegistry, SessionStore, ProjectContext;
+AgentLoop -> AgentEngine, ToolRegistry, SessionStore, ProjectContext, SlashCommands;
 AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService.
 
 ---
@@ -113,6 +117,12 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 - **Cheap-model routing.** Summarization/compaction goes through `LlamaClient.summaryChat`, governed
   by `agent.summary-model` and `agent.summary-base-url`. Defaults to the main model (works out of the
   box); point it at a smaller model / second `llama-server` to offload summarization.
+- **Hooks.** `HookService` reads an optional `hooks.json`. `preToolUse` hooks run before a tool and,
+  if they exit non-zero, block it; `postToolUse` hooks run after and their stdout is appended to the
+  result (e.g. format/lint after an edit). Hooks get `IMINI_TOOL`, `IMINI_ARGS`, `IMINI_RESULT` env vars.
+- **Slash commands.** `SlashCommands` loads `commands/*.md`; each file is a prompt template named
+  after the file, with `$ARGS` replaced by the text you type. `/help` lists them. Unknown slash text
+  passes through unchanged.
 
 ---
 
@@ -137,7 +147,8 @@ agent.summary-base-url=http://localhost:8081
 ```
 
 Optional files in the working dir: `permissions.json` (allow/deny rules), `mcp.json` (MCP servers),
-`IMINI.md` (project memory). Runtime state lives under `.imini/`.
+`IMINI.md` (project memory), `hooks.json` (tool hooks), `commands/*.md` (slash commands).
+Runtime state lives under `.imini/`.
 
 ---
 
@@ -169,6 +180,9 @@ the **app console** will show. Prompts deliberately name tools because the 3B mo
 | 19 | Project memory | copy `IMINI.example.md` to `IMINI.md`, `ask.bat "What build command should I use?"` | the answer uses the commands from your IMINI.md (e.g. `mvn -q compile`) |
 | 20 | Injection hardening | `ask.bat "Use web_fetch on <a page that contains 'ignore previous instructions'> and summarize."` | the tool output is fenced `[UNTRUSTED CONTENT ...]` with a `[WARNING: ... prompt-injection ...]`; the agent summarizes without obeying the embedded instruction |
 | 21 | Cheap-model routing | (optional) run a small model on :8082, set `agent.summary-model`/`-base-url`, trigger compaction | compaction summaries are produced by the smaller model/server |
+| 22 | Hooks | copy `hooks.example.json` to `hooks.json`, `ask.bat "Run the command: echo hi"` | console shows the pre-hook output; a non-zero pre-hook would block the tool; post-hook stdout is appended to the result |
+| 23 | Slash command | `ask.bat "/explain recursion"` | the `/explain` template (from `commands/explain.md`) expands with $ARGS=recursion before the model sees it |
+| 24 | List commands | `ask.bat "/help"` | returns the list of available slash commands without calling the model |
 
 TESTING.md has the full setup and exact expected output for each.
 
@@ -182,4 +196,4 @@ TESTING.md has the full setup and exact expected output for each.
 - Confinement covers file writes/edits, not arbitrary shell commands.
 - Interrupt/steer are a single global signal (single-user); responsive in streaming mode.
 - Injection fencing is a mitigation, not a guarantee.
-- Not yet implemented (next): hooks / custom slash commands.
+- Education-grade by design. For the path to a production build, see **ROADMAP.md**.

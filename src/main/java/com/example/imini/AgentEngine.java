@@ -42,6 +42,7 @@ public class AgentEngine {
     private final ContextManager context;
     private final PermissionService permissions;
     private final InterruptService interrupt;
+    private final HookService hooks;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
@@ -58,11 +59,12 @@ public class AgentEngine {
     private boolean parallelTools;
 
     public AgentEngine(LlamaClient llama, ContextManager context,
-                       PermissionService permissions, InterruptService interrupt) {
+                       PermissionService permissions, InterruptService interrupt, HookService hooks) {
         this.llama = llama;
         this.context = context;
         this.permissions = permissions;
         this.interrupt = interrupt;
+        this.hooks = hooks;
     }
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
@@ -142,7 +144,7 @@ public class AgentEngine {
             if (parallelTools) {
                 for (CallInfo ci : infos) {
                     if (ci.tool != null && !ci.tool.mutating) {
-                        futures.put(ci, pool.submit(() -> safeExec(ci.tool, ci.args)));
+                        futures.put(ci, pool.submit(() -> runTool(ci.name, ci.tool, ci.args)));
                     }
                 }
             }
@@ -156,7 +158,7 @@ public class AgentEngine {
                     System.out.println("[" + label + ":tool] " + ci.name + " " + ci.args
                             + (parallelNote ? " (parallel)" : ""));
                     Future<String> f = futures.get(ci);
-                    result = (f != null) ? join(f) : safeExec(ci.tool, ci.args);
+                    result = (f != null) ? join(f) : runTool(ci.name, ci.tool, ci.args);
                 } else {
                     String signature = ci.name + "|" + ci.args;
                     int count = callCounts.merge(signature, 1, Integer::sum);
@@ -170,7 +172,7 @@ public class AgentEngine {
                         switch (d.kind()) {
                             case ALLOW -> {
                                 System.out.println("[" + label + ":tool] " + ci.name + " " + ci.args);
-                                result = safeExec(ci.tool, ci.args);
+                                result = runTool(ci.name, ci.tool, ci.args);
                             }
                             case DENY -> result = "DENIED: " + d.note() + ".";
                             case RECORD_PLAN -> {
@@ -209,6 +211,20 @@ public class AgentEngine {
         for (String p : plan) sb.append("\n  - ").append(p);
         sb.append("\n\nRe-send this request with mode \"ask\" or \"auto\" to carry it out.");
         return sb.toString();
+    }
+
+    private String runTool(String name, Tool tool, Map<String, Object> args) {
+        String block = hooks.runPre(name, args);
+        if (block != null) {
+            System.out.println("[hook:pre] blocked " + name);
+            return block;
+        }
+        String result = safeExec(tool, args);
+        String postOut = hooks.runPost(name, args, result);
+        if (postOut != null && !postOut.isBlank()) {
+            result = result + "\n[post-hook]\n" + postOut;
+        }
+        return result;
     }
 
     private String safeExec(Tool tool, Map<String, Object> args) {

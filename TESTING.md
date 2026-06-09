@@ -281,3 +281,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the summary/memory note is now produced by the small model on :8082, while normal
   answers still come from the main model on :8081. With the defaults (blank summary-model) everything
   uses the main model, so this is purely opt-in.
+
+## 22. Hooks (pre/post tool shell commands)
+
+- **Setup:** copy `hooks.example.json` to `hooks.json` (the example logs around `run_command` and
+  `edit_file`). Restart the app.
+- **Run:** `ask.bat "Run the command: echo hi"` (approve the permission prompt).
+- **Observe:** before the tool runs, the pre-hook's `echo [hook] about to run...` appears; the tool
+  output follows. Try a post-hook test with an edit (`ask.bat "In notes.txt change draft to final"`)
+  to see the post-hook line appended to the tool result.
+- **Blocking:** change a pre-hook command to `exit 1` (Windows: `cmd /c exit 1`) for `run_command`;
+  the tool is then **blocked** and the model is told so. Remove `hooks.json` to turn hooks off.
+
+## 23. Slash commands
+
+- **Setup:** the project ships `commands/explain.md` and `commands/summarize.md`.
+- **Run:** `ask.bat "/explain recursion"`
+- **Observe:** the model receives the expanded template ("Explain the following ... recursion") and
+  answers accordingly -- you didn't have to type the full prompt. Add your own `commands/foo.md` with
+  a `$ARGS` placeholder and it becomes `/foo` after a restart.
+
+## 24. List slash commands
+
+- **Run:** `ask.bat "/help"`  (or `/commands`)
+- **Observe:** the harness returns the list of available commands immediately, without calling the
+  model.

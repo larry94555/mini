@@ -36,12 +36,15 @@ public class AgentLoop {
     private final ToolRegistry registry;
     private final SessionStore sessions;
     private final ProjectContext project;
+    private final SlashCommands slash;
 
-    public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions, ProjectContext project) {
+    public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
+                     ProjectContext project, SlashCommands slash) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
         this.project = project;
+        this.slash = slash;
     }
 
     private String systemPrompt() {
@@ -50,17 +53,22 @@ public class AgentLoop {
 
     /** One-shot, ephemeral. */
     public String run(String userQuestion, Mode mode) throws Exception {
-        return engine.run(systemPrompt(), userQuestion, registry.tools(), mode, "main");
+        if (slash.isHelp(userQuestion)) return slash.help();
+        String question = slash.expand(userQuestion);
+        return engine.run(systemPrompt(), question, registry.tools(), mode, "main");
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
     public String chat(String sessionId, String userMessage, Mode mode) throws Exception {
+        if (slash.isHelp(userMessage)) return slash.help();
+        String expanded = slash.expand(userMessage);
+
         List<Map<String, Object>> history = sessions.get(sessionId);
         if (history == null) {
             history = new ArrayList<>();
             history.add(message("system", systemPrompt())); // project instructions captured at session start
         }
-        history.add(message("user", userMessage));
+        history.add(message("user", expanded));
 
         AgentResult result = engine.converse(history, registry.tools(), mode, "main");
         sessions.save(sessionId, result.messages());
