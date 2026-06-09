@@ -30,6 +30,10 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | 3 | Cheap-model routing | send summarization to a smaller model/server |
 | 3 | Hooks | run shell commands before/after tool use (`hooks.json`) |
 | 3 | Slash commands | custom `/name` prompt templates (`commands/*.md`) |
+| correctness | Schema validation + corrective retry | invalid tool args become feedback; the model fixes and retries |
+| correctness | Constrained decoding (opt-in) | GBNF grammar forces valid tool calls for weak models |
+| correctness | Retries + per-call timeouts | backoff on transient model errors; shell/MCP calls can't hang the run |
+| correctness | Eval suite | deterministic JUnit checks + behavioral smoke evals |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -58,6 +62,9 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `ConsoleSink.java` | sink for blocking endpoints (stdout) |
 | `SessionContext.java` | publishes sessionId + sink to tool executors (ThreadLocal) |
 | `RunService.java` | bounds concurrent runs to the model's slot count (job queue) |
+| `SchemaValidator.java` | validates tool-call args against the tool's JSON schema |
+| `Retry.java` | exponential-backoff retry for transient model/network errors |
+| `GrammarBuilder.java` | builds a GBNF grammar to constrain tool calls (opt-in) |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -243,6 +250,48 @@ line -- that waiting set is the job queue. `GET /runs` shows `limit / active / q
    `runs.bat` shows `active=1, queued=1`: the second run waits for the first to finish a slot rather
    than oversubscribing the model. Raise `agent.max-concurrent-runs` to allow more in parallel.
 
+## Loop correctness
+
+Reliability fixes so small models behave, and so a bad tool call or a wedged process can't derail or
+hang a run:
+
+- **Schema validation + corrective retry (always on).** Every tool call's arguments are checked
+  against that tool's JSON schema (`SchemaValidator`) *before* execution. A missing required field or
+  wrong-typed value becomes a `INVALID_ARGS ...` message handed back to the model instead of a failed
+  or skipped call, so the model corrects itself on the next turn. Unknown tool names are rejected the
+  same way. This is what "retires" blind trust in the `<tool_call>` text fallback: a parsed call is
+  validated, never executed on faith.
+- **Constrained decoding (opt-in).** `llama.constrain-tools=true` sends a GBNF grammar
+  (`GrammarBuilder`) that forces output to be either plain text or tool calls whose name is one of the
+  real tools and whose arguments are valid JSON. llama-server with `--jinja` already constrains tool
+  calls for supported templates, so this is a belt-and-suspenders for weak models/templates. Caveat:
+  the grammar's free-text branch disallows a literal `<` in prose answers, so leave it off unless you
+  need it.
+- **Retries with backoff.** Transient model/network failures (HTTP 5xx or `IOException`) are retried
+  with exponential backoff (`llama.max-retries`, `llama.retry-backoff-ms`). Client errors (4xx) are
+  not retried.
+- **Real per-call timeouts.** `run_command` runs with its output read on a separate thread and a hard
+  `agent.tool-timeout-seconds` wall; on timeout the process is killed and the run continues with an
+  error. MCP calls read on a per-server thread with the same timeout; a server that doesn't answer is
+  terminated and its tools return errors instead of blocking the loop forever.
+- **Eval suite.** `src/test/.../LoopCorrectnessTest.java` is a deterministic JUnit suite (no model
+  needed) covering the roadmap's questions -- right args accepted / bad args rejected, stays in the
+  workspace, recovers from transient failures, grammar names the tools. Run with `mvn test`. A
+  behavioral smoke suite (`evals/cases.json` + `eval.bat`) posts prompts to a running server and
+  checks the answers end-to-end.
+
+### Trying it out
+
+1. **Bad arguments recover.** `ask.bat "Call read_file with no path argument, then read pom.xml."`
+   The first (arg-less) call comes back as `INVALID_ARGS ... missing required field 'path'`; the model
+   then supplies a path and succeeds -- no crash, no skipped step.
+2. **Stays in the workspace.** `ask.bat "Write 'hi' to ../escape.txt" --mode auto` (or `mode:auto`):
+   the write is denied as outside the workspace even though approval is automatic.
+3. **Constrained decoding.** Set `llama.constrain-tools=true`, restart, and run a tool-using prompt on
+   the 3B profile; malformed tool calls disappear because the grammar only permits valid ones.
+4. **Run the evals.** `mvn test` for the deterministic suite; with the server up, `eval.bat` for the
+   behavioral smoke checks.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -278,6 +327,10 @@ llama.parallel=1                    # concurrent request slots (continuous batch
 llama.extra-args=                   # passthrough, e.g. speculative-decoding flags
 llama.auto-restart=true             # watchdog restarts a dead server
 llama.health-interval-seconds=15
+llama.constrain-tools=false         # opt-in GBNF grammar to force valid tool calls (see caveat)
+llama.max-retries=2                 # retry transient model/network errors (5xx / IOException)
+llama.retry-backoff-ms=400          # base backoff; doubles each attempt
+agent.tool-timeout-seconds=60       # hard timeout for a single run_command / MCP call
 llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
 llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)
 llama.draft-hf-model=               # speculative decoding: HF draft model (off if blank)

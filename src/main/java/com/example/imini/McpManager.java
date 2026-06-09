@@ -3,6 +3,7 @@ package com.example.imini;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -17,6 +18,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A minimal Model Context Protocol client. On startup it reads mcp.json (if present), launches each
@@ -40,6 +46,9 @@ public class McpManager {
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<Server> servers = new ArrayList<>();
     private final List<Tool> tools = new ArrayList<>();
+
+    @Value("${agent.tool-timeout-seconds:60}")
+    private int toolTimeoutSeconds;
 
     public List<Tool> tools() {
         return tools;
@@ -142,6 +151,8 @@ public class McpManager {
         private final Process proc;
         private final BufferedWriter out;
         private final BufferedReader in;
+        private final ExecutorService io;
+        private volatile boolean dead = false;
         private int nextId = 1;
 
         Server(String name, Process proc) {
@@ -149,9 +160,15 @@ public class McpManager {
             this.proc = proc;
             this.out = new BufferedWriter(new OutputStreamWriter(proc.getOutputStream()));
             this.in = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+            this.io = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "mcp-" + name + "-io");
+                t.setDaemon(true);
+                return t;
+            });
         }
 
         synchronized Map<String, Object> request(String method, Map<String, Object> params) throws IOException {
+            if (dead) throw new IOException("MCP server '" + name + "' is not running.");
             int id = nextId++;
             Map<String, Object> msg = new LinkedHashMap<>();
             msg.put("jsonrpc", "2.0");
@@ -160,15 +177,32 @@ public class McpManager {
             msg.put("params", params);
             writeLine(msg);
 
-            String line;
-            while ((line = in.readLine()) != null) {
-                Map<String, Object> resp = parse(line);
-                if (resp == null) continue;                       // skip non-JSON log noise
-                Object rid = resp.get("id");
-                if (rid instanceof Number n && n.intValue() == id) return resp;
-                // otherwise it's a notification or unrelated message: ignore and keep reading
+            Future<Map<String, Object>> f = io.submit(() -> {
+                String line;
+                while ((line = in.readLine()) != null) {
+                    Map<String, Object> resp = parse(line);
+                    if (resp == null) continue;                   // skip non-JSON log noise
+                    Object rid = resp.get("id");
+                    if (rid instanceof Number n && n.intValue() == id) return resp;
+                    // otherwise a notification or unrelated message: ignore and keep reading
+                }
+                throw new IOException("MCP server '" + name + "' closed before responding to " + method);
+            });
+            try {
+                return f.get(toolTimeoutSeconds, TimeUnit.SECONDS);
+            } catch (TimeoutException te) {
+                dead = true;
+                proc.destroyForcibly();
+                io.shutdownNow();
+                throw new IOException("MCP server '" + name + "' timed out after " + toolTimeoutSeconds
+                        + "s on " + method + "; server terminated.");
+            } catch (java.util.concurrent.ExecutionException ee) {
+                Throwable cause = ee.getCause();
+                throw (cause instanceof IOException io2) ? io2 : new IOException(String.valueOf(cause));
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted waiting for MCP server '" + name + "'");
             }
-            throw new IOException("MCP server '" + name + "' closed before responding to " + method);
         }
 
         synchronized void notify(String method, Map<String, Object> params) throws IOException {
@@ -224,6 +258,7 @@ public class McpManager {
 
         void close() {
             try {
+                io.shutdownNow();
                 proc.destroy();
             } catch (Exception ignore) {
                 // best effort
