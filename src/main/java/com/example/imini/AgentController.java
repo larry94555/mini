@@ -12,15 +12,17 @@ import java.util.UUID;
 
 /**
  * HTTP surface.
- *   POST /ask         {"question":"...","mode":"ask|auto|plan"?}     one-shot, no memory
+ *   POST /ask         {"question":"...","mode":?}                    one-shot, no memory
  *   POST /chat        {"sessionId":"...?","message":"...","mode":?}  multi-turn; returns the sessionId
  *   GET  /sessions                                                   list known session ids
  *   GET  /todos                                                      current task checklist
  *   POST /rewind                                                     undo the most recent file edit
- *   GET  /checkpoints                                                list available rewind points
+ *   GET  /checkpoints                                                list rewind points
+ *   POST /interrupt                                                  stop the run in progress
+ *   POST /steer       {"message":"..."}                              inject guidance into the run
  *
- * "mode" controls permissions: ask = prompt per mutating call (default), auto = approve
- * automatically (still workspace-confined), plan = record intended actions without executing.
+ * mode = ask (default) | auto | plan. Call /interrupt or /steer from a SECOND terminal while a run
+ * is going.
  */
 @RestController
 public class AgentController {
@@ -29,12 +31,15 @@ public class AgentController {
     private final SessionStore sessions;
     private final CheckpointStore checkpoints;
     private final TodoStore todos;
+    private final InterruptService interrupt;
 
-    public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints, TodoStore todos) {
+    public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
+                           TodoStore todos, InterruptService interrupt) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
         this.todos = todos;
+        this.interrupt = interrupt;
     }
 
     @PostMapping("/ask")
@@ -70,6 +75,19 @@ public class AgentController {
     @GetMapping("/checkpoints")
     public List<String> checkpoints() {
         return checkpoints.list();
+    }
+
+    @PostMapping("/interrupt")
+    public Map<String, String> interrupt() {
+        interrupt.interrupt();
+        return Map.of("result", "interrupt requested; the run will stop at the next checkpoint.");
+    }
+
+    @PostMapping("/steer")
+    public Map<String, String> steer(@RequestBody Map<String, String> body) {
+        String message = body.getOrDefault("message", "");
+        interrupt.steer(message);
+        return Map.of("result", "steering queued: " + message);
     }
 
     private Mode parseMode(String raw) {

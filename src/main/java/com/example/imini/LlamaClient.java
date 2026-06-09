@@ -15,29 +15,33 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Thin wrapper over llama-server's OpenAI-compatible POST /v1/chat/completions.
+ * Wrapper over llama-server's OpenAI-compatible API.
  *
- * Safety relevant to the "endless loop" bug:
- *   - every request now sets max_tokens, so one generation can never run unbounded;
- *   - frequency/presence penalties discourage the small model from repeating itself;
- *   - chatStream has three independent guards (length, wall-clock, line-repetition) that stop a
- *     runaway stream even if the server ignores the token cap.
+ *   chat / chatStream  -> the main model (8081).
+ *   summaryChat        -> a (optionally cheaper) model for summarization/compaction; configured by
+ *                         agent.summary-model + agent.summary-base-url. Defaults to the main model,
+ *                         so it works out of the box; point it at a smaller model / second server to
+ *                         do real cheap-model routing.
+ *   countTokens        -> /tokenize for accurate context measurement.
+ *
+ * chatStream takes a cancel check so a run can be interrupted mid-generation.
  */
 @Component
 public class LlamaClient {
 
-    private static final String ENDPOINT = "http://localhost:8081/v1/chat/completions";
+    private static final String BASE = "http://localhost:8081";
+    private static final String ENDPOINT = BASE + "/v1/chat/completions";
+    private static final String TOKENIZE_ENDPOINT = BASE + "/tokenize";
     private static final String MODEL = "qwen2.5-3b-instruct"; // matches --alias
 
-    // sampling: curb repetition in the small model
     private static final double FREQUENCY_PENALTY = 0.5;
     private static final double PRESENCE_PENALTY = 0.3;
-    // stream guard: how many times the same non-empty line may repeat before we abort
     private static final int LINE_REPEAT_LIMIT = 8;
 
     @Value("${agent.max-tokens:1024}")
@@ -46,6 +50,10 @@ public class LlamaClient {
     private int streamMaxChars;
     @Value("${agent.stream-max-seconds:90}")
     private int streamMaxSeconds;
+    @Value("${agent.summary-model:}")
+    private String summaryModel;
+    @Value("${agent.summary-base-url:http://localhost:8081}")
+    private String summaryBaseUrl;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -56,10 +64,24 @@ public class LlamaClient {
     // Blocking
     // ---------------------------------------------------------------------
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> chat(List<Map<String, Object>> messages,
                                     List<Map<String, Object>> tools) throws Exception {
-        HttpRequest req = buildRequest(messages, tools, false);
+        return chatAt(ENDPOINT, MODEL, messages, tools);
+    }
+
+    /** Summarization/compaction call, routed to the (optionally cheaper) summary model. */
+    public Map<String, Object> summaryChat(List<Map<String, Object>> messages) throws Exception {
+        String model = (summaryModel == null || summaryModel.isBlank()) ? MODEL : summaryModel;
+        String url = (summaryBaseUrl == null || summaryBaseUrl.isBlank() ? BASE : summaryBaseUrl)
+                + "/v1/chat/completions";
+        return chatAt(url, model, messages, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> chatAt(String url, String model,
+                                       List<Map<String, Object>> messages,
+                                       List<Map<String, Object>> tools) throws Exception {
+        HttpRequest req = buildRequest(url, model, messages, tools, false);
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() / 100 != 2) {
             throw new RuntimeException("llama-server error " + resp.statusCode() + ": " + resp.body());
@@ -73,14 +95,21 @@ public class LlamaClient {
     }
 
     // ---------------------------------------------------------------------
-    // Streaming (SSE) with runaway guards
+    // Streaming (SSE) with runaway guards + cancellation
     // ---------------------------------------------------------------------
+
+    public Map<String, Object> chatStream(List<Map<String, Object>> messages,
+                                          List<Map<String, Object>> tools,
+                                          Consumer<String> onToken) throws Exception {
+        return chatStream(messages, tools, onToken, () -> false);
+    }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> chatStream(List<Map<String, Object>> messages,
                                           List<Map<String, Object>> tools,
-                                          Consumer<String> onToken) throws Exception {
-        HttpRequest req = buildRequest(messages, tools, true);
+                                          Consumer<String> onToken,
+                                          BooleanSupplier cancelled) throws Exception {
+        HttpRequest req = buildRequest(ENDPOINT, MODEL, messages, tools, true);
         HttpResponse<Stream<String>> resp = http.send(req, HttpResponse.BodyHandlers.ofLines());
         if (resp.statusCode() / 100 != 2) {
             String body = resp.body().collect(Collectors.joining("\n"));
@@ -91,7 +120,7 @@ public class LlamaClient {
         TreeMap<Integer, ToolCallAcc> toolCalls = new TreeMap<>();
 
         long deadline = System.nanoTime() + streamMaxSeconds * 1_000_000_000L;
-        int scanCursor = 0;       // index in content up to which lines have been checked
+        int scanCursor = 0;
         String lastLine = null;
         int lineRepeat = 0;
         String abortReason = null;
@@ -100,6 +129,10 @@ public class LlamaClient {
         try {
             Iterator<String> it = body.iterator();
             while (it.hasNext()) {
+                if (cancelled.getAsBoolean()) {
+                    abortReason = "interrupted by user";
+                    break;
+                }
                 String line = it.next();
                 if (line == null || !line.startsWith("data:")) continue;
                 String data = line.substring("data:".length()).trim();
@@ -134,7 +167,6 @@ public class LlamaClient {
                     }
                 }
 
-                // ---- runaway guards ----
                 if (content.length() > streamMaxChars) {
                     abortReason = "length cap (" + streamMaxChars + " chars)";
                     break;
@@ -167,8 +199,6 @@ public class LlamaClient {
         message.put("role", "assistant");
 
         if (abortReason != null) {
-            // The turn was cut off. Treat whatever we have as final text (drop any half-parsed
-            // tool call) so the loop ends gracefully instead of acting on garbage.
             System.out.println("\n[guard] stream stopped: " + abortReason);
             content.append("\n[harness stopped this response: ").append(abortReason).append("]");
             message.put("content", content.toString());
@@ -195,15 +225,9 @@ public class LlamaClient {
     }
 
     // ---------------------------------------------------------------------
-    // Accurate token counting (Tier 2)
+    // Accurate token counting
     // ---------------------------------------------------------------------
 
-    private static final String TOKENIZE_ENDPOINT = "http://localhost:8081/tokenize";
-
-    /**
-     * Ask llama-server how many tokens a piece of text really is. Returns -1 on any failure so the
-     * caller can fall back to an estimate.
-     */
     @SuppressWarnings("unchecked")
     public int countTokens(String text) {
         try {
@@ -228,24 +252,25 @@ public class LlamaClient {
     // Helpers
     // ---------------------------------------------------------------------
 
-    private HttpRequest buildRequest(List<Map<String, Object>> messages,
+    private HttpRequest buildRequest(String url, String model,
+                                     List<Map<String, Object>> messages,
                                      List<Map<String, Object>> tools,
                                      boolean stream) throws Exception {
         Map<String, Object> bodyMap = new LinkedHashMap<>();
-        bodyMap.put("model", MODEL);
+        bodyMap.put("model", model);
         bodyMap.put("messages", messages);
         if (tools != null && !tools.isEmpty()) {
             bodyMap.put("tools", tools);
             bodyMap.put("tool_choice", "auto");
         }
         bodyMap.put("temperature", 0.2);
-        bodyMap.put("max_tokens", maxTokens);             // bound every single generation
+        bodyMap.put("max_tokens", maxTokens);
         bodyMap.put("frequency_penalty", FREQUENCY_PENALTY);
         bodyMap.put("presence_penalty", PRESENCE_PENALTY);
         bodyMap.put("stream", stream);
 
         return HttpRequest.newBuilder()
-                .uri(URI.create(ENDPOINT))
+                .uri(URI.create(url))
                 .timeout(Duration.ofMinutes(5))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(bodyMap)))

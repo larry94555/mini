@@ -111,7 +111,7 @@ public class McpManager {
                 String exposedName = sanitize(name + "_" + toolName);
                 final String original = toolName;
                 // MCP tools are external code -> treat as mutating so the permission gate applies.
-                tools.add(new Tool(exposedName, "[MCP:" + name + "] " + desc, schema, true,
+                tools.add(new Tool(exposedName, "[MCP:" + name + "] " + desc, schema, true, true,
                         callArgs -> srv.callTool(original, callArgs)));
                 System.out.println("[mcp] " + name + " -> tool " + exposedName);
             }
