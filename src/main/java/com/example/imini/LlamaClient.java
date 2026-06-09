@@ -55,6 +55,12 @@ public class LlamaClient {
     private String model;
     @Value("${llama.cache-prompt:true}")
     private boolean cachePrompt;
+    @Value("${llama.constrain-tools:false}")
+    private boolean constrainTools;
+    @Value("${llama.max-retries:2}")
+    private int maxRetries;
+    @Value("${llama.retry-backoff-ms:400}")
+    private long retryBackoffMs;
 
     private String base() { return "http://localhost:" + port; }
     private String endpoint() { return base() + "/v1/chat/completions"; }
@@ -87,8 +93,14 @@ public class LlamaClient {
                                        List<Map<String, Object>> messages,
                                        List<Map<String, Object>> tools) throws Exception {
         HttpRequest req = buildRequest(url, model, messages, tools, false);
-        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() / 100 != 2) {
+        HttpResponse<String> resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
+            HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() / 100 == 5) {                 // transient server error -> retry
+                throw new java.io.IOException("llama-server " + r.statusCode() + ": " + r.body());
+            }
+            return r;
+        });
+        if (resp.statusCode() / 100 != 2) {                  // 4xx -> caller error, not retried
             throw new RuntimeException("llama-server error " + resp.statusCode() + ": " + resp.body());
         }
         Map<String, Object> json = mapper.readValue(resp.body(), Map.class);
@@ -243,7 +255,11 @@ public class LlamaClient {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
+                HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (r.statusCode() / 100 == 5) throw new java.io.IOException("tokenize " + r.statusCode());
+                return r;
+            });
             if (resp.statusCode() / 100 != 2) return -1;
             Map<String, Object> json = mapper.readValue(resp.body(), Map.class);
             Object tokens = json.get("tokens");
@@ -267,6 +283,10 @@ public class LlamaClient {
         if (tools != null && !tools.isEmpty()) {
             bodyMap.put("tools", tools);
             bodyMap.put("tool_choice", "auto");
+            if (constrainTools) {
+                String grammar = GrammarBuilder.fromTools(tools);
+                if (grammar != null) bodyMap.put("grammar", grammar);
+            }
         }
         bodyMap.put("temperature", 0.2);
         bodyMap.put("max_tokens", maxTokens);

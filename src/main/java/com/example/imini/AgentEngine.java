@@ -154,11 +154,21 @@ public class AgentEngine {
                 infos.add(new CallInfo(name, id, args, tools.get(name)));
             }
 
+            // Validate each call's arguments against its tool schema BEFORE executing. A failure
+            // becomes a corrective tool result the model can react to (recover) rather than a bad run.
+            Map<CallInfo, String> validationErrors = new IdentityHashMap<>();
+            for (CallInfo ci : infos) {
+                if (ci.tool != null) {
+                    String verr = SchemaValidator.validate(ci.name, ci.tool.parameters, ci.args);
+                    if (verr != null) validationErrors.put(ci, verr);
+                }
+            }
+
             Map<CallInfo, Future<String>> futures = new IdentityHashMap<>();
             if (parallelTools) {
                 final RunSink s = sink;
                 for (CallInfo ci : infos) {
-                    if (ci.tool != null && !ci.tool.mutating) {
+                    if (ci.tool != null && !ci.tool.mutating && validationErrors.get(ci) == null) {
                         futures.put(ci, pool.submit(() -> runTool(sid, s, ci.name, ci.tool, ci.args)));
                     }
                 }
@@ -168,7 +178,10 @@ public class AgentEngine {
             for (CallInfo ci : infos) {
                 String result;
                 if (ci.tool == null) {
-                    result = "ERROR: unknown tool '" + ci.name + "'";
+                    result = "ERROR: unknown tool '" + ci.name + "'. Use only the provided tools.";
+                } else if (validationErrors.get(ci) != null) {
+                    result = validationErrors.get(ci);
+                    sink.log("[" + label + ":invalid] " + ci.name + " " + ci.args);
                 } else if (!ci.tool.mutating) {
                     sink.log("[" + label + ":tool] " + ci.name + " " + ci.args + (parallelNote ? " (parallel)" : ""));
                     Future<String> f = futures.get(ci);

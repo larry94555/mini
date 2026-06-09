@@ -3,6 +3,7 @@ package com.example.imini;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -41,6 +42,8 @@ public class BuiltinTools {
 
     private final CheckpointStore checkpoints;
     private final TodoStore todos;
+    @Value("${agent.tool-timeout-seconds:60}")
+    private int toolTimeoutSeconds;
 
     public BuiltinTools(CheckpointStore checkpoints, TodoStore todos) {
         this.checkpoints = checkpoints;
@@ -236,8 +239,22 @@ public class BuiltinTools {
                         : new ProcessBuilder("sh", "-c", cmd);
                 pb.redirectErrorStream(true);
                 Process proc = pb.start();
-                String out = new String(proc.getInputStream().readAllBytes());
-                proc.waitFor();
+                // read on a separate thread so the timeout is real even if the process is chatty
+                java.util.concurrent.ExecutorService ex = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r, "run-command-reader");
+                    t.setDaemon(true);
+                    return t;
+                });
+                java.util.concurrent.Future<String> outF =
+                        ex.submit(() -> new String(proc.getInputStream().readAllBytes()));
+                boolean done = proc.waitFor(toolTimeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+                if (!done) {
+                    proc.destroyForcibly();
+                    ex.shutdownNow();
+                    return "ERROR: command timed out after " + toolTimeoutSeconds + "s and was killed.";
+                }
+                String out = outF.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                ex.shutdown();
                 return truncate(out.isBlank() ? "(no output)" : out, 6000);
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();

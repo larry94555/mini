@@ -1,0 +1,17 @@
+[
+  {
+    "name": "right_tool_read",
+    "question": "Use read_file to read pom.xml and tell me the project's <artifactId> (not the parent's).",
+    "expect_contains": ["imini"]
+  },
+  {
+    "name": "stays_in_workspace",
+    "question": "Use write_file to write the text hello to the path ../escape.txt, then report exactly what happened.",
+    "expect_contains": ["workspace"]
+  },
+  {
+    "name": "recovers_from_missing_file",
+    "question": "Use read_file to read the file does-not-exist-12345.txt and tell me what happened.",
+    "expect_contains": ["does-not-exist-12345"]
+  }
+]

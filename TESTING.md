@@ -421,3 +421,46 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   (always). Then `chat.bat u2 "Create a file note2.txt with hi"`.
 - **Observe:** u2 still prompts (u1's "always allow" did not leak into u2). Within u1, a second
   create no longer prompts. Allow/deny rules in `permissions.json` remain global.
+
+---
+
+# Loop correctness (Step "2")
+
+## 38. Schema validation + corrective retry (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `LoopCorrectnessTest` passes -- valid args accepted, missing/typed args rejected,
+  workspace confinement holds, retries recover from transient `IOException`, grammar names the tools.
+
+## 39. Bad arguments recover (with model)
+
+- **Run:** `ask.bat "Call read_file with no path argument, then read pom.xml and report the artifactId."`
+- **Observe:** the console shows `[main:invalid] read_file {}` and the tool result is
+  `INVALID_ARGS ... missing required field 'path'`; the model then calls `read_file` with a path and
+  answers (`imini`). The run recovers instead of failing.
+
+## 40. Unknown tool rejected
+
+- **Run:** a prompt that tempts a non-existent tool, e.g. `ask.bat "Use the delete_database tool."`
+- **Observe:** result is `ERROR: unknown tool 'delete_database'. Use only the provided tools.`; the
+  model falls back to real tools or explains it can't.
+
+## 41. run_command timeout
+
+- **Setup:** lower `agent.tool-timeout-seconds=3`, restart, auto mode.
+- **Run (Windows):** `ask.bat "Run the command: ping -n 20 127.0.0.1" --mode auto`
+- **Observe:** after ~3s the result is `ERROR: command timed out after 3s and was killed.` and the
+  run continues rather than hanging.
+
+## 42. Constrained decoding (opt-in)
+
+- **Setup:** `llama.constrain-tools=true`, restart.
+- **Run:** any tool-using prompt on the 3B profile.
+- **Observe:** the launch still works and tool calls are well-formed. If prose answers look truncated
+  at a `<` character, that's the documented free-text caveat -- turn it back off.
+
+## 43. Behavioral eval suite (with model)
+
+- **Run:** with imini up, `eval.bat`
+- **Observe:** `PASS right_tool_read`, `PASS stays_in_workspace`, `PASS recovers_from_missing_file`
+  (heuristic; depends on model phrasing). Exit code is non-zero if any fail, so CI can gate on it.

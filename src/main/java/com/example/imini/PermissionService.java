@@ -165,11 +165,16 @@ public class PermissionService {
         if (!(tool.equals("write_file") || tool.equals("edit_file"))) return false;
         Object p = args.get("path");
         if (p == null) return false;
+        return !isWithin(root, String.valueOf(p));
+    }
+
+    /** True if {@code candidate}, resolved against {@code root}, stays inside {@code root}. */
+    public static boolean isWithin(Path root, String candidate) {
         try {
-            Path target = root.resolve(String.valueOf(p)).normalize();
-            return !target.startsWith(root);
+            Path target = root.resolve(candidate).normalize();
+            return target.startsWith(root);
         } catch (Exception e) {
-            return true; // if we can't resolve it, treat as unsafe
+            return false; // if we can't resolve it, treat as unsafe
         }
     }
 }
