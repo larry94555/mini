@@ -23,7 +23,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | 2 | Accurate tokens + layered context | real `/tokenize` counts, durable memory note, tool-output trimming |
 | 2 | Todo / planning tool | `todo_write` checklist the model maintains |
 | 2 | Parallel tools | independent read-only calls run concurrently |
-| 3 | Interruptibility + steering | stop or redirect a run in flight |
+| 3 | Interruptibility + steering | per-session: stop or redirect one run in flight |
+| 3c | Concurrency & multi-user | per-session todos/permissions/interrupt; SSE streaming; slot-bounded job queue |
 | 3 | Project memory | `IMINI.md`/`CLAUDE.md`/`AGENTS.md` folded into the system prompt |
 | 3 | Prompt-injection hardening | untrusted web/MCP output is fenced as data, not instructions |
 | 3 | Cheap-model routing | send summarization to a smaller model/server |
@@ -47,12 +48,16 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `Untrusted.java` | fences untrusted tool output (prompt-injection hardening) |
 | `CheckpointStore.java` | snapshot-before-edit + rewind |
 | `SessionStore.java` | per-session history, persisted to `.imini/sessions/` |
-| `TodoStore.java` | the current task checklist |
-| `PermissionService.java` | allow/deny rules, remembered decisions, confinement, plan mode |
-| `InterruptService.java` | interrupt + steering signals |
+| `TodoStore.java` | per-session task checklists |
+| `PermissionService.java` | allow/deny rules, per-session remembered decisions, confinement, plan mode |
+| `InterruptService.java` | per-session interrupt + steering signals |
 | `ProjectContext.java` | loads project-memory file into the system prompt |
 | `HookService.java` | pre/post tool shell hooks (`hooks.json`) |
 | `SlashCommands.java` | custom slash commands (`commands/*.md`) |
+| `RunSink.java` | where a run's tokens/logs go (console or SSE) |
+| `ConsoleSink.java` | sink for blocking endpoints (stdout) |
+| `SessionContext.java` | publishes sessionId + sink to tool executors (ThreadLocal) |
+| `RunService.java` | bounds concurrent runs to the model's slot count (job queue) |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -64,7 +69,7 @@ Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager, PermissionS
 BuiltinTools -> CheckpointStore, TodoStore; SubAgent -> AgentEngine, BuiltinTools;
 ToolRegistry -> BuiltinTools, SubAgent, McpManager;
 AgentLoop -> AgentEngine, ToolRegistry, SessionStore, ProjectContext, SlashCommands;
-AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService.
+AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService, RunService.
 
 ---
 
@@ -88,14 +93,20 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 
 | Method & path | Body | Purpose |
 |---------------|------|---------|
-| `POST /ask` | `{"question":"...","mode":?}` | one-shot, no memory |
-| `POST /chat` | `{"sessionId":"...?","message":"...","mode":?}` | multi-turn; returns sessionId |
+| `POST /ask` | `{"question":"...","mode":?}` | one-shot, no memory (blocking) |
+| `POST /chat` | `{"sessionId":"...?","message":"...","mode":?}` | multi-turn; returns sessionId (blocking) |
+| `POST /ask/stream` | `{"question":"...","mode":?}` | one-shot, **SSE** stream |
+| `POST /chat/stream` | `{"sessionId":"...?","message":"...","mode":?}` | multi-turn, **SSE** stream |
 | `GET /sessions` | - | list sessions |
-| `GET /todos` | - | current task checklist |
-| `POST /rewind` | - | undo most recent file edit |
+| `GET /todos?sessionId=` | - | that session's checklist |
+| `GET /runs` | - | concurrency status: limit / active / queued |
+| `POST /rewind` | - | undo most recent file edit (global) |
 | `GET /checkpoints` | - | list rewind points |
-| `POST /interrupt` | - | stop the run in progress |
-| `POST /steer` | `{"message":"..."}` | inject guidance into the running loop |
+| `POST /interrupt` | `{"sessionId":"..."}` | stop that session's run |
+| `POST /steer` | `{"sessionId":"...","message":"..."}` | inject guidance into that session's run |
+
+SSE events: `session` (the id), `token` (model text), `log` (tool/guard/plan lines), `answer` (final
+text), `done`, `error`.
 
 `mode` = `ask` (default; prompt per mutating call) | `auto` (approve, still confined) | `plan`
 (record actions, execute nothing).
@@ -104,10 +115,11 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 
 ## Tier 3 details
 
-- **Interruptibility & steering.** `InterruptService` holds a stop flag and a steer queue. The main
-  loop checks them between turns and mid-stream, so a `POST /interrupt` from a second terminal halts
-  a run gracefully (partial result returned), and `POST /steer` injects a user message at the next
-  turn. Only the main loop responds (sub-agents run to completion). Effective in streaming mode.
+- **Interruptibility & steering (per-session).** `InterruptService` keys a stop flag and steer queue
+  by `sessionId`, so `POST /interrupt {sessionId}` from a second terminal halts just that run
+  (partial result returned) and `POST /steer {sessionId,message}` injects a user message at its next
+  turn -- other concurrent runs are unaffected. Only the main loop responds (sub-agents run to
+  completion). Effective in streaming mode.
 - **Project memory.** `ProjectContext` looks for `IMINI.md`, then `CLAUDE.md`, then `AGENTS.md` in
   the working directory and appends its contents to the system prompt. Read fresh per one-shot
   request; for sessions it is captured when the session starts.
@@ -188,6 +200,49 @@ These are config + scenario rather than a single prompt; restart the app after c
    In a multi-turn `chat.bat` session, later turns reuse the cached prefix, so they start responding
    sooner than the first. Set `llama.cache-reuse=0` if an older llama-server refuses the flag.
 
+## Concurrency & multi-user
+
+Two changes let several people use one imini process at once:
+
+**Per-session state.** Interrupt/steer signals, the todo checklist, and remembered permission
+decisions are now keyed by `sessionId` (the id `POST /chat` returns, or whatever you pass). Two
+sessions keep independent task lists and can be interrupted independently; one user's "always allow"
+doesn't leak into another's run. Allow/deny *rules* in `permissions.json` stay global (they're
+policy). Internally the engine publishes the current `sessionId` + output sink to tool executors via
+a `SessionContext` ThreadLocal, so `todo_write` scopes to the right session without changing any tool
+signature.
+
+**Streaming + a slot-bounded job queue.** `POST /chat/stream` and `POST /ask/stream` return
+Server-Sent Events (`token`/`log`/`answer`/...), so a client watches the run live instead of waiting
+for a single JSON blob. `RunService` caps how many runs execute at once to the model's slot count
+(`agent.max-concurrent-runs`, default = `llama.parallel`) using a fair semaphore; extra runs wait in
+line -- that waiting set is the job queue. `GET /runs` shows `limit / active / queued`.
+
+> Honest limitation: ASK-mode permission and deadline prompts are answered on the **server console**
+> (one operator). For genuinely concurrent remote users, run in `auto` mode with `permissions.json`
+> rules; per-session *remembered* decisions still apply. Checkpoints/rewind remain global (out of
+> scope for this step).
+
+### Trying it out
+
+1. **Live streaming.** `stream.bat work1 "Explain how a hash map works, then list 3 pitfalls."`
+   Tokens print as they're generated (SSE `token` events); `log` events show any tool/guard lines.
+   The same run over `chat.bat` would only print once it finished.
+
+2. **Interrupt one session, not the other.** Start two long streams in two terminals:
+   `stream.bat A "Write a very detailed 10-step plan to refactor a large project."` and
+   `stream.bat B "Summarize the history of the printing press in depth."` Now
+   `interrupt.bat A` -- only session A stops (its stream ends with a partial result); B keeps going.
+   That isolation is the per-session change; before, one interrupt hit every run.
+
+3. **Separate todos per session.** `chat.bat plan1 "Use todo_write to plan 3 steps to add a README."`
+   then `chat.bat plan2 "Use todo_write to plan 2 steps to add tests."` Check each:
+   `GET /todos?sessionId=plan1` vs `?sessionId=plan2` (or open in a browser) -- two distinct lists.
+
+4. **Watch the job queue.** Set `llama.parallel=1` (one slot), restart, and fire two streams at once.
+   `runs.bat` shows `active=1, queued=1`: the second run waits for the first to finish a slot rather
+   than oversubscribing the model. Raise `agent.max-concurrent-runs` to allow more in parallel.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -207,6 +262,7 @@ agent.max-tool-result-chars=4000
 agent.summary-model=                # blank = main model; set for cheap-model routing
 agent.summary-base-url=             # blank = same as main; set host for cheap-model routing
 agent.deadline-action=ask           # ask = prompt to continue at the budget; stop = hard stop
+agent.max-concurrent-runs=0         # cap on simultaneous runs; 0 = use llama.parallel (slot count)
 # Model serving (llama-server):
 llama.manage-server=true            # false = use an external llama-server
 llama.binary=llama-server.exe       # full path pins a specific version

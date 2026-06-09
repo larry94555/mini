@@ -24,8 +24,11 @@ import com.example.imini.PermissionService.Mode;
  * THE HARNESS, shared by the main agent and the sub-agent. think -> act -> observe loop.
  *
  * Tier 2: permission modes (ASK/AUTO/PLAN), parallel read-only tools, tool-output trimming.
- * Tier 3: interruptibility + steering (main loop only), and prompt-injection fencing of untrusted
- *         tool output.
+ * Tier 3: interruptibility + steering (main loop only), prompt-injection fencing, hooks.
+ * Step 3 (concurrency): every run carries a sessionId (per-session interrupt/steer/todos/permissions)
+ *         and a RunSink (tokens + logs go to the caller's stream, not a shared System.out), so many
+ *         runs can stream to different clients at once. The sessionId + sink are also published to
+ *         tool executors via SessionContext for the duration of each tool call.
  *
  * Stop conditions: MAX_ITERATIONS, wall-clock deadline, duplicate-call detection, user interrupt.
  */
@@ -70,16 +73,17 @@ public class AgentEngine {
     }
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
-                      Mode mode, String label) throws Exception {
+                      Mode mode, String label, String sessionId, RunSink sink) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(msg("system", systemPrompt));
         messages.add(msg("user", userMessage));
-        return converse(messages, tools, mode, label).answer();
+        return converse(messages, tools, mode, label, sessionId, sink).answer();
     }
 
     public AgentResult converse(List<Map<String, Object>> startingMessages, Map<String, Tool> tools,
-                                Mode mode, String label) throws Exception {
+                                Mode mode, String label, String sessionId, RunSink sink) throws Exception {
 
+        if (sink == null) sink = RunSink.NOOP;
         List<Map<String, Object>> messages = new ArrayList<>(startingMessages);
         List<Map<String, Object>> specs = specsFor(tools);
         boolean interactive = "main".equals(label); // only the main loop honors interrupt/steer
@@ -95,40 +99,41 @@ public class AgentEngine {
                         && permissions.confirmContinue(deadlineSeconds);
                 if (extend) {
                     deadline = System.nanoTime() + deadlineSeconds * 1_000_000_000L;
-                    System.out.println("[deadline:" + label + "] extended by " + deadlineSeconds + "s by the user.");
+                    sink.log("[deadline:" + label + "] extended by " + deadlineSeconds + "s by the user.");
                 } else {
-                    System.out.println("\n[guard:" + label + "] time budget of " + deadlineSeconds + "s reached; stopping.");
+                    sink.log("[guard:" + label + "] time budget of " + deadlineSeconds + "s reached; stopping.");
                     return new AgentResult("[stopped: reached the " + deadlineSeconds + "s time budget.]"
                             + planSuffix(plan), messages);
                 }
             }
 
             if (interactive) {
-                for (String s : interrupt.drainSteer()) {
+                for (String s : interrupt.drainSteer(sessionId)) {
                     messages.add(msg("user", "[steering from user] " + s));
-                    System.out.println("[steer:" + label + "] injected: " + s);
+                    sink.log("[steer:" + label + "] injected: " + s);
                 }
-                if (interrupt.consumeStop()) {
-                    System.out.println("\n[interrupt:" + label + "] stopped before model call.");
+                if (interrupt.consumeStop(sessionId)) {
+                    sink.log("[interrupt:" + label + "] stopped before model call.");
                     return new AgentResult("[stopped: interrupted by the user]" + planSuffix(plan), messages);
                 }
             }
 
             messages = context.compactIfNeeded(messages, label);
 
-            BooleanSupplier cancel = interactive ? interrupt::isStopRequested : () -> false;
+            final String sid = sessionId;
+            BooleanSupplier cancel = interactive ? () -> interrupt.isStopRequested(sid) : () -> false;
             Map<String, Object> assistant;
             if (stream) {
-                System.out.print("\n[" + label + " thinking] ");
-                assistant = llama.chatStream(messages, specs, token -> System.out.print(token), cancel);
-                System.out.println();
+                sink.log("[" + label + " thinking]");
+                final RunSink s = sink;
+                assistant = llama.chatStream(messages, specs, s::token, cancel);
             } else {
                 assistant = llama.chat(messages, specs);
             }
             messages.add(assistant);
 
-            if (interactive && interrupt.consumeStop()) {
-                System.out.println("\n[interrupt:" + label + "] stopped during generation.");
+            if (interactive && interrupt.consumeStop(sessionId)) {
+                sink.log("[interrupt:" + label + "] stopped during generation.");
                 return new AgentResult("[stopped: interrupted by the user mid-response]" + planSuffix(plan), messages);
             }
 
@@ -151,9 +156,10 @@ public class AgentEngine {
 
             Map<CallInfo, Future<String>> futures = new IdentityHashMap<>();
             if (parallelTools) {
+                final RunSink s = sink;
                 for (CallInfo ci : infos) {
                     if (ci.tool != null && !ci.tool.mutating) {
-                        futures.put(ci, pool.submit(() -> runTool(ci.name, ci.tool, ci.args)));
+                        futures.put(ci, pool.submit(() -> runTool(sid, s, ci.name, ci.tool, ci.args)));
                     }
                 }
             }
@@ -164,10 +170,9 @@ public class AgentEngine {
                 if (ci.tool == null) {
                     result = "ERROR: unknown tool '" + ci.name + "'";
                 } else if (!ci.tool.mutating) {
-                    System.out.println("[" + label + ":tool] " + ci.name + " " + ci.args
-                            + (parallelNote ? " (parallel)" : ""));
+                    sink.log("[" + label + ":tool] " + ci.name + " " + ci.args + (parallelNote ? " (parallel)" : ""));
                     Future<String> f = futures.get(ci);
-                    result = (f != null) ? join(f) : runTool(ci.name, ci.tool, ci.args);
+                    result = (f != null) ? join(f) : runTool(sessionId, sink, ci.name, ci.tool, ci.args);
                 } else {
                     String signature = ci.name + "|" + ci.args;
                     int count = callCounts.merge(signature, 1, Integer::sum);
@@ -175,19 +180,19 @@ public class AgentEngine {
                         dupStrikes++;
                         result = "NOTE: you already called '" + ci.name + "' with these exact arguments "
                                 + (count - 1) + " time(s). Do NOT call it again; answer with what you have.";
-                        System.out.println("[guard:" + label + "] suppressed duplicate call to " + ci.name);
+                        sink.log("[guard:" + label + "] suppressed duplicate call to " + ci.name);
                     } else {
-                        Decision d = permissions.decide(ci.name, true, ci.args, mode);
+                        Decision d = permissions.decide(sessionId, ci.name, true, ci.args, mode);
                         switch (d.kind()) {
                             case ALLOW -> {
-                                System.out.println("[" + label + ":tool] " + ci.name + " " + ci.args);
-                                result = runTool(ci.name, ci.tool, ci.args);
+                                sink.log("[" + label + ":tool] " + ci.name + " " + ci.args);
+                                result = runTool(sessionId, sink, ci.name, ci.tool, ci.args);
                             }
                             case DENY -> result = "DENIED: " + d.note() + ".";
                             case RECORD_PLAN -> {
                                 String desc = ci.name + " " + ci.args;
                                 plan.add(desc);
-                                System.out.println("[" + label + ":plan] would run " + desc);
+                                sink.log("[" + label + ":plan] would run " + desc);
                                 result = "[plan mode] Recorded (not executed): " + desc
                                         + ". Continue planning; do not assume it ran.";
                             }
@@ -205,7 +210,7 @@ public class AgentEngine {
             }
 
             if (dupStrikes >= MAX_DUP_STRIKES) {
-                System.out.println("\n[guard:" + label + "] too many repeated calls; stopping.");
+                sink.log("[guard:" + label + "] too many repeated calls; stopping.");
                 return new AgentResult("[stopped: the model kept repeating the same tool call.]"
                         + planSuffix(plan), messages);
             }
@@ -222,18 +227,25 @@ public class AgentEngine {
         return sb.toString();
     }
 
-    private String runTool(String name, Tool tool, Map<String, Object> args) {
-        String block = hooks.runPre(name, args);
-        if (block != null) {
-            System.out.println("[hook:pre] blocked " + name);
-            return block;
+    /** Publishes sessionId + sink to the tool executor (via SessionContext), runs hooks + the tool. */
+    private String runTool(String sessionId, RunSink sink, String name, Tool tool, Map<String, Object> args) {
+        SessionContext.Ctx prev = SessionContext.get();
+        SessionContext.set(new SessionContext.Ctx(sessionId, sink));
+        try {
+            String block = hooks.runPre(name, args);
+            if (block != null) {
+                sink.log("[hook:pre] blocked " + name);
+                return block;
+            }
+            String result = safeExec(tool, args);
+            String postOut = hooks.runPost(name, args, result);
+            if (postOut != null && !postOut.isBlank()) {
+                result = result + "\n[post-hook]\n" + postOut;
+            }
+            return result;
+        } finally {
+            SessionContext.set(prev);
         }
-        String result = safeExec(tool, args);
-        String postOut = hooks.runPost(name, args, result);
-        if (postOut != null && !postOut.isBlank()) {
-            result = result + "\n[post-hook]\n" + postOut;
-        }
-        return result;
     }
 
     private String safeExec(Tool tool, Map<String, Object> args) {

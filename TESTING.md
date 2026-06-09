@@ -379,3 +379,45 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `ask.bat "Use todo_write to plan 3 steps, then view pom.xml and report the jsoup version."`
 - **Observe:** the launch line shows the Llama-3.1-8B model; multi-step tool use is more reliable than
   3B/7B. The 8B profile uses a community GGUF repo -- override `llama.hf-model` if you prefer another.
+
+---
+
+# Concurrency & multi-user (Step 3)
+
+## 33. SSE streaming
+
+- **Run:** `stream.bat s1 "Explain how a hash map works, then list 3 pitfalls."`
+- **Observe:** tokens appear progressively in the terminal (SSE `token` events), interleaved with
+  `log` lines for any tool/guard activity, then a final `answer` and `done`. Compare with `chat.bat
+  s1 "..."`, which prints only after the whole run finishes.
+
+## 34. Per-session interrupt (isolation)
+
+- **Setup:** two terminals.
+- **Run:** terminal 1 `stream.bat A "Write a very detailed 10-step refactoring plan."`; terminal 2,
+  while A streams, `interrupt.bat A`. Separately start `stream.bat B "..."` and confirm `interrupt.bat
+  A` does NOT stop B.
+- **Observe:** session A ends early with `[stopped: interrupted by the user]`; session B is unaffected.
+  (Before Step 3 a single interrupt stopped every run.)
+
+## 35. Per-session todos
+
+- **Run:** `chat.bat plan1 "Use todo_write to plan 3 steps to add a README."` then
+  `chat.bat plan2 "Use todo_write to plan 2 steps to add tests."`
+- **Observe:** `GET /todos?sessionId=plan1` and `?sessionId=plan2` return different lists. Visit each
+  in a browser or `curl "http://localhost:8080/todos?sessionId=plan1"`.
+
+## 36. Slot-bounded job queue
+
+- **Setup:** `llama.parallel=1`, restart (one model slot, so `agent.max-concurrent-runs` resolves to 1).
+- **Run:** start two streams at once (two terminals), then `runs.bat` (or `GET /runs`).
+- **Observe:** `{"limit":1,"active":1,"queued":1}` while both are outstanding -- the second run waits
+  for a slot instead of oversubscribing the model. Raise `agent.max-concurrent-runs` to allow more.
+
+## 37. Per-session permissions (remembered isolation)
+
+- **Setup:** ASK mode (default), server console visible.
+- **Run:** `chat.bat u1 "Create a file note1.txt with hello"`; at the console prompt answer `a`
+  (always). Then `chat.bat u2 "Create a file note2.txt with hi"`.
+- **Observe:** u2 still prompts (u1's "always allow" did not leak into u2). Within u1, a second
+  create no longer prompts. Allow/deny rules in `permissions.json` remain global.

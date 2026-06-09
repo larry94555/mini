@@ -51,15 +51,15 @@ public class AgentLoop {
         return BASE_SYSTEM_PROMPT + project.addendum();
     }
 
-    /** One-shot, ephemeral. */
-    public String run(String userQuestion, Mode mode) throws Exception {
+    /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
+    public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userQuestion)) return slash.help();
         String question = slash.expand(userQuestion);
-        return engine.run(systemPrompt(), question, registry.tools(), mode, "main");
+        return engine.run(systemPrompt(), question, registry.tools(), mode, "main", sessionId, sink);
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
-    public String chat(String sessionId, String userMessage, Mode mode) throws Exception {
+    public String chat(String sessionId, String userMessage, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userMessage)) return slash.help();
         String expanded = slash.expand(userMessage);
 
@@ -70,7 +70,7 @@ public class AgentLoop {
         }
         history.add(message("user", expanded));
 
-        AgentResult result = engine.converse(history, registry.tools(), mode, "main");
+        AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());
         return result.answer();
     }
