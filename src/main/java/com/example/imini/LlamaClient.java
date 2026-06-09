@@ -35,11 +35,6 @@ import java.util.stream.Stream;
 @Component
 public class LlamaClient {
 
-    private static final String BASE = "http://localhost:8081";
-    private static final String ENDPOINT = BASE + "/v1/chat/completions";
-    private static final String TOKENIZE_ENDPOINT = BASE + "/tokenize";
-    private static final String MODEL = "qwen2.5-3b-instruct"; // matches --alias
-
     private static final double FREQUENCY_PENALTY = 0.5;
     private static final double PRESENCE_PENALTY = 0.3;
     private static final int LINE_REPEAT_LIMIT = 8;
@@ -52,8 +47,18 @@ public class LlamaClient {
     private int streamMaxSeconds;
     @Value("${agent.summary-model:}")
     private String summaryModel;
-    @Value("${agent.summary-base-url:http://localhost:8081}")
+    @Value("${agent.summary-base-url:}")
     private String summaryBaseUrl;
+    @Value("${llama.port:8081}")
+    private int port;
+    @Value("${llama.alias:qwen2.5-3b-instruct}")
+    private String model;
+    @Value("${llama.cache-prompt:true}")
+    private boolean cachePrompt;
+
+    private String base() { return "http://localhost:" + port; }
+    private String endpoint() { return base() + "/v1/chat/completions"; }
+    private String tokenizeEndpoint() { return base() + "/tokenize"; }
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -66,15 +71,15 @@ public class LlamaClient {
 
     public Map<String, Object> chat(List<Map<String, Object>> messages,
                                     List<Map<String, Object>> tools) throws Exception {
-        return chatAt(ENDPOINT, MODEL, messages, tools);
+        return chatAt(endpoint(), model, messages, tools);
     }
 
     /** Summarization/compaction call, routed to the (optionally cheaper) summary model. */
     public Map<String, Object> summaryChat(List<Map<String, Object>> messages) throws Exception {
-        String model = (summaryModel == null || summaryModel.isBlank()) ? MODEL : summaryModel;
-        String url = (summaryBaseUrl == null || summaryBaseUrl.isBlank() ? BASE : summaryBaseUrl)
-                + "/v1/chat/completions";
-        return chatAt(url, model, messages, null);
+        String m = (summaryModel == null || summaryModel.isBlank()) ? model : summaryModel;
+        String url = (summaryBaseUrl == null || summaryBaseUrl.isBlank())
+                ? endpoint() : summaryBaseUrl + "/v1/chat/completions";
+        return chatAt(url, m, messages, null);
     }
 
     @SuppressWarnings("unchecked")
@@ -109,7 +114,7 @@ public class LlamaClient {
                                           List<Map<String, Object>> tools,
                                           Consumer<String> onToken,
                                           BooleanSupplier cancelled) throws Exception {
-        HttpRequest req = buildRequest(ENDPOINT, MODEL, messages, tools, true);
+        HttpRequest req = buildRequest(endpoint(), model, messages, tools, true);
         HttpResponse<Stream<String>> resp = http.send(req, HttpResponse.BodyHandlers.ofLines());
         if (resp.statusCode() / 100 != 2) {
             String body = resp.body().collect(Collectors.joining("\n"));
@@ -233,7 +238,7 @@ public class LlamaClient {
         try {
             String body = mapper.writeValueAsString(Map.of("content", text == null ? "" : text));
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(TOKENIZE_ENDPOINT))
+                    .uri(URI.create(tokenizeEndpoint()))
                     .timeout(Duration.ofSeconds(20))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -265,6 +270,7 @@ public class LlamaClient {
         }
         bodyMap.put("temperature", 0.2);
         bodyMap.put("max_tokens", maxTokens);
+        bodyMap.put("cache_prompt", cachePrompt);   // reuse the prefix KV cache for latency
         bodyMap.put("frequency_penalty", FREQUENCY_PENALTY);
         bodyMap.put("presence_penalty", PRESENCE_PENALTY);
         bodyMap.put("stream", stream);

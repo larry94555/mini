@@ -306,3 +306,76 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `ask.bat "/help"`  (or `/commands`)
 - **Observe:** the harness returns the list of available commands immediately, without calling the
   model.
+
+---
+
+# Model serving & performance
+
+## 25. Ask-to-continue deadline
+
+- **Setup:** `agent.deadline-action=ask` (default), `agent.deadline-seconds=120`. To see it fast,
+  lower it (e.g. `agent.deadline-seconds=20`) and restart.
+- **Run:** `ask.bat "Use delegate_research to write a long, multi-source report on the Apollo program."`
+- **Observe:** when the run passes the budget, the app console prints
+  `[deadline] Continue for another Ns? (y = yes, N = stop):`. Type `y` to extend (console logs
+  `[deadline:main] extended by Ns`), or `N` to stop with a partial result. Set
+  `agent.deadline-action=stop` to confirm the old hard-stop behavior returns.
+
+## 26. Model profile (3B -> 7B)
+
+- **Setup:** `llama.profile=medium`, restart (first run downloads the 7B model).
+- **Run:** `ask.bat "Use todo_write to plan 3 steps, then view pom.xml and report the jsoup version."`
+- **Observe:** the startup log shows the 7B model launching; the run completes with cleaner tool use
+  than the 3B (fewer fallback hiccups). Switch back with `llama.profile=small`.
+
+## 27. Parallel slots (continuous batching)
+
+- **Setup:** `llama.parallel=2`, restart.
+- **Run:** in two terminals at the same time:
+  `chat.bat a "Count from 1 to 20 with a sentence about each."`
+  `chat.bat b "Write a short paragraph about rivers."`
+- **Observe:** both progress concurrently rather than one blocking the other. With `llama.parallel=1`
+  the second request waits for the first.
+
+## 28. Watchdog auto-restart
+
+- **Setup:** `llama.auto-restart=true` (default).
+- **Run:** while imini is up, end the `llama-server` process in Task Manager.
+- **Observe:** within ~`llama.health-interval-seconds` the console prints
+  `[llama] watchdog: server unhealthy; restarting...` and relaunches it; a follow-up `ask.bat` works
+  without restarting imini.
+
+## 29. External / local / pinned server (optional)
+
+- **External:** start your own `llama-server` and set `llama.manage-server=false` so imini just
+  connects to `llama.port`.
+- **Local model:** set `llama.model-path=C:\\models\\your-model.gguf` to run offline (uses `-m`).
+- **Speculative decoding:** add a draft model via `llama.extra-args`, e.g.
+  `--model-draft C:\\models\\qwen-0.5b.gguf --draft 16`.
+
+## 30. KV-cache reuse (latency)
+
+- **Setup:** defaults (`llama.cache-prompt=true`, `llama.cache-reuse=256`). Nothing to change.
+- **Run:** a multi-turn session -- `chat.bat c1 "Write three facts about the moon."` then
+  `chat.bat c1 "Now three about Mars."`
+- **Observe:** the later turn begins producing tokens sooner than the first, because the shared
+  prefix is served from the KV cache rather than recomputed. If your `llama-server` is old and fails
+  to start, set `llama.cache-reuse=0` (the request-level `cache_prompt` is still honored).
+
+## 31. Speculative decoding (latency)
+
+- **Setup:** set a draft model from the same family, e.g.
+  `llama.draft-hf-model=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M`, and restart (first run downloads it).
+  The startup log will show `-hfd ... --draft-max 16` in the launch line.
+- **Run:** `ask.bat "Explain how TCP works in two sentences."`
+- **Observe:** output is identical in quality but typically faster, because the tiny draft model
+  proposes tokens the main model verifies in batches. If the console shows llama-server failing on
+  the draft flags, your build uses different names -- clear `llama.draft-hf-model` and put the
+  correct flags in `llama.extra-args` instead.
+
+## 32. 8B (non-Qwen) profile
+
+- **Setup:** `llama.profile=large`, restart (downloads Llama-3.1-8B GGUF, a few GB).
+- **Run:** `ask.bat "Use todo_write to plan 3 steps, then view pom.xml and report the jsoup version."`
+- **Observe:** the launch line shows the Llama-3.1-8B model; multi-step tool use is more reliable than
+  3B/7B. The 8B profile uses a community GGUF repo -- override `llama.hf-model` if you prefer another.

@@ -15,6 +15,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | Tier | Feature | What it adds |
 |------|---------|--------------|
 | core | Agent loop + tools + streaming | think -> act -> observe; watch tokens live |
+| serving | Model profiles + GPU/threads/parallel + watchdog | config-driven llama-server: pick model/quant, offload, batch, auto-restart |
 | 1 | Precise editing + checkpoint/rewind | `view` / `edit_file`; undo any edit |
 | 1 | Sessions | multi-turn memory, persisted and resumable |
 | 1 | MCP client | load tools from external MCP servers (optional) |
@@ -126,6 +127,67 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 
 ---
 
+## Model serving & performance
+
+`LlamaServerManager` is fully config-driven (see the `llama.*` keys above), so you tune the
+performance/quality tradeoff without touching code:
+
+- **Profiles** -- `llama.profile=small|medium|large` selects model + context: small = 3B Qwen,
+  medium = 7B Qwen, large = 8B Llama-3.1 (a non-Qwen family, where tool-calling reliability climbs).
+  Override any single piece with `llama.hf-model`, `llama.ctx-size`, etc.
+- **GPU offload** -- `llama.gpu-layers` maps to `-ngl` (0 = CPU; raise it on a CUDA/Metal/Vulkan build).
+- **Threads** -- `llama.threads` (0 = all cores).
+- **Continuous batching** -- `llama.parallel` sets the number of request slots, so one server can serve
+  several requests at once instead of queueing them.
+- **Speculative decoding** -- first-class: set `llama.draft-hf-model` (or `llama.draft-model-path`)
+  plus `llama.draft-tokens`/`llama.draft-gpu-layers`, and the launcher emits `-md`/`-hfd`,
+  `--draft-max`, `-ngld`. Off unless a draft model is set. (Flag spelling varies by build; if yours
+  rejects them, fall back to `llama.extra-args`.)
+- **Prefix / KV-cache reuse** -- `cache_prompt` is sent on every request and `--cache-reuse`
+  (`llama.cache-reuse`) is passed to the server, so repeated/multi-turn prompts reuse the KV cache
+  instead of recomputing the prefix. Set `llama.cache-reuse=0` if an older server won't start.
+- **Local models / version pinning** -- `llama.model-path` runs a local `.gguf` (offline);
+  `llama.binary` can point at a specific llama-server build.
+- **Health watchdog** -- a background thread re-checks `/health` and auto-restarts a dead server
+  (`llama.auto-restart`, `llama.health-interval-seconds`).
+
+### Trying the new features
+
+These are config + scenario rather than a single prompt; restart the app after changing
+`application.properties`.
+
+1. **Stronger model (profile).** Set `llama.profile=medium` (7B), restart, then:
+   `ask.bat "Use todo_write to plan 3 steps, then view pom.xml and tell me the jsoup version."`
+   The 7B model emits valid tool calls far more reliably than the 3B, so you'll see fewer
+   `<tool_call>`-fallback hiccups and cleaner multi-step behavior -- the prompt is exercising the
+   model-serving profile, not new tools.
+
+2. **Concurrency (parallel slots).** Set `llama.parallel=2`, restart. In two terminals at once:
+   `chat.bat a "Count slowly from 1 to 20 with a sentence about each number."` and
+   `chat.bat b "Write a short paragraph about rivers."` Both make progress together instead of one
+   waiting for the other -- that's continuous batching across two slots.
+
+3. **Auto-restart (watchdog).** While the app runs, kill the `llama-server` process (Task Manager).
+   Within ~15s the console prints `[llama] watchdog: server unhealthy; restarting...` and reloads it;
+   your next `ask.bat` works without restarting imini.
+
+4. **Ask-to-continue deadline.** With `agent.deadline-action=ask` (default) and a long task:
+   `ask.bat "Use delegate_research to write a thorough, multi-source report on the Apollo program."`
+   When the run passes `agent.deadline-seconds` (120s), the app console asks
+   `[deadline] Continue for another 120s? (y = yes, N = stop):`. Type `y` to grant more time or `N`
+   to stop with a partial result. Set `agent.deadline-action=stop` to restore the old hard-stop.
+
+5. **Speculative decoding (latency).** Run a small draft model alongside the main one by setting
+   `llama.draft-hf-model=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M` (same family as the small/medium
+   Qwen profiles) and restart. The launcher adds `-hfd ... --draft-max 16`; the main model verifies
+   the draft's guesses in batches, so a normal prompt like `ask.bat "Explain TCP in two sentences."`
+   returns faster at identical output quality. If your build rejects the flags, the console shows
+   llama-server failing to start -- move the flags into `llama.extra-args` with your build's spelling.
+
+6. **KV-cache reuse (latency).** Nothing to do -- `cache_prompt` + `--cache-reuse` are on by default.
+   In a multi-turn `chat.bat` session, later turns reuse the cached prefix, so they start responding
+   sooner than the first. Set `llama.cache-reuse=0` if an older llama-server refuses the flag.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -143,7 +205,29 @@ agent.workspace-root=               # blank = current working dir
 agent.parallel-tools=true
 agent.max-tool-result-chars=4000
 agent.summary-model=                # blank = main model; set for cheap-model routing
-agent.summary-base-url=http://localhost:8081
+agent.summary-base-url=             # blank = same as main; set host for cheap-model routing
+agent.deadline-action=ask           # ask = prompt to continue at the budget; stop = hard stop
+# Model serving (llama-server):
+llama.manage-server=true            # false = use an external llama-server
+llama.binary=llama-server.exe       # full path pins a specific version
+llama.profile=small                 # small=3B Qwen | medium=7B Qwen | large=8B Llama-3.1
+llama.hf-model=                     # override the profile's model:quant
+llama.model-path=                   # use a local .gguf (-m) instead of -hf
+llama.alias=qwen2.5-3b-instruct
+llama.port=8081
+llama.ctx-size=0                    # 0 = profile default
+llama.gpu-layers=-1                 # -1 = CPU (0); raise on a GPU build
+llama.threads=0                     # 0 = all cores
+llama.parallel=1                    # concurrent request slots (continuous batching)
+llama.extra-args=                   # passthrough, e.g. speculative-decoding flags
+llama.auto-restart=true             # watchdog restarts a dead server
+llama.health-interval-seconds=15
+llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
+llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)
+llama.draft-hf-model=               # speculative decoding: HF draft model (off if blank)
+llama.draft-model-path=             # or a local draft .gguf
+llama.draft-tokens=16               # draft tokens per step
+llama.draft-gpu-layers=-1           # -ngld for the draft model (-1 = omit)
 ```
 
 Optional files in the working dir: `permissions.json` (allow/deny rules), `mcp.json` (MCP servers),

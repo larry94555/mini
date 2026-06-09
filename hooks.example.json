@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy to hooks.json to run shell commands around tool use. 'match' is a tool name or '*'. A preToolUse hook that exits non-zero BLOCKS the tool (its output becomes the result). postToolUse stdout is appended to the tool result. Env: IMINI_TOOL, IMINI_ARGS (JSON), IMINI_RESULT (post only).",
+  "preToolUse": [
+    { "match": "run_command", "command": "echo [hook] about to run a shell command: %IMINI_ARGS%" }
+  ],
+  "postToolUse": [
+    { "match": "edit_file", "command": "echo [hook] a file was edited; a real hook could run a formatter or linter here" }
+  ]
+}
