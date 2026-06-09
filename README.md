@@ -34,6 +34,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | correctness | Constrained decoding (opt-in) | GBNF grammar forces valid tool calls for weak models |
 | correctness | Retries + per-call timeouts | backoff on transient model errors; shell/MCP calls can't hang the run |
 | correctness | Eval suite | deterministic JUnit checks + behavioral smoke evals |
+| safety | Command sandbox | deny-only/allowlist screening of run_command (+ optional container exec) |
+| safety | Read confinement | read_file/view/list_dir restricted to the workspace |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -65,6 +67,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `SchemaValidator.java` | validates tool-call args against the tool's JSON schema |
 | `Retry.java` | exponential-backoff retry for transient model/network errors |
 | `GrammarBuilder.java` | builds a GBNF grammar to constrain tool calls (opt-in) |
+| `Sandbox.java` | run_command screening, read confinement, optional container exec |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -292,6 +295,49 @@ hang a run:
 4. **Run the evals.** `mvn test` for the deterministic suite; with the server up, `eval.bat` for the
    behavioral smoke checks.
 
+## Sandboxing
+
+The dangerous tools are now contained, so the agent can't trivially wreck the host or read arbitrary
+files. Three layers, all in `Sandbox`:
+
+- **Command screening for `run_command`.** `sandbox.command-mode`:
+  - `deny-only` (default) blocks a built-in denylist of destructive patterns (`rm -rf /`, fork bombs,
+    `mkfs`, `dd if=`, `shutdown`, piping a download straight to a shell, ...) plus anything you add in
+    `sandbox.deny`. Everyday commands still run.
+  - `allowlist` runs *only* commands whose first word or prefix is in `sandbox.allow` (e.g.
+    `git status,ls,cat`) -- the locked-down setting for shared/production use.
+  - `off` restores the old unscreened behavior.
+  A `sandbox.max-command-length` cap also applies. A blocked command returns `DENIED: ...` to the
+  model (which then adapts) instead of executing.
+- **Read confinement.** `read_file`, `view`, and `list_dir` are now restricted to the workspace root
+  (`sandbox.confine-reads`, default true), closing the hole where reads could wander to `/etc/passwd`
+  or above the project. Writes were already confined via permissions; the file tools double-check too.
+- **Optional container exec.** Set `sandbox.container-command` to a prefix that ends in an in-container
+  shell taking the command as its next argument; `{workdir}` is replaced with the workspace root, and
+  the command is appended as a single argument. Example (no network, read-only host except the
+  workspace):
+  `docker run --rm --network none -v {workdir}:/work -w /work alpine sh -c`
+  Blank = run on the host (default). This is the strongest containment but needs a container runtime.
+
+> Honest scope: screening is pattern-based, not a true syscall sandbox -- a determined command can
+> still evade a substring denylist. For real isolation use `allowlist` mode or, better,
+> `sandbox.container-command`. This step closes the easy footguns and gives you the knobs; it is not a
+> security boundary on its own without the container option.
+
+### Trying it out
+
+1. **Dangerous command blocked.** `ask.bat "Run the command: rm -rf / --no-preserve-root" --mode auto`
+   -> returns `DENIED: matches a denied pattern ('rm -rf /')`; nothing executes.
+2. **Allowlist mode.** Set `sandbox.command-mode=allowlist` and `sandbox.allow=git status,ls`, restart,
+   then `ask.bat "Run the command: curl http://example.com" --mode auto` is denied, while
+   `ask.bat "Run the command: ls" --mode auto` runs.
+3. **Read confinement.** `ask.bat "Use read_file to read ../../../etc/passwd"` ->
+   `DENIED: '...' is outside the workspace (...)`.
+4. **Container exec (optional).** With Docker installed, set
+   `sandbox.container-command=docker run --rm --network none -v {workdir}:/work -w /work alpine sh -c`,
+   restart, and run a command -- it executes inside a throwaway, network-less container scoped to the
+   workspace.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -331,6 +377,12 @@ llama.constrain-tools=false         # opt-in GBNF grammar to force valid tool ca
 llama.max-retries=2                 # retry transient model/network errors (5xx / IOException)
 llama.retry-backoff-ms=400          # base backoff; doubles each attempt
 agent.tool-timeout-seconds=60       # hard timeout for a single run_command / MCP call
+sandbox.command-mode=deny-only      # off | deny-only (block dangerous) | allowlist (only listed)
+sandbox.allow=                      # allowlist mode: allowed first-words/prefixes (csv)
+sandbox.deny=                       # extra denied substrings, merged with built-in defaults (csv)
+sandbox.max-command-length=2000
+sandbox.confine-reads=true          # restrict read_file/view/list_dir to the workspace
+sandbox.container-command=          # optional: run commands inside a container (see below)
 llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
 llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)
 llama.draft-hf-model=               # speculative decoding: HF draft model (off if blank)
