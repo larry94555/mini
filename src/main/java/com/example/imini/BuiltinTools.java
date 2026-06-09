@@ -207,8 +207,9 @@ public class BuiltinTools {
                         }
                     }
                 }
-                todos.set(items);
-                String rendered = todos.render();
+                String sid = SessionContext.sessionId();
+                todos.set(sid, items);
+                String rendered = todos.render(sid);
                 System.out.println("[todo] updated:\n" + rendered);
                 return "Updated todo list:\n" + rendered;
             } catch (Exception e) {

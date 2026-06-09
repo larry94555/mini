@@ -54,7 +54,8 @@ public class ToolRegistry {
                 schema, false, args -> {
             try {
                 Object t = args.get("task");
-                return subAgent.run(t == null ? "" : String.valueOf(t));
+                return subAgent.run(SessionContext.sessionId(),
+                        t == null ? "" : String.valueOf(t), SessionContext.sink());
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }

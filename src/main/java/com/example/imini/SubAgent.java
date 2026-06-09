@@ -31,13 +31,13 @@ public class SubAgent {
         this.builtins = builtins;
     }
 
-    public String run(String task) throws Exception {
+    public String run(String sessionId, String task, RunSink sink) throws Exception {
         Map<String, Tool> webTools = new LinkedHashMap<>();
         Tool search = builtins.webSearch();
         Tool fetch = builtins.webFetch();
         webTools.put(search.name, search);
         webTools.put(fetch.name, fetch);
         // AUTO mode: the sub-agent has only read-only tools, so nothing needs approval anyway.
-        return engine.run(SYSTEM_PROMPT, task, webTools, PermissionService.Mode.AUTO, "sub");
+        return engine.run(SYSTEM_PROMPT, task, webTools, PermissionService.Mode.AUTO, "sub", sessionId, sink);
     }
 }

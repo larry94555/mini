@@ -3,28 +3,31 @@ package com.example.imini;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Holds the agent's current task checklist. The model overwrites it via the todo_write tool to plan
- * and track multi-step work; you can read it at GET /todos. Last-write-wins, single list (a learning
- * simplification -- a real system would key it per session).
+ * Per-session task checklist. The model overwrites its own session's list via the todo_write tool;
+ * read it at GET /todos?sessionId=. Keyed by sessionId so concurrent users keep separate lists
+ * (last-write-wins within a session).
  */
 @Component
 public class TodoStore {
 
     public record Item(String content, String status) {}
 
-    private List<Item> items = List.of();
+    private final Map<String, List<Item>> bySession = new ConcurrentHashMap<>();
 
-    public synchronized void set(List<Item> newItems) {
-        items = List.copyOf(newItems);
+    public void set(String sessionId, List<Item> newItems) {
+        bySession.put(sessionId, List.copyOf(newItems));
     }
 
-    public synchronized List<Item> get() {
-        return items;
+    public List<Item> get(String sessionId) {
+        return bySession.getOrDefault(sessionId, List.of());
     }
 
-    public synchronized String render() {
+    public String render(String sessionId) {
+        List<Item> items = get(sessionId);
         if (items.isEmpty()) return "(no todos)";
         StringBuilder sb = new StringBuilder();
         for (Item it : items) {

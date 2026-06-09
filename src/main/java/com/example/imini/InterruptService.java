@@ -4,49 +4,58 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Interruptibility and steering. A run is normally driven by one HTTP request thread; this service
- * lets a SECOND request (POST /interrupt or /steer) reach into the running loop:
+ * Per-session interruptibility and steering. Keyed by sessionId so concurrent runs don't affect each
+ * other:
  *
- *   - interrupt() sets a stop flag the engine checks between turns and mid-stream, so a runaway or
- *     wrong-headed run can be halted gracefully (partial result returned).
- *   - steer(msg) queues guidance that the engine injects as a user message at the next turn, so you
- *     can correct the agent without restarting.
+ *   - interrupt(sessionId) sets a stop flag the engine checks between turns and mid-stream, so one
+ *     run can be halted gracefully (partial result returned) without touching the others.
+ *   - steer(sessionId, msg) queues guidance the engine injects as a user message at that session's
+ *     next turn.
  *
- * It's a single global flag/queue -- fine for this single-user learning kit; a real system would key
- * it per session.
+ * A SECOND request (POST /interrupt or /steer, carrying the sessionId) reaches the running loop.
  */
 @Component
 public class InterruptService {
 
-    private final AtomicBoolean stop = new AtomicBoolean(false);
-    private final ConcurrentLinkedQueue<String> steerQueue = new ConcurrentLinkedQueue<>();
+    private final Map<String, AtomicBoolean> stops = new ConcurrentHashMap<>();
+    private final Map<String, Queue<String>> steers = new ConcurrentHashMap<>();
 
-    public void interrupt() {
-        stop.set(true);
+    public void interrupt(String sessionId) {
+        stops.computeIfAbsent(sessionId, k -> new AtomicBoolean()).set(true);
     }
 
-    /** True if a stop is pending; also clears it. */
-    public boolean consumeStop() {
-        return stop.getAndSet(false);
+    /** True if a stop is pending for this session; also clears it. */
+    public boolean consumeStop(String sessionId) {
+        AtomicBoolean b = stops.get(sessionId);
+        return b != null && b.getAndSet(false);
     }
 
     /** Non-clearing check, used to abort an in-progress stream. */
-    public boolean isStopRequested() {
-        return stop.get();
+    public boolean isStopRequested(String sessionId) {
+        AtomicBoolean b = stops.get(sessionId);
+        return b != null && b.get();
     }
 
-    public void steer(String message) {
-        if (message != null && !message.isBlank()) steerQueue.add(message);
+    public void steer(String sessionId, String message) {
+        if (message != null && !message.isBlank()) {
+            steers.computeIfAbsent(sessionId, k -> new ConcurrentLinkedQueue<>()).add(message);
+        }
     }
 
-    public List<String> drainSteer() {
+    public List<String> drainSteer(String sessionId) {
+        Queue<String> q = steers.get(sessionId);
         List<String> out = new ArrayList<>();
-        String s;
-        while ((s = steerQueue.poll()) != null) out.add(s);
+        if (q != null) {
+            String s;
+            while ((s = q.poll()) != null) out.add(s);
+        }
         return out;
     }
 }

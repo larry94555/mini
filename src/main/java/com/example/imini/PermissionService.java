@@ -49,7 +49,7 @@ public class PermissionService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Set<String> allow = new LinkedHashSet<>();
     private final Set<String> deny = new LinkedHashSet<>();
-    private final Set<String> remembered = ConcurrentHashMap.newKeySet();
+    private final Map<String, Set<String>> remembered = new ConcurrentHashMap<>();
     private final BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
     private Path root;
 
@@ -78,7 +78,7 @@ public class PermissionService {
     }
 
     /** Decide whether a (mutating) tool call may proceed. */
-    public Decision decide(String tool, boolean mutating, Map<String, Object> args, Mode mode) {
+    public Decision decide(String sessionId, String tool, boolean mutating, Map<String, Object> args, Mode mode) {
         if (!mutating) return new Decision(Kind.ALLOW, null);
 
         if (matches(deny, tool, args)) {
@@ -87,7 +87,7 @@ public class PermissionService {
         if (confine && writesOutsideRoot(tool, args)) {
             return new Decision(Kind.DENY, "target path is outside the workspace (" + root + ")");
         }
-        if (matches(allow, tool, args) || matches(remembered, tool, args)) {
+        if (matches(allow, tool, args) || matches(rememberedFor(sessionId), tool, args)) {
             return new Decision(Kind.ALLOW, "allowed by rule");
         }
         if (mode == Mode.PLAN) {
@@ -96,10 +96,10 @@ public class PermissionService {
         if (mode == Mode.AUTO || autoApprove) {
             return new Decision(Kind.ALLOW, "auto-approved");
         }
-        return promptConsole(tool, args);
+        return promptConsole(sessionId, tool, args);
     }
 
-    private Decision promptConsole(String tool, Map<String, Object> args) {
+    private Decision promptConsole(String sessionId, String tool, Map<String, Object> args) {
         System.out.println("\n[permission] Tool '" + tool + "' wants to run with:");
         System.out.println("            " + args);
         System.out.print("[permission] Allow? (y = once, a = always, N = no): ");
@@ -107,7 +107,7 @@ public class PermissionService {
             String line = in.readLine();
             String ans = line == null ? "" : line.trim().toLowerCase();
             if (ans.equals("a")) {
-                remembered.add(ruleKey(tool, args));
+                rememberedFor(sessionId).add(ruleKey(tool, args));
                 System.out.println("[permission] will always allow this from now on.");
                 return new Decision(Kind.ALLOW, "remembered");
             }
@@ -146,6 +146,10 @@ public class PermissionService {
             }
         }
         return false;
+    }
+
+    private Set<String> rememberedFor(String sessionId) {
+        return remembered.computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet());
     }
 
     private String ruleKey(String tool, Map<String, Object> args) {
