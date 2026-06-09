@@ -30,7 +30,8 @@ import java.util.UUID;
  *     POST /steer        {"sessionId":"...","message":"..."}             inject guidance into that run
  *     GET  /todos?sessionId=...                                         that session's checklist
  *
- *   GET /sessions, POST /rewind, GET /checkpoints, GET /runs (concurrency status).
+ *   GET /sessions, POST /rewind {sessionId}, GET /checkpoints?sessionId=, GET /runs.
+ *   POST /index (build retrieval index), GET /memory?q=&k= (search the index).
  *
  * Concurrency is bounded to the model's slot count by RunService (see GET /runs). mode = ask
  * (default) | auto | plan. NOTE: ASK-mode permission/deadline prompts are answered on the SERVER
@@ -45,15 +46,18 @@ public class AgentController {
     private final TodoStore todos;
     private final InterruptService interrupt;
     private final RunService runService;
+    private final RetrievalService retrieval;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
-                           TodoStore todos, InterruptService interrupt, RunService runService) {
+                           TodoStore todos, InterruptService interrupt, RunService runService,
+                           RetrievalService retrieval) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
         this.todos = todos;
         this.interrupt = interrupt;
         this.runService = runService;
+        this.retrieval = retrieval;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -160,13 +164,28 @@ public class AgentController {
     }
 
     @PostMapping("/rewind")
-    public Map<String, String> rewind() {
-        return Map.of("result", checkpoints.rewindLast());
+    public Map<String, String> rewind(@RequestBody Map<String, String> body) {
+        String sessionId = body.getOrDefault("sessionId", "");
+        if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to rewind.");
+        return Map.of("result", checkpoints.rewindLast(sessionId));
     }
 
     @GetMapping("/checkpoints")
-    public List<String> checkpoints() {
-        return checkpoints.list();
+    public List<String> checkpoints(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        return checkpoints.list(sessionId);
+    }
+
+    // ---- retrieval / memory ------------------------------------------------
+
+    @PostMapping("/index")
+    public Map<String, String> index() {
+        return Map.of("result", retrieval.index());
+    }
+
+    @GetMapping("/memory")
+    public Map<String, String> memory(@RequestParam(name = "q") String q,
+                                      @RequestParam(name = "k", defaultValue = "5") int k) {
+        return Map.of("result", retrieval.search(q, k));
     }
 
     // ---- helpers -----------------------------------------------------------
