@@ -36,6 +36,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | correctness | Eval suite | deterministic JUnit checks + behavioral smoke evals |
 | safety | Command sandbox | deny-only/allowlist screening of run_command (+ optional container exec) |
 | safety | Read confinement | read_file/view/list_dir restricted to the workspace |
+| memory | Persistence (SQLite) | sessions + per-session checkpoints survive restarts (migrations) |
+| memory | Retrieval / RAG | index workspace files; search_memory finds relevant snippets |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -68,6 +70,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `Retry.java` | exponential-backoff retry for transient model/network errors |
 | `GrammarBuilder.java` | builds a GBNF grammar to constrain tool calls (opt-in) |
 | `Sandbox.java` | run_command screening, read confinement, optional container exec |
+| `Database.java` | SQLite connection + migration runner (sessions/checkpoints/index) |
+| `RetrievalService.java` | workspace indexing + search_memory/index_workspace tools |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -79,7 +83,8 @@ Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager, PermissionS
 BuiltinTools -> CheckpointStore, TodoStore; SubAgent -> AgentEngine, BuiltinTools;
 ToolRegistry -> BuiltinTools, SubAgent, McpManager;
 AgentLoop -> AgentEngine, ToolRegistry, SessionStore, ProjectContext, SlashCommands;
-AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService, RunService.
+AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService, RunService, RetrievalService.
+Persistence: SessionStore + CheckpointStore -> Database (SQLite); ToolRegistry -> RetrievalService.
 
 ---
 
@@ -110,8 +115,10 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 | `GET /sessions` | - | list sessions |
 | `GET /todos?sessionId=` | - | that session's checklist |
 | `GET /runs` | - | concurrency status: limit / active / queued |
-| `POST /rewind` | - | undo most recent file edit (global) |
-| `GET /checkpoints` | - | list rewind points |
+| `POST /rewind` | `{"sessionId":"..."}` | undo that session's most recent file change |
+| `GET /checkpoints?sessionId=` | - | list that session's rewind points |
+| `POST /index` | - | (re)build the retrieval index over the workspace |
+| `GET /memory?q=&k=` | - | search the index for relevant snippets |
 | `POST /interrupt` | `{"sessionId":"..."}` | stop that session's run |
 | `POST /steer` | `{"sessionId":"...","message":"..."}` | inject guidance into that session's run |
 
@@ -230,8 +237,8 @@ line -- that waiting set is the job queue. `GET /runs` shows `limit / active / q
 
 > Honest limitation: ASK-mode permission and deadline prompts are answered on the **server console**
 > (one operator). For genuinely concurrent remote users, run in `auto` mode with `permissions.json`
-> rules; per-session *remembered* decisions still apply. Checkpoints/rewind remain global (out of
-> scope for this step).
+> rules; per-session *remembered* decisions still apply. (Checkpoints/rewind are now per-session too,
+> persisted in SQLite.)
 
 ### Trying it out
 
@@ -338,6 +345,44 @@ files. Three layers, all in `Sandbox`:
    restart, and run a command -- it executes inside a throwaway, network-less container scoped to the
    workspace.
 
+## Persistence & retrieval
+
+**Persistence (SQLite).** Sessions and checkpoints now live in a SQLite database (`Database`, default
+`.imini/imini.db`) instead of loose JSON files, applied through a tiny forward-only migration runner
+(a `schema_version` table tracks which migrations have run). Conversations resume after a restart, and
+**checkpoints are now per-session** (finishing the Step 3 per-session work): each session has its own
+rewind history, and rewinding a file that was *created* during the session deletes it. If the SQLite
+driver/file can't be opened, the stores fall back to in-memory behaviour so the app still runs. One
+shared connection guarded by synchronized access -- fine for a low-end single node.
+
+**Retrieval / RAG (`RetrievalService`).** `index_workspace` walks the project's text files, chunks
+them, and stores the chunks (in SQLite, or in-memory as fallback); `search_memory` returns the top-k
+relevant snippets for a query, so the agent can find *where* something lives before reading whole
+files. Both are tools the model can call, plus `POST /index` and `GET /memory?q=` for direct use.
+Scoring is **lexical by default** (term overlap) -- zero setup, deterministic. Set
+`retrieval.embeddings=true` to score by cosine similarity using a llama-server embedding endpoint
+(start a model with `--embeddings`, ideally a *second* server; the main 3B is a generator, not an
+embedder).
+
+> Honest scope: lexical retrieval is keyword overlap, not semantic understanding -- it finds files
+> that share words with the query, which is great for code/identifier lookup and weak for paraphrase.
+> Turn on embeddings for semantic search. The index is a snapshot; re-run `index_workspace` after big
+> changes (search_memory auto-indexes once if the index is empty).
+
+### Trying it out
+
+1. **Sessions survive a restart.** `chat.bat work1 "Remember the project codename is Bluefin."` Stop
+   imini, start it again, then `chat.bat work1 "What's the codename?"` -- it answers Bluefin from the
+   SQLite-persisted history.
+2. **Per-session rewind.** In session `s1`, have it edit a file, then `POST /rewind {"sessionId":"s1"}`
+   (or wire a script) -- only s1's last change is undone; another session's history is untouched.
+   `GET /checkpoints?sessionId=s1` lists s1's points.
+3. **Find-then-read with retrieval.** `ask.bat "Use search_memory to find where the tool timeout is
+   configured, then read that file and report the value."` It searches the index (auto-built),
+   gets a snippet from `application.properties`, reads it, and reports `agent.tool-timeout-seconds`.
+4. **Direct memory search.** `POST /index` then open `http://localhost:8080/memory?q=command%20allowlist`
+   -- returns the matching snippets from `Sandbox.java` / `application.properties`.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -383,6 +428,14 @@ sandbox.deny=                       # extra denied substrings, merged with built
 sandbox.max-command-length=2000
 sandbox.confine-reads=true          # restrict read_file/view/list_dir to the workspace
 sandbox.container-command=          # optional: run commands inside a container (see below)
+persistence.enabled=true            # SQLite-backed sessions + checkpoints (false = in-memory)
+persistence.db-path=.imini/imini.db
+retrieval.chunk-size=1000
+retrieval.max-file-kb=200
+retrieval.top-k=5
+retrieval.embeddings=false          # true = semantic search via a llama embedding endpoint
+retrieval.embed-base-url=           # blank = main server; better: a 2nd server with --embeddings
+retrieval.embed-model=nomic-embed-text
 llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
 llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)
 llama.draft-hf-model=               # speculative decoding: HF draft model (off if blank)

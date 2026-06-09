@@ -504,3 +504,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `ask.bat "Run the command: pwd && ls" --mode auto`
 - **Observe:** the command runs inside a throwaway container (output shows `/work` and the workspace
   contents); network is disabled inside it. Clearing `sandbox.container-command` reverts to host exec.
+
+---
+
+# Persistence & retrieval
+
+## 49. Retrieval scoring (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RetrievalTest` passes -- lexical score favors matching chunks, is zero on no overlap,
+  tokenize lowercases/splits/drops short tokens, cosine is ~1 for identical and 0 for orthogonal.
+
+## 50. Sessions persist across restart
+
+- **Run:** `chat.bat work1 "Remember the project codename is Bluefin."`, stop imini, restart it, then
+  `chat.bat work1 "What is the codename?"`
+- **Observe:** it answers "Bluefin" from the SQLite-persisted history (`.imini/imini.db`). Set
+  `persistence.enabled=false` to confirm it then forgets across restarts (in-memory fallback).
+
+## 51. Per-session checkpoints / rewind
+
+- **Run:** in session `s1` (auto mode) `chat.bat s1 "Append a line to notes.txt"`, then
+  `curl -X POST http://localhost:8080/rewind -H "Content-Type: application/json" -d "{\"sessionId\":\"s1\"}"`
+- **Observe:** s1's last file change is undone (or the file removed if it was newly created);
+  `GET /checkpoints?sessionId=s1` lists s1's points, and another session's history is unaffected.
+
+## 52. Retrieval find-then-read (with model)
+
+- **Run:** `ask.bat "Use search_memory to find where the tool timeout is configured, then read that file and report the value."`
+- **Observe:** search_memory auto-indexes, returns a snippet from `application.properties`, and the
+  model reports `agent.tool-timeout-seconds=60`.
+
+## 53. Direct index + memory search
+
+- **Run:** `curl -X POST http://localhost:8080/index` then
+  `curl "http://localhost:8080/memory?q=command%20allowlist"`
+- **Observe:** snippets from `Sandbox.java` / `application.properties` mentioning the allowlist.
