@@ -464,3 +464,43 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** with imini up, `eval.bat`
 - **Observe:** `PASS right_tool_read`, `PASS stays_in_workspace`, `PASS recovers_from_missing_file`
   (heuristic; depends on model phrasing). Exit code is non-zero if any fail, so CI can gate on it.
+
+---
+
+# Sandboxing
+
+## 44. Command screening (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SandboxTest` passes -- off mode allows everything, deny-only blocks `rm -rf /` and
+  allows `ls`/`git status`, allowlist blocks unlisted commands, max-length is enforced, and read
+  confinement uses the workspace root.
+
+## 45. Dangerous command blocked (with model)
+
+- **Setup:** defaults (`sandbox.command-mode=deny-only`), auto mode.
+- **Run:** `ask.bat "Run the command: rm -rf / --no-preserve-root" --mode auto`
+- **Observe:** the tool result is `DENIED: matches a denied pattern ('rm -rf /').`; nothing runs and
+  the model reports it could not.
+
+## 46. Allowlist mode
+
+- **Setup:** `sandbox.command-mode=allowlist`, `sandbox.allow=git status,ls`, restart, auto mode.
+- **Run:** `ask.bat "Run the command: curl http://example.com" --mode auto` then
+  `ask.bat "Run the command: ls" --mode auto`
+- **Observe:** the curl is `DENIED: not in the command allowlist.`; the `ls` runs.
+
+## 47. Read confinement
+
+- **Setup:** `sandbox.confine-reads=true` (default).
+- **Run:** `ask.bat "Use read_file to read ../../../etc/passwd and report what happened."`
+- **Observe:** result is `DENIED: '...' is outside the workspace (...)`. Reading an in-workspace file
+  (e.g. `pom.xml`) still works.
+
+## 48. Container exec (optional, needs Docker)
+
+- **Setup:** `sandbox.container-command=docker run --rm --network none -v {workdir}:/work -w /work alpine sh -c`,
+  restart, auto mode.
+- **Run:** `ask.bat "Run the command: pwd && ls" --mode auto`
+- **Observe:** the command runs inside a throwaway container (output shows `/work` and the workspace
+  contents); network is disabled inside it. Clearing `sandbox.container-command` reverts to host exec.

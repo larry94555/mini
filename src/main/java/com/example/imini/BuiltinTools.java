@@ -42,12 +42,14 @@ public class BuiltinTools {
 
     private final CheckpointStore checkpoints;
     private final TodoStore todos;
+    private final Sandbox sandbox;
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
 
-    public BuiltinTools(CheckpointStore checkpoints, TodoStore todos) {
+    public BuiltinTools(CheckpointStore checkpoints, TodoStore todos, Sandbox sandbox) {
         this.checkpoints = checkpoints;
         this.todos = todos;
+        this.sandbox = sandbox;
     }
 
     /** Tools available to the main agent. */
@@ -66,7 +68,10 @@ public class BuiltinTools {
         return new Tool("read_file", "Read a UTF-8 text file from disk.",
                 schema(props, "path"), false, args -> {
             try {
-                return truncate(Files.readString(Path.of(str(args, "path"))), 6000);
+                String path = str(args, "path");
+                String denied = sandbox.enforcePath("read_file", path, false);
+                if (denied != null) return denied;
+                return truncate(Files.readString(Path.of(path)), 6000);
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
@@ -83,7 +88,10 @@ public class BuiltinTools {
                         + "so you can copy an exact, unique snippet to replace.",
                 schema(props, "path"), false, args -> {
             try {
-                List<String> lines = Files.readAllLines(Path.of(str(args, "path")));
+                String path = str(args, "path");
+                String denied = sandbox.enforcePath("view", path, false);
+                if (denied != null) return denied;
+                List<String> lines = Files.readAllLines(Path.of(path));
                 int start = Math.max(1, intArg(args, "start_line", 1));
                 int end = Math.min(lines.size(), intArg(args, "end_line", lines.size()));
                 StringBuilder sb = new StringBuilder();
@@ -104,6 +112,8 @@ public class BuiltinTools {
                 schema(props), false, args -> {
             try {
                 String p = args.containsKey("path") ? str(args, "path") : ".";
+                String denied = sandbox.enforcePath("list_dir", p, false);
+                if (denied != null) return denied;
                 try (var stream = Files.list(Path.of(p))) {
                     String out = stream
                             .map(x -> (Files.isDirectory(x) ? "[dir]  " : "[file] ") + x.getFileName())
@@ -126,6 +136,8 @@ public class BuiltinTools {
                         + "Mutating: requires approval.",
                 schema(props, "path", "content"), true, args -> {
             try {
+                String denied = sandbox.enforcePath("write_file", str(args, "path"), true);
+                if (denied != null) return denied;
                 Path p = Path.of(str(args, "path"));
                 checkpoints.snapshot(p);                       // save before overwriting
                 if (p.getParent() != null) Files.createDirectories(p.getParent());
@@ -148,6 +160,8 @@ public class BuiltinTools {
                         + "Mutating: requires approval.",
                 schema(props, "path", "old_str", "new_str"), true, args -> {
             try {
+                String denied = sandbox.enforcePath("edit_file", str(args, "path"), true);
+                if (denied != null) return denied;
                 Path p = Path.of(str(args, "path"));
                 String content = Files.readString(p);
                 String oldStr = str(args, "old_str");
@@ -233,10 +247,10 @@ public class BuiltinTools {
                 schema(props, "command"), true, args -> {
             try {
                 String cmd = str(args, "command");
+                String denied = sandbox.screenCommand(cmd);
+                if (denied != null) return "DENIED: " + denied + ".";
                 boolean win = System.getProperty("os.name").toLowerCase().contains("win");
-                ProcessBuilder pb = win
-                        ? new ProcessBuilder("cmd.exe", "/c", cmd)
-                        : new ProcessBuilder("sh", "-c", cmd);
+                ProcessBuilder pb = new ProcessBuilder(sandbox.buildProcess(cmd, win));
                 pb.redirectErrorStream(true);
                 Process proc = pb.start();
                 // read on a separate thread so the timeout is real even if the process is chatty
