@@ -10,6 +10,14 @@ public interface RunSink {
     void token(String text);   // a streamed model token
     void log(String line);     // a structured run log line (tool call, guard, plan, steer, ...)
 
+    /**
+     * A named structured event (e.g. "approval"). SSE sinks emit it as a distinct event type;
+     * other sinks fall back to logging it.
+     */
+    default void event(String type, String data) {
+        log("[" + type + "] " + data);
+    }
+
     /** Discards everything; used when no output target is attached. */
     RunSink NOOP = new RunSink() {
         @Override public void token(String text) {}

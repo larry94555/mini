@@ -599,3 +599,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 > Note: ASK-mode approvals are answered on the SERVER CONSOLE, not in the browser. Use auto/plan mode
 > in the UI, or answer prompts where imini is running.
+
+---
+
+# Remote approvals
+
+## 60. Approval registry (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `ApprovalsTest` passes -- a parked approval is delivered to the waiting thread on
+  resolve, clears from the pending list, times out to the default action, and resolving an unknown id
+  returns false.
+
+## 61. Approve in the browser
+
+- **Setup:** `permissions.prompt-mode=remote`, restart. Open the UI, pick **ask** mode.
+- **Run:** "create a file notes.txt with the text hello".
+- **Observe:** an **Approval needed** banner shows `write_file {"path":"notes.txt",...}` with buttons.
+  **Allow once** -> the file is written and the run finishes. **Deny** -> the tool returns a
+  not-approved result and the model adapts. **Allow always** -> a second write this session doesn't
+  prompt.
+
+## 62. Approval timeout
+
+- **Setup:** `permissions.prompt-mode=remote`, `permissions.approval-timeout-seconds=10`, restart, ask mode.
+- **Run:** trigger a gated tool and ignore the banner for ~10s.
+- **Observe:** the run proceeds with the default action (`deny`) and reports it; no hang.
+
+## 63. Approvals over the API
+
+- **Run:** with a gated run in flight (remote+ask), `curl "http://localhost:8080/approvals?sessionId=<id>"`
+  then `curl -X POST http://localhost:8080/approve -H "Content-Type: application/json" -d "{\"id\":\"<id>\",\"decision\":\"allow\"}"`
+- **Observe:** the first lists the pending request; the second returns `{"resolved":true,...}` and the
+  run continues. (Use the streaming endpoint or the UI; a blocking POST /chat just waits.)

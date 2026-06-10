@@ -45,13 +45,24 @@ public class PermissionService {
     private boolean confine;
     @Value("${agent.workspace-root:}")
     private String workspaceRootCfg;
+    @Value("${permissions.prompt-mode:console}")
+    private String promptMode;                       // console | remote
+    @Value("${permissions.approval-timeout-seconds:120}")
+    private int approvalTimeoutSeconds;
+    @Value("${permissions.approval-timeout-action:deny}")
+    private String approvalTimeoutAction;
 
+    private final Approvals approvals;
     private final ObjectMapper mapper = new ObjectMapper();
     private final Set<String> allow = new LinkedHashSet<>();
     private final Set<String> deny = new LinkedHashSet<>();
     private final Map<String, Set<String>> remembered = new ConcurrentHashMap<>();
     private final BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
     private Path root;
+
+    public PermissionService(Approvals approvals) {
+        this.approvals = approvals;
+    }
 
     @PostConstruct
     @SuppressWarnings("unchecked")
@@ -96,7 +107,26 @@ public class PermissionService {
         if (mode == Mode.AUTO || autoApprove) {
             return new Decision(Kind.ALLOW, "auto-approved");
         }
+        if ("remote".equalsIgnoreCase(promptMode)) {
+            return decideRemote(sessionId, tool, args);
+        }
         return promptConsole(sessionId, tool, args);
+    }
+
+    private Decision decideRemote(String sessionId, String tool, Map<String, Object> args) {
+        String argsJson;
+        try { argsJson = mapper.writeValueAsString(args); } catch (Exception e) { argsJson = String.valueOf(args); }
+        String dec = approvals.await(sessionId, tool, argsJson,
+                approvalTimeoutSeconds * 1000L, approvalTimeoutAction);
+        switch (dec == null ? "deny" : dec) {
+            case "always":
+                rememberedFor(sessionId).add(ruleKey(tool, args));
+                return new Decision(Kind.ALLOW, "approved (remembered)");
+            case "allow":
+                return new Decision(Kind.ALLOW, "approved");
+            default:
+                return new Decision(Kind.DENY, "not approved");
+        }
     }
 
     private Decision promptConsole(String sessionId, String tool, Map<String, Object> args) {
@@ -122,7 +152,12 @@ public class PermissionService {
      * Asked when a run hits its time budget: lets the user grant another window or let it stop.
      * Returns false (stop) if no console is attached, so a detached run still terminates.
      */
-    public boolean confirmContinue(int seconds) {
+    public boolean confirmContinue(String sessionId, int seconds) {
+        if ("remote".equalsIgnoreCase(promptMode)) {
+            String dec = approvals.await(sessionId, "(continue run)", "used " + seconds + "s budget",
+                    approvalTimeoutSeconds * 1000L, approvalTimeoutAction);
+            return "allow".equals(dec) || "always".equals(dec);
+        }
         System.out.println("\n[deadline] This run has used its " + seconds + "s time budget.");
         System.out.print("[deadline] Continue for another " + seconds + "s? (y = yes, N = stop): ");
         try {

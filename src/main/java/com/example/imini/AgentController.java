@@ -34,6 +34,7 @@ import java.util.UUID;
  *   POST /index (build retrieval index), GET /memory?q=&k= (search the index).
  *   GET /health (open), GET /metrics (observability snapshot).
  *   GET /session?id= (one session's messages, for the web UI at / ).
+ *   GET /approvals?sessionId=, POST /approve {id,decision} (remote ASK-mode approvals).
  *
  * Concurrency is bounded to the model's slot count by RunService (see GET /runs). mode = ask
  * (default) | auto | plan. NOTE: ASK-mode permission/deadline prompts are answered on the SERVER
@@ -50,10 +51,11 @@ public class AgentController {
     private final RunService runService;
     private final RetrievalService retrieval;
     private final Metrics metrics;
+    private final Approvals approvals;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
-                           RetrievalService retrieval, Metrics metrics) {
+                           RetrievalService retrieval, Metrics metrics, Approvals approvals) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -62,6 +64,7 @@ public class AgentController {
         this.runService = runService;
         this.retrieval = retrieval;
         this.metrics = metrics;
+        this.approvals = approvals;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -216,6 +219,22 @@ public class AgentController {
         return metrics.snapshot();
     }
 
+    // ---- remote approvals --------------------------------------------------
+
+    @GetMapping("/approvals")
+    public List<Map<String, Object>> approvals(
+            @RequestParam(name = "sessionId", defaultValue = "") String sessionId) {
+        return approvals.list(sessionId.isBlank() ? null : sessionId);
+    }
+
+    @PostMapping("/approve")
+    public Map<String, Object> approve(@RequestBody Map<String, String> body) {
+        String id = body.getOrDefault("id", "");
+        String decision = body.getOrDefault("decision", "deny"); // allow | always | deny
+        boolean ok = approvals.resolve(id, decision);
+        return Map.of("resolved", ok, "id", id, "decision", decision);
+    }
+
     @PostMapping("/rewind")
     public Map<String, String> rewind(@RequestBody Map<String, String> body) {
         String sessionId = body.getOrDefault("sessionId", "");
@@ -251,6 +270,7 @@ public class AgentController {
         return new RunSink() {
             @Override public void token(String text) { send(emitter, "token", text); }
             @Override public void log(String line) { send(emitter, "log", line); }
+            @Override public void event(String type, String data) { send(emitter, type, data); }
         };
     }
 

@@ -72,6 +72,15 @@
 <div class="layout">
   <div class="chat card">
     <div id="messages"></div>
+    <div id="approval" class="card" style="display:none;border-color:var(--warn);margin-top:8px">
+      <h3 style="color:var(--warn)">Approval needed</h3>
+      <div id="approvalBody" class="mono"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" data-d="allow">Allow once</button>
+        <button data-d="always">Allow always</button>
+        <button class="danger" data-d="deny">Deny</button>
+      </div>
+    </div>
     <div class="composer">
       <textarea id="input" placeholder="Ask imini...  (Enter to send, Shift+Enter for newline)"></textarea>
       <div style="display:flex;flex-direction:column;gap:6px">
@@ -154,6 +163,7 @@ async function send(){
   addMsg("you", "user").textContent = text;
   const body = addMsg("imini");
   state.streaming = true; setStatus("running", "var(--warn)");
+  const apoll = setInterval(pollApprovals, 1500);
 
   try {
     const resp = await fetch("/chat/stream", {
@@ -176,6 +186,7 @@ async function send(){
     }
   } catch(e){ if (e) appendLog("[error] "+e); }
   finally {
+    clearInterval(apoll); hideApproval();
     state.streaming = false; setStatus("idle");
     refreshTodos(); refreshCheckpoints(); refreshSessions();
   }
@@ -193,10 +204,31 @@ function handleEvent(e, body){
     case "session": state.session = e.data; localStorage.setItem("imini.session", state.session); break;
     case "token": body.textContent += e.data; $("#messages").scrollTop = $("#messages").scrollHeight; break;
     case "log": appendLog(e.data); break;
+    case "approval": try { showApproval(JSON.parse(e.data)); } catch(_){} break;
     case "answer": if (!body.textContent.trim()) body.textContent = e.data; break;
     case "error": body.innerHTML += '<span class="err">'+e.data+'</span>'; break;
     case "done": break;
   }
+}
+
+// --- remote approvals ---
+function showApproval(a){
+  state.approvalId = a.id;
+  $("#approvalBody").textContent = a.tool + "  " + (a.args || "");
+  $("#approval").style.display = "";
+}
+function hideApproval(){ state.approvalId = null; $("#approval").style.display = "none"; }
+document.querySelectorAll("#approval button").forEach(b => b.onclick = () => {
+  const decision = b.getAttribute("data-d");
+  const id = state.approvalId;
+  if (!id) { hideApproval(); return; }
+  hideApproval();
+  post("/approve", {id, decision}).then(()=>appendLog("[approval] "+decision+" ("+id+")"));
+});
+async function pollApprovals(){
+  if (state.approvalId) return; // already showing one
+  const list = await getJson("/approvals?sessionId="+encodeURIComponent(state.session));
+  if (Array.isArray(list) && list.length) showApproval(list[0]);
 }
 
 // --- controls ---
