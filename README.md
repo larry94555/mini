@@ -1,21 +1,24 @@
 # imini — a low-end Claude Code learning harness
 
 `imini` is a deliberately small, local-first coding-agent harness built around `llama-server`.
-It is designed to make the boundary between:
 
-- **the model**: reasoning, choosing a tool, producing text, and
-- **the harness**: tools, permissions, persistence, compaction, retrieval, approvals, and UX
+Its purpose is to make the boundary between:
+
+- **the model** — reasoning, choosing a tool, producing text, and
+- **the harness** — tools, permissions, persistence, compaction, retrieval, approvals, and UX
 
 concrete and easy to study.
 
-It is intentionally **education-grade**, not a claim of production readiness.
+It is intentionally **education-grade**: readable enough to learn from, useful enough to experiment with, and honest about where production hardening would still be needed.
+
+---
 
 ## Start here
 
 - **INSTALL.md** — first-time setup
-- **TESTING.md** — feature-by-feature manual checks
+- **TESTING.md** — feature-by-feature checks and deterministic tests
 - **ARCHITECTURE.md** — one complete request trace through the harness
-- **ROADMAP.md** — what to harden next for production use
+- **ROADMAP.md** — the next steps toward a stronger local coding agent
 
 ---
 
@@ -27,9 +30,10 @@ Use this repo if you want to learn:
 2. how tool-calling loops work,
 3. how permissions and plan mode fit into the loop,
 4. why persistence, retrieval, and compaction belong outside the model,
-5. how to write deterministic tests for an agent harness.
+5. how MCP, hooks, project memory, and slash commands extend an agent,
+6. how to write deterministic tests for a coding-agent harness.
 
-Use a larger project such as Aider, OpenCode, or OpenHands if you want a deeper production reference.
+If you want a deeper production reference, study projects such as **Aider**, **OpenCode**, or **OpenHands** alongside this one.
 
 ---
 
@@ -41,15 +45,15 @@ Use a larger project such as Aider, OpenCode, or OpenHands if you want a deeper 
 | serving | Model profiles + llama-server supervision | local model serving is part of the harness |
 | editing | Precise editing + checkpoints + rewind | safe mutation needs reversibility |
 | memory | Sessions + SQLite persistence | chat memory should survive restarts |
-| memory | Retrieval / search_memory | context selection belongs in the harness |
+| memory | Retrieval / `search_memory` | context selection belongs in the harness |
 | permissions | Allow/deny rules + remembered decisions + plan mode | review and execution should be separable |
 | approvals | Console or remote approvals | mutating actions need a human gate |
 | context | Accurate token counting + compaction + project memory | context is engineered, not accidental |
 | orchestration | Todo tool + parallel read-only tools + interrupt/steer | long tasks need state and control |
 | extensibility | MCP + hooks + slash commands + sub-agent | agent systems are mostly extension surfaces |
-| reliability | schema validation + corrective retry + optional grammar | small models need harness assistance |
-| safety | workspace confinement + command screening | policy must live outside the prompt |
-| ops | auth + rate limiting + metrics + web UI | the product surface matters |
+| reliability | Schema validation + corrective retry + optional grammar | small models need harness assistance |
+| safety | Workspace confinement + command screening | policy must live outside the prompt |
+| ops | Auth + rate limiting + metrics + web UI | the product surface matters |
 
 ---
 
@@ -81,52 +85,27 @@ Use a larger project such as Aider, OpenCode, or OpenHands if you want a deeper 
 
 ---
 
-## Request modes
+## Execution modes
 
 `imini` currently exposes three main execution modes:
 
-- **ask** — default, mutating tools need approval.
+- **ask** — default; mutating tools need approval.
 - **auto** — mutating tools are auto-approved, but policy and confinement still apply.
 - **plan** — intended actions are recorded, not executed.
 
-That distinction is important for learning because it makes reviewable planning a first-class concept.
+That split matters because it makes reviewable planning a first-class concept rather than an afterthought.
 
 ---
 
-## Approvals, interrupts, and current behavior
+## Current behavior
 
-The newer harness behavior is:
+The intended current behavior is:
 
 - approvals can be handled either by the **console** or by the **remote approval flow**,
-- interrupt and steer are intended to be **per-session controls**,
+- interrupt and steer are treated as **session-oriented controls**,
 - sessions, checkpoints, and retrieval are persisted more durably than in the earlier JSON-only design.
 
-Older docs and caveats sometimes still describe an earlier single-user, console-only flow.
-This patch aligns the top-level docs around the current behavior and treats any remaining older wording as historical drift to remove.
-
----
-
-## Formatting and CI
-
-This patch adds:
-
-- `.editorconfig`,
-- Spotless formatting in Maven,
-- GitHub Actions CI that runs formatting checks and tests.
-
-The Spotless configuration uses `ratchetFrom origin/main`, which means formatting is enforced for **files changed in the branch** without forcing a giant repository-wide reformat in one PR.
-
-To format locally:
-
-```bat
-format.bat
-```
-
-or:
-
-```bash
-mvn spotless:apply
-```
+When these docs and the implementation disagree, treat the code and tests as the source of truth and update the docs quickly.
 
 ---
 
@@ -134,7 +113,7 @@ mvn spotless:apply
 
 The most valuable tests in this repo are the deterministic harness tests.
 
-Examples:
+Examples include:
 
 - schema validation of tool-call arguments,
 - workspace confinement,
@@ -155,7 +134,7 @@ This is intentional. The harness should be testable even when the model is not d
 - Small local models remain weaker at tool use than larger hosted models.
 - `web_search` remains a lightweight approach, not a production search stack.
 - Command screening is not the same thing as a hardened sandbox.
-- The web UI and remote-approval flows make the product more usable, but they do not by themselves make it production-safe.
-- The codebase is evolving quickly, so documentation drift is something to actively guard against.
+- The web UI and remote-approval flows improve usability, but they do not by themselves make the system production-safe.
+- The codebase is evolving quickly, so documentation drift needs active attention.
 
 If your next goal is production hardening rather than learning, start with `ROADMAP.md`.
