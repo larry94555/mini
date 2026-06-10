@@ -440,8 +440,9 @@ A single static page (`src/main/resources/static/index.html`) served by Spring B
 the endpoints you already have:
 
 - **Streaming chat** against `POST /chat/stream`, consumed with `fetch` + a stream reader (not
-  `EventSource`) so it can send a POST and attach the API key header. Tokens render live; tool/guard
-  lines go to a collapsible run log.
+  `EventSource`) so it can send a POST and attach the API key header. SSE payloads are JSON-encoded so
+  token spacing and newlines survive. Tokens render live; the model's **thinking and tool calls**
+  (the `log` events) show inline above each answer as muted activity lines (and in the run log).
 - **Sessions** -- a switcher (`GET /sessions`) with a "new" button; switching loads prior history via
   `GET /session?id=`.
 - **Mode** selector (ask / auto / plan).
