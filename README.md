@@ -38,6 +38,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | safety | Read confinement | read_file/view/list_dir restricted to the workspace |
 | memory | Persistence (SQLite) | sessions + per-session checkpoints survive restarts (migrations) |
 | memory | Retrieval / RAG | index workspace files; search_memory finds relevant snippets |
+| ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
+| ops | Observability | /metrics snapshot + structured run logs |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -72,6 +74,9 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `Sandbox.java` | run_command screening, read confinement, optional container exec |
 | `Database.java` | SQLite connection + migration runner (sessions/checkpoints/index) |
 | `RetrievalService.java` | workspace indexing + search_memory/index_workspace tools |
+| `AuthFilter.java` | API-key auth + per-key rate limiting (servlet filter) |
+| `RateLimiter.java` | fixed-window per-key limiter |
+| `Metrics.java` | counters/latency/gauges for GET /metrics |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -85,6 +90,7 @@ ToolRegistry -> BuiltinTools, SubAgent, McpManager;
 AgentLoop -> AgentEngine, ToolRegistry, SessionStore, ProjectContext, SlashCommands;
 AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService, RunService, RetrievalService.
 Persistence: SessionStore + CheckpointStore -> Database (SQLite); ToolRegistry -> RetrievalService.
+Ops: AuthFilter (servlet filter) + Metrics wrap every request; AgentEngine + AgentController feed Metrics.
 
 ---
 
@@ -119,6 +125,8 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 | `GET /checkpoints?sessionId=` | - | list that session's rewind points |
 | `POST /index` | - | (re)build the retrieval index over the workspace |
 | `GET /memory?q=&k=` | - | search the index for relevant snippets |
+| `GET /health` | - | liveness (always open, even with auth on) |
+| `GET /metrics` | - | observability snapshot (counters, latency, concurrency) |
 | `POST /interrupt` | `{"sessionId":"..."}` | stop that session's run |
 | `POST /steer` | `{"sessionId":"...","message":"..."}` | inject guidance into that session's run |
 
@@ -383,6 +391,39 @@ embedder).
 4. **Direct memory search.** `POST /index` then open `http://localhost:8080/memory?q=command%20allowlist`
    -- returns the matching snippets from `Sandbox.java` / `application.properties`.
 
+## Auth & observability
+
+Now that the API is multi-user and streaming, it can be locked down and watched.
+
+**API-key auth (`AuthFilter`).** A servlet filter (auto-registered for all paths) that is **off by
+default** (backward compatible). Turn it on with `auth.enabled=true` and list keys in `auth.keys` as
+`key` or `label:key`. Requests must then present the key in the `auth.header` (default `X-API-Key`) or
+as `Authorization: Bearer <key>`; an unknown key gets `401`, and exceeding
+`auth.rate-limit-per-minute` (per key, fixed window) gets `429`. `auth.open-paths` (default `/health`)
+are always allowed so health checks work. Keys are compared in constant time.
+
+**Observability (`Metrics`).** Every request is counted; runs are timed; tool calls (and tool errors),
+model calls, approximate output tokens, and per-key request counts are tallied; live concurrency
+(`limit/active/queued`) is read from `RunService`. `GET /metrics` returns the snapshot as JSON, and
+each run also prints a structured one-line log (`[metrics] run endpoint=... session=... ms=... ok=...`)
+for tailing/grep.
+
+> Honest scope: this is app-level API-key auth and in-process metrics -- right for a small shared
+> deployment behind your own network boundary. It is not OAuth/OIDC, per-user RBAC, or a real metrics
+> backend (Prometheus/OTel); those are the production follow-ons. Keys live in config, so manage that
+> file like a secret.
+
+### Trying it out
+
+1. **Locked down.** Set `auth.enabled=true`, `auth.keys=alice:s3cret`, restart. `ask.bat` (no key) now
+   fails; `curl -X POST localhost:8080/ask -H "X-API-Key: s3cret" -H "Content-Type: application/json"
+   -d "{\"question\":\"hi\"}"` works. `GET /health` works without a key; `GET /metrics` needs one.
+2. **Rate limiting.** Set `auth.rate-limit-per-minute=3`, restart, and fire four quick authed requests
+   -- the fourth returns `429 rate limit exceeded`.
+3. **Metrics.** After a few runs, `curl localhost:8080/metrics` shows run counts, average/max latency,
+   `tool_calls_by_name`, `requests_by_key`, and live `concurrency`. Watch the console for the
+   `[metrics] run ...` lines.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -436,6 +477,11 @@ retrieval.top-k=5
 retrieval.embeddings=false          # true = semantic search via a llama embedding endpoint
 retrieval.embed-base-url=           # blank = main server; better: a 2nd server with --embeddings
 retrieval.embed-model=nomic-embed-text
+auth.enabled=false                  # true = require an API key on every non-open request
+auth.header=X-API-Key               # also accepts "Authorization: Bearer <key>"
+auth.keys=                          # comma-separated "key" or "label:key"
+auth.open-paths=/health             # always allowed through
+auth.rate-limit-per-minute=0        # per-key fixed-window limit; 0 = unlimited
 llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
 llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)
 llama.draft-hf-model=               # speculative decoding: HF draft model (off if blank)

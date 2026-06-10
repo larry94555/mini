@@ -540,3 +540,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `curl -X POST http://localhost:8080/index` then
   `curl "http://localhost:8080/memory?q=command%20allowlist"`
 - **Observe:** snippets from `Sandbox.java` / `application.properties` mentioning the allowlist.
+
+---
+
+# Auth & observability
+
+## 54. Auth + rate-limit logic (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AuthTest` + `MetricsTest` pass -- key parsing (label/bare), header/Bearer extraction,
+  constant-time compare, fixed-window rate limiting (allow up to N, then 429, then reset), and metrics
+  counter/latency aggregation.
+
+## 55. API key required
+
+- **Setup:** `auth.enabled=true`, `auth.keys=alice:s3cret`, restart.
+- **Run:** `ask.bat "hi"` (no key) then
+  `curl -X POST http://localhost:8080/ask -H "X-API-Key: s3cret" -H "Content-Type: application/json" -d "{\"question\":\"hi\"}"`
+- **Observe:** the keyless call returns `401 {"error":"missing or invalid API key"}`; the keyed call
+  works. `curl http://localhost:8080/health` works without a key; `curl http://localhost:8080/metrics`
+  without a key returns 401.
+
+## 56. Rate limiting
+
+- **Setup:** `auth.enabled=true`, `auth.keys=alice:s3cret`, `auth.rate-limit-per-minute=3`, restart.
+- **Run:** fire 4 quick authed requests to `/ask`.
+- **Observe:** the 4th returns `429 {"error":"rate limit exceeded"}`; `/metrics` shows `rate_limited`.
+
+## 57. Metrics snapshot
+
+- **Run:** do a few `/ask` and `/chat` calls, then `curl http://localhost:8080/metrics`
+- **Observe:** JSON with `counters` (requests, runs_ok/failed, tool_calls, model_calls), `run_latency`
+  (count/avg_ms/max_ms), `tool_calls_by_name`, `requests_by_key`, `approx_output_tokens`, and live
+  `concurrency`. The console prints a `[metrics] run endpoint=... ms=... ok=...` line per run.

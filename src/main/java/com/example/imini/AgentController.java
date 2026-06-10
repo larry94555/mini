@@ -32,6 +32,7 @@ import java.util.UUID;
  *
  *   GET /sessions, POST /rewind {sessionId}, GET /checkpoints?sessionId=, GET /runs.
  *   POST /index (build retrieval index), GET /memory?q=&k= (search the index).
+ *   GET /health (open), GET /metrics (observability snapshot).
  *
  * Concurrency is bounded to the model's slot count by RunService (see GET /runs). mode = ask
  * (default) | auto | plan. NOTE: ASK-mode permission/deadline prompts are answered on the SERVER
@@ -47,10 +48,11 @@ public class AgentController {
     private final InterruptService interrupt;
     private final RunService runService;
     private final RetrievalService retrieval;
+    private final Metrics metrics;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
-                           RetrievalService retrieval) {
+                           RetrievalService retrieval, Metrics metrics) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -58,6 +60,7 @@ public class AgentController {
         this.interrupt = interrupt;
         this.runService = runService;
         this.retrieval = retrieval;
+        this.metrics = metrics;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -67,8 +70,18 @@ public class AgentController {
         final String sessionId = "oneshot-" + UUID.randomUUID().toString().substring(0, 8);
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
-        String answer = runService.runBounded(() -> loop.run(sessionId, q, mode, new ConsoleSink()));
-        return Map.of("answer", answer);
+        metrics.inc("runs_started");
+        long t0 = System.nanoTime();
+        try {
+            String answer = runService.runBounded(() -> loop.run(sessionId, q, mode, new ConsoleSink()));
+            long ms = (System.nanoTime() - t0) / 1_000_000L;
+            metrics.recordRun(ms, true);
+            metrics.logRun("/ask", sessionId, null, ms, true);
+            return Map.of("answer", answer);
+        } catch (Exception e) {
+            metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
+            throw e;
+        }
     }
 
     @PostMapping("/chat")
@@ -76,8 +89,18 @@ public class AgentController {
         final String sessionId = resolveSession(body.get("sessionId"));
         final Mode mode = parseMode(body.get("mode"));
         final String message = body.getOrDefault("message", "");
-        String answer = runService.runBounded(() -> loop.chat(sessionId, message, mode, new ConsoleSink()));
-        return Map.of("sessionId", sessionId, "answer", answer);
+        metrics.inc("runs_started");
+        long t0 = System.nanoTime();
+        try {
+            String answer = runService.runBounded(() -> loop.chat(sessionId, message, mode, new ConsoleSink()));
+            long ms = (System.nanoTime() - t0) / 1_000_000L;
+            metrics.recordRun(ms, true);
+            metrics.logRun("/chat", sessionId, null, ms, true);
+            return Map.of("sessionId", sessionId, "answer", answer);
+        } catch (Exception e) {
+            metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
+            throw e;
+        }
     }
 
     // ---- streaming (SSE) ---------------------------------------------------
@@ -88,15 +111,21 @@ public class AgentController {
         final Mode mode = parseMode(body.get("mode"));
         final String message = body.getOrDefault("message", "");
         SseEmitter emitter = new SseEmitter(0L); // no server-side timeout
+        metrics.inc("runs_started");
         runService.submitAsync(() -> {
             RunSink sink = sseSink(emitter);
+            long t0 = System.nanoTime();
             try {
                 send(emitter, "session", sessionId);
                 String answer = runService.runBounded(() -> loop.chat(sessionId, message, mode, sink));
+                long ms = (System.nanoTime() - t0) / 1_000_000L;
+                metrics.recordRun(ms, true);
+                metrics.logRun("/chat/stream", sessionId, null, ms, true);
                 send(emitter, "answer", answer);
                 send(emitter, "done", "");
                 emitter.complete();
             } catch (Exception e) {
+                metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
                 send(emitter, "error", String.valueOf(e.getMessage()));
                 emitter.complete();
             }
@@ -110,15 +139,21 @@ public class AgentController {
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
         SseEmitter emitter = new SseEmitter(0L);
+        metrics.inc("runs_started");
         runService.submitAsync(() -> {
             RunSink sink = sseSink(emitter);
+            long t0 = System.nanoTime();
             try {
                 send(emitter, "session", sessionId);
                 String answer = runService.runBounded(() -> loop.run(sessionId, q, mode, sink));
+                long ms = (System.nanoTime() - t0) / 1_000_000L;
+                metrics.recordRun(ms, true);
+                metrics.logRun("/ask/stream", sessionId, null, ms, true);
                 send(emitter, "answer", answer);
                 send(emitter, "done", "");
                 emitter.complete();
             } catch (Exception e) {
+                metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
                 send(emitter, "error", String.valueOf(e.getMessage()));
                 emitter.complete();
             }
@@ -161,6 +196,16 @@ public class AgentController {
     @GetMapping("/runs")
     public Map<String, Integer> runs() {
         return Map.of("limit", runService.limit(), "active", runService.active(), "queued", runService.queued());
+    }
+
+    @GetMapping("/health")
+    public Map<String, String> health() {
+        return Map.of("status", "ok");
+    }
+
+    @GetMapping("/metrics")
+    public Map<String, Object> metrics() {
+        return metrics.snapshot();
     }
 
     @PostMapping("/rewind")

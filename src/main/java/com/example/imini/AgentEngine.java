@@ -46,6 +46,7 @@ public class AgentEngine {
     private final PermissionService permissions;
     private final InterruptService interrupt;
     private final HookService hooks;
+    private final Metrics metrics;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
@@ -64,12 +65,14 @@ public class AgentEngine {
     private boolean parallelTools;
 
     public AgentEngine(LlamaClient llama, ContextManager context,
-                       PermissionService permissions, InterruptService interrupt, HookService hooks) {
+                       PermissionService permissions, InterruptService interrupt, HookService hooks,
+                       Metrics metrics) {
         this.llama = llama;
         this.context = context;
         this.permissions = permissions;
         this.interrupt = interrupt;
         this.hooks = hooks;
+        this.metrics = metrics;
     }
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
@@ -131,6 +134,9 @@ public class AgentEngine {
                 assistant = llama.chat(messages, specs);
             }
             messages.add(assistant);
+            metrics.inc("model_calls");
+            Object ac = assistant.get("content");
+            if (ac != null) metrics.addModelOutput(String.valueOf(ac).length());
 
             if (interactive && interrupt.consumeStop(sessionId)) {
                 sink.log("[interrupt:" + label + "] stopped during generation.");
@@ -245,12 +251,17 @@ public class AgentEngine {
         SessionContext.Ctx prev = SessionContext.get();
         SessionContext.set(new SessionContext.Ctx(sessionId, sink));
         try {
+            metrics.incTool(name);
             String block = hooks.runPre(name, args);
             if (block != null) {
                 sink.log("[hook:pre] blocked " + name);
                 return block;
             }
             String result = safeExec(tool, args);
+            if (result != null && (result.startsWith("ERROR") || result.startsWith("DENIED")
+                    || result.startsWith("INVALID_ARGS") || result.startsWith("BLOCKED"))) {
+                metrics.inc("tool_errors");
+            }
             String postOut = hooks.runPost(name, args, result);
             if (postOut != null && !postOut.isBlank()) {
                 result = result + "\n[post-hook]\n" + postOut;
