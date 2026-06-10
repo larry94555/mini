@@ -274,9 +274,15 @@ public class AgentController {
         };
     }
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper SSE_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
     private static void send(SseEmitter emitter, String name, String data) {
         try {
-            emitter.send(SseEmitter.event().name(name).data(data == null ? "" : data));
+            // JSON-encode the payload so leading/trailing spaces and newlines survive SSE framing
+            // (SSE strips a leading space after "data:", which would eat token-leading spaces).
+            String encoded = SSE_MAPPER.writeValueAsString(data == null ? "" : data);
+            emitter.send(SseEmitter.event().name(name).data(encoded));
         } catch (Exception e) {
             // client disconnected or emitter completed; nothing to do
         }

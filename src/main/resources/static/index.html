@@ -44,6 +44,9 @@
   .mono { font-family:var(--mono); font-size:12px; }
   pre.log { margin:0; max-height:160px; overflow:auto; white-space:pre-wrap;
             font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .activity { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-bottom:5px; }
+  .activity div { white-space:pre-wrap; opacity:.85; }
+  .activity div::before { content:"› "; color:var(--accent); }
   ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
   .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
@@ -147,6 +150,21 @@ function addMsg(who, cls){
   $("#messages").scrollTop = $("#messages").scrollHeight;
   return wrap.querySelector(".body");
 }
+// an assistant turn = an inline "activity" area (thinking / tool calls) above the answer body
+function addTurn(){
+  const wrap = document.createElement("div");
+  wrap.className = "msg";
+  wrap.innerHTML = '<div class="who">imini</div><div style="flex:1;min-width:0">'
+                 + '<div class="activity"></div><div class="body"></div></div>';
+  $("#messages").appendChild(wrap);
+  $("#messages").scrollTop = $("#messages").scrollHeight;
+  return { body: wrap.querySelector(".body"), activity: wrap.querySelector(".activity") };
+}
+function addActivity(turn, line){
+  const d = document.createElement("div"); d.textContent = line;
+  turn.activity.appendChild(d);
+  $("#messages").scrollTop = $("#messages").scrollHeight;
+}
 function appendLog(line){
   const el = $("#log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
 }
@@ -161,7 +179,7 @@ async function send(){
   if (!text || state.streaming) return;
   $("#input").value = "";
   addMsg("you", "user").textContent = text;
-  const body = addMsg("imini");
+  const turn = addTurn();
   state.streaming = true; setStatus("running", "var(--warn)");
   const apoll = setInterval(pollApprovals, 1500);
 
@@ -170,7 +188,7 @@ async function send(){
       method:"POST", headers: headers(true),
       body: JSON.stringify({ sessionId: state.session, message: text, mode: $("#mode").value })
     });
-    if (!resp.ok){ body.innerHTML = '<span class="err">HTTP '+resp.status+' '+(await resp.text())+'</span>'; throw 0; }
+    if (!resp.ok){ turn.body.innerHTML = '<span class="err">HTTP '+resp.status+' '+(await resp.text())+'</span>'; throw 0; }
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
@@ -181,7 +199,7 @@ async function send(){
       let i;
       while ((i = buf.indexOf("\n\n")) >= 0){
         const frame = buf.slice(0, i); buf = buf.slice(i + 2);
-        handleEvent(parseSse(frame), body);
+        handleEvent(parseSse(frame), turn);
       }
     }
   } catch(e){ if (e) appendLog("[error] "+e); }
@@ -195,18 +213,20 @@ function parseSse(frame){
   let ev = "message", data = [];
   for (const line of frame.split("\n")){
     if (line.startsWith("event:")) ev = line.slice(6).trim();
-    else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /,""));
+    else if (line.startsWith("data:")) data.push(line.slice(5)); // no strip; payload is JSON-encoded
   }
-  return { event: ev, data: data.join("\n") };
+  const raw = data.join("\n");
+  let val; try { val = JSON.parse(raw); } catch(_) { val = raw; }
+  return { event: ev, data: val };
 }
-function handleEvent(e, body){
+function handleEvent(e, turn){
   switch(e.event){
     case "session": state.session = e.data; localStorage.setItem("imini.session", state.session); break;
-    case "token": body.textContent += e.data; $("#messages").scrollTop = $("#messages").scrollHeight; break;
-    case "log": appendLog(e.data); break;
+    case "token": turn.body.textContent += e.data; $("#messages").scrollTop = $("#messages").scrollHeight; break;
+    case "log": addActivity(turn, e.data); appendLog(e.data); break;
     case "approval": try { showApproval(JSON.parse(e.data)); } catch(_){} break;
-    case "answer": if (!body.textContent.trim()) body.textContent = e.data; break;
-    case "error": body.innerHTML += '<span class="err">'+e.data+'</span>'; break;
+    case "answer": if (!turn.body.textContent.trim()) turn.body.textContent = e.data; break;
+    case "error": turn.body.innerHTML += '<span class="err">'+e.data+'</span>'; break;
     case "done": break;
   }
 }
