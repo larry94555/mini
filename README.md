@@ -40,6 +40,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | memory | Retrieval / RAG | index workspace files; search_memory finds relevant snippets |
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
 | ops | Observability | /metrics snapshot + structured run logs |
+| ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -77,6 +78,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `AuthFilter.java` | API-key auth + per-key rate limiting (servlet filter) |
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
+| `static/index.html` | the web UI (vanilla HTML/JS, served at / ) |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
@@ -127,6 +129,8 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 | `GET /memory?q=&k=` | - | search the index for relevant snippets |
 | `GET /health` | - | liveness (always open, even with auth on) |
 | `GET /metrics` | - | observability snapshot (counters, latency, concurrency) |
+| `GET /session?id=` | - | one session's messages (the UI uses this to load history) |
+| `GET /` | - | the web UI (single-page app) |
 | `POST /interrupt` | `{"sessionId":"..."}` | stop that session's run |
 | `POST /steer` | `{"sessionId":"...","message":"..."}` | inject guidance into that session's run |
 
@@ -424,6 +428,40 @@ for tailing/grep.
    `tool_calls_by_name`, `requests_by_key`, and live `concurrency`. Watch the console for the
    `[metrics] run ...` lines.
 
+## Web UI
+
+A single static page (`src/main/resources/static/index.html`) served by Spring Boot at
+`http://localhost:8080/` -- no build step, no framework, ~12 KB of vanilla HTML/JS. It ties together
+the endpoints you already have:
+
+- **Streaming chat** against `POST /chat/stream`, consumed with `fetch` + a stream reader (not
+  `EventSource`) so it can send a POST and attach the API key header. Tokens render live; tool/guard
+  lines go to a collapsible run log.
+- **Sessions** -- a switcher (`GET /sessions`) with a "new" button; switching loads prior history via
+  `GET /session?id=`.
+- **Mode** selector (ask / auto / plan).
+- **Todos** (`GET /todos?sessionId=`), **Checkpoints + rewind** (`GET /checkpoints`, `POST /rewind`),
+  **Stop / Steer** (`POST /interrupt`, `POST /steer`), **Memory search** (`POST /index`, `GET /memory`),
+  and a live **Metrics** panel (`GET /metrics`, refreshed every 5s).
+- **API key** field: if `auth.enabled=true`, paste a key and it's sent as `X-API-Key` on every call
+  (and remembered in the browser). The page itself is in `auth.open-paths`, so it loads without a key;
+  the API calls it makes are still authenticated.
+
+Open it by starting imini (`run.bat`) and visiting `http://localhost:8080/`.
+
+> Honest scope: it's a minimal operator console, not a polished product -- one page, no bundler. The
+> biggest gap it exposes is that **ASK-mode approvals still happen on the server console**, not in the
+> browser; for the UI, use `auto` or `plan` mode (or answer prompts at the server). Wiring approvals
+> into the UI ("remote approvals") is the natural next step.
+
+### Trying it out
+
+1. `run.bat`, open `http://localhost:8080/`, pick `auto` mode, and ask something that uses a tool
+   ("read pom.xml and tell me the artifactId") -- watch tokens stream and the run log fill.
+2. Click **new**, hold a short multi-turn chat, then reload the page -- your session is remembered and
+   its history reloads (SQLite persistence).
+3. Use **Memory search** (it auto-indexes) to find a snippet, and watch the **Metrics** panel update.
+
 ## Configuration (`application.properties`)
 
 ```
@@ -480,7 +518,7 @@ retrieval.embed-model=nomic-embed-text
 auth.enabled=false                  # true = require an API key on every non-open request
 auth.header=X-API-Key               # also accepts "Authorization: Bearer <key>"
 auth.keys=                          # comma-separated "key" or "label:key"
-auth.open-paths=/health             # always allowed through
+auth.open-paths=/health,/,/index.html  # always allowed (incl. the web UI page)
 auth.rate-limit-per-minute=0        # per-key fixed-window limit; 0 = unlimited
 llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
 llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)

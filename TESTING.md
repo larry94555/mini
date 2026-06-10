@@ -573,3 +573,29 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** JSON with `counters` (requests, runs_ok/failed, tool_calls, model_calls), `run_latency`
   (count/avg_ms/max_ms), `tool_calls_by_name`, `requests_by_key`, `approx_output_tokens`, and live
   `concurrency`. The console prints a `[metrics] run endpoint=... ms=... ok=...` line per run.
+
+---
+
+# Web UI
+
+## 58. Web UI smoke test (manual)
+
+- **Run:** `run.bat`, then open `http://localhost:8080/` in a browser.
+- **Observe:**
+  - Pick `auto` mode and send "read pom.xml and tell me the artifactId" -- tokens stream into the
+    assistant bubble; the collapsible **run log** shows `[main:tool] read_file ...`.
+  - **Todos**, **Checkpoints**, and **Metrics** panels populate; Metrics refreshes ~every 5s.
+  - **new** starts a fresh session; after a couple of turns, reload the page -- the session id is
+    remembered and `GET /session?id=` reloads the visible history.
+  - **Memory search**: type a term, hit Find (auto-indexes first), see snippets.
+  - **Stop** mid-run ends the stream with a partial answer; **Steer** injects guidance.
+
+## 59. Web UI with auth on
+
+- **Setup:** `auth.enabled=true`, `auth.keys=alice:s3cret`, restart.
+- **Observe:** the page at `/` still loads (it's an open path). Sending a chat without a key shows an
+  HTTP 401 in the bubble; paste `s3cret` into the API key field and it works. `requests_by_key` in the
+  Metrics panel shows `alice`.
+
+> Note: ASK-mode approvals are answered on the SERVER CONSOLE, not in the browser. Use auto/plan mode
+> in the UI, or answer prompts where imini is running.
