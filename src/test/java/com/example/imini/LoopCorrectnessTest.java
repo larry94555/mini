@@ -1,12 +1,5 @@
 package com.example.imini;
 
-import org.junit.jupiter.api.Test;
-
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -14,10 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
+
 /**
- * Deterministic harness eval suite (no model required) -- the CI-able core of "loop correctness".
- * Encodes the roadmap's questions: does it accept the RIGHT tool call, STAY in the workspace, and
- * RECOVER from bad input / transient failures?
+ * Deterministic harness checks that do not require a live model.
+ *
+ * <p>These tests focus on the harness contracts that matter most for a Claude Code-style loop:
+ * schema validation, workspace confinement, retry behavior, and grammar generation.
  */
 class LoopCorrectnessTest {
 
@@ -28,18 +28,16 @@ class LoopCorrectnessTest {
                 "required", List.of("path"));
     }
 
-    // --- schema validation: right args accepted, bad args rejected (recover) ---
-
     @Test
     void schemaAcceptsValidArgs() {
         assertNull(SchemaValidator.validate("read_file", stringPathSchema(), Map.of("path", "notes.txt")));
     }
 
     @Test
-    void schemaRejectsMissingRequired() {
+    void schemaRejectsMissingRequiredField() {
         String err = SchemaValidator.validate("read_file", stringPathSchema(), Map.of());
         assertNotNull(err);
-        assertTrue(err.contains("missing required"), err);
+        assertTrue(err.contains("missing required field 'path'"), err);
     }
 
     @Test
@@ -49,26 +47,38 @@ class LoopCorrectnessTest {
         assertTrue(err.contains("should be a string"), err);
     }
 
-    // --- workspace confinement: stays in workspace ---
-
     @Test
-    void confinementStaysInWorkspace() {
+    void confinementAllowsPathsWithinWorkspace() {
         Path root = Path.of("/work/project");
+
         assertTrue(PermissionService.isWithin(root, "notes.txt"));
-        assertTrue(PermissionService.isWithin(root, "sub/dir/x.java"));
-        assertFalse(PermissionService.isWithin(root, "../escape.txt"));
-        assertFalse(PermissionService.isWithin(root, "/etc/passwd"));
+        assertTrue(PermissionService.isWithin(root, "src/main/App.java"));
+        assertTrue(PermissionService.isWithin(root, "sub/dir/../dir/file.txt"));
     }
 
-    // --- retries with backoff: recover from transient failures ---
+    @Test
+    void confinementRejectsPathTraversalAndAbsolutePaths() {
+        Path root = Path.of("/work/project");
+
+        assertFalse(PermissionService.isWithin(root, "../escape.txt"));
+        assertFalse(PermissionService.isWithin(root, "sub/../../escape.txt"));
+        assertFalse(PermissionService.isWithin(root, "/etc/passwd"));
+    }
 
     @Test
     void retryRecoversAfterTransientFailures() throws Exception {
         AtomicInteger calls = new AtomicInteger();
-        String result = Retry.withBackoff(3, 1, () -> {
-            if (calls.incrementAndGet() < 3) throw new java.io.IOException("transient");
-            return "ok";
-        });
+
+        String result = Retry.withBackoff(
+                3,
+                1,
+                () -> {
+                    if (calls.incrementAndGet() < 3) {
+                        throw new java.io.IOException("transient");
+                    }
+                    return "ok";
+                });
+
         assertEquals("ok", result);
         assertEquals(3, calls.get());
     }
@@ -76,29 +86,38 @@ class LoopCorrectnessTest {
     @Test
     void retryDoesNotRetryClientErrors() {
         AtomicInteger calls = new AtomicInteger();
-        assertThrows(IllegalStateException.class, () -> Retry.withBackoff(3, 1, () -> {
-            calls.incrementAndGet();
-            throw new IllegalStateException("bad request");
-        }));
-        assertEquals(1, calls.get()); // non-IOException is not retried
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> Retry.withBackoff(
+                        3,
+                        1,
+                        () -> {
+                            calls.incrementAndGet();
+                            throw new IllegalStateException("bad request");
+                        }));
+
+        assertEquals(1, calls.get());
     }
 
-    // --- constrained decoding: grammar names the available tools ---
-
     @Test
-    void grammarIncludesToolNames() {
+    void grammarIncludesAvailableToolNames() {
         List<Map<String, Object>> specs = List.of(
                 Map.of("function", Map.of("name", "read_file")),
-                Map.of("function", Map.of("name", "view")));
-        String g = GrammarBuilder.fromTools(specs);
-        assertNotNull(g);
-        assertTrue(g.contains("read_file"), g);
-        assertTrue(g.contains("view"), g);
-        assertTrue(g.contains("tool-call"), g);
+                Map.of("function", Map.of("name", "view")),
+                Map.of("function", Map.of("name", "todo_write")));
+
+        String grammar = GrammarBuilder.fromTools(specs);
+
+        assertNotNull(grammar);
+        assertTrue(grammar.contains("read_file"), grammar);
+        assertTrue(grammar.contains("view"), grammar);
+        assertTrue(grammar.contains("todo_write"), grammar);
+        assertTrue(grammar.contains("tool-call"), grammar);
     }
 
     @Test
-    void grammarNullWhenNoTools() {
+    void grammarIsNullWhenNoToolsAreAvailable() {
         assertNull(GrammarBuilder.fromTools(List.of()));
     }
 }

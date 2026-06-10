@@ -51,6 +51,8 @@ public class LlamaClient {
     private String summaryBaseUrl;
     @Value("${llama.port:8081}")
     private int port;
+    @Value("${llama.client-host:localhost}")
+    private String clientHost;
     @Value("${llama.alias:qwen2.5-3b-instruct}")
     private String model;
     @Value("${llama.cache-prompt:true}")
@@ -62,7 +64,7 @@ public class LlamaClient {
     @Value("${llama.retry-backoff-ms:400}")
     private long retryBackoffMs;
 
-    private String base() { return "http://localhost:" + port; }
+    private String base() { return "http://" + clientHost + ":" + port; }
     private String endpoint() { return base() + "/v1/chat/completions"; }
     private String tokenizeEndpoint() { return base() + "/tokenize"; }
 
