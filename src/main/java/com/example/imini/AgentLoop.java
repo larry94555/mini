@@ -1,6 +1,7 @@
 package com.example.imini;
 
 import com.example.imini.PermissionService.Mode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -10,8 +11,8 @@ import java.util.Map;
 
 /**
  * The MAIN agent. Owns the base system prompt and the full toolset, and hands the loop to
- * AgentEngine. Tier 3: the effective system prompt is the base prompt PLUS any project instructions
- * (IMINI.md / CLAUDE.md / AGENTS.md) loaded by ProjectContext.
+ * AgentEngine. The effective system prompt is the base prompt PLUS the optional coding-profile
+ * workflow (agent.profile=coding) PLUS any project instructions (IMINI.md / CLAUDE.md / AGENTS.md).
  */
 @Component
 public class AgentLoop {
@@ -32,6 +33,9 @@ public class AgentLoop {
             When you have enough information, reply to the user in plain text and do NOT call any more tools.
             """;
 
+    @Value("${agent.profile:general}")
+    private String profile;          // general (default) | coding
+
     private final AgentEngine engine;
     private final ToolRegistry registry;
     private final SessionStore sessions;
@@ -48,7 +52,7 @@ public class AgentLoop {
     }
 
     private String systemPrompt() {
-        return BASE_SYSTEM_PROMPT + project.addendum();
+        return BASE_SYSTEM_PROMPT + AgentProfile.guidance(profile) + project.addendum();
     }
 
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */

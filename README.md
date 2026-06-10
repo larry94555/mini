@@ -38,6 +38,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | safety | Read confinement | read_file/view/list_dir restricted to the workspace |
 | coding | Codebase navigation | glob, grep, repo_tree, read_many -- deterministic repo search/read |
 | coding | Git awareness | git_status, git_diff over the workspace repo |
+| coding | Coding profile | `agent.profile=coding` adds an explicit orient->locate->read->edit->verify workflow |
 | memory | Persistence (SQLite) | sessions + per-session checkpoints survive restarts (migrations) |
 | memory | Retrieval / RAG | index workspace files; search_memory finds relevant snippets |
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
@@ -91,6 +92,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
 | `ToolRegistry.java` | assembles main toolset: builtins + delegate_research + MCP tools |
 | `AgentLoop.java` | main agent: `run` (one-shot) and `chat` (session) |
+| `AgentProfile.java` | optional coding-workflow guidance added to the system prompt |
 | `AgentController.java` | REST endpoints |
 | `Tool.java`, `AgentResult.java` | value types |
 
@@ -541,6 +543,33 @@ shell out to `git` (read-only subcommands) in the workspace root.
 4. **Review changes.** Make an edit, then `ask.bat "Run git_status and git_diff and summarize what
    changed."`
 
+## Coding profile
+
+The navigation tools above only help if the model actually uses them in the right order. The base
+system prompt is general; setting `agent.profile=coding` appends an explicit, numbered workflow that
+names those tools and the loop a good coding agent follows:
+
+> ORIENT (`repo_tree`) -> LOCATE (`glob`/`grep`, search before reading, never invent paths) ->
+> READ (`view`/`read_many` before editing) -> EDIT (prefer `edit_file`, small targeted changes) ->
+> VERIFY (`git_status`/`git_diff`, run tests via `run_command`) before reporting done.
+
+Small local models infer this loop poorly but follow a concrete numbered version well, so this is the
+cheapest way to turn the new tools into better task quality. It's a pure prompt addition -- no tools or
+APIs change, and the default (`general`) leaves the prompt exactly as before.
+
+Like project instructions, the profile is captured into the system prompt when a `/chat` session
+starts, so set it before beginning a session (one-shot `/ask` picks it up immediately).
+
+### Trying it out
+
+1. Set `agent.profile=coding`, restart, and ask a vague coding task: `ask.bat "Where is the permission
+   decision made, and add a log line when a tool is denied?"` -- with the profile on, imini tends to
+   `grep`/`glob` to locate the code, `view` it, make a targeted `edit_file`, then `git_diff` to confirm,
+   instead of guessing paths.
+2. Compare with `agent.profile=general` on the same prompt to see the difference in tool use.
+3. Combine with an `IMINI.md` (project instructions) for repo-specific conventions on top of the
+   generic workflow.
+
 ## Docker / one-command run
 
 For a no-install run, the repo ships a `Dockerfile` and a `docker-compose.yml` that bring up imini and
@@ -624,6 +653,7 @@ llama.constrain-tools=false         # opt-in GBNF grammar to force valid tool ca
 llama.max-retries=2                 # retry transient model/network errors (5xx / IOException)
 llama.retry-backoff-ms=400          # base backoff; doubles each attempt
 agent.tool-timeout-seconds=60       # hard timeout for a single run_command / MCP / git call
+agent.profile=general               # general | coding (coding adds the codebase workflow to the prompt)
 nav.grep-max-file-kb=512            # grep skips files larger than this (keeps search fast)
 sandbox.command-mode=deny-only      # off | deny-only (block dangerous) | allowlist (only listed)
 sandbox.allow=                      # allowlist mode: allowed first-words/prefixes (csv)

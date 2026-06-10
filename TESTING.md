@@ -698,3 +698,22 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** "Run git_status, then git_diff, and summarize." Also try `git_diff` with `staged=true`.
 - **Observe:** porcelain status (branch + changes) and a unified diff. In a non-repo (or no git on
   PATH) both return a clean `ERROR: ... (is git installed and is the workspace a git repo?)`.
+
+---
+
+# Coding profile
+
+## 73. Profile guidance (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AgentProfileTest` passes -- `agent.profile=coding` guidance names the navigation tools
+  (repo_tree/glob/grep/read_many/git_diff/edit_file) and the orient/verify steps, is case-insensitive,
+  and `general`/unknown/null add nothing.
+
+## 74. Coding profile changes tool use (manual)
+
+- **Setup:** `agent.profile=coding`, restart.
+- **Run:** `ask.bat "Where is the permission decision made, and add a log line when a tool is denied?"`
+- **Observe:** imini tends to `grep`/`glob` to locate code, `view` it, make a targeted `edit_file`,
+  then `git_diff` to confirm -- rather than guessing paths. Re-run with `agent.profile=general` to
+  compare. (Behavioral, model-dependent; the deterministic guarantee is covered by case 73.)
