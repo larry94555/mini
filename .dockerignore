@@ -1,0 +1,6 @@
+target/
+.git/
+.imini/
+*.zip
+mini-gh/
+.maven/

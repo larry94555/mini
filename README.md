@@ -42,6 +42,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | ops | Observability | /metrics snapshot + structured run logs |
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
 | ui | Remote approvals | answer ASK-mode prompts in the browser/API instead of the server console |
+| ops | Docker / one-command run | `docker compose up` brings up imini + a llama.cpp server |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -80,6 +81,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
 | `Approvals.java` | pending-decision registry for remote ASK-mode approvals |
+| `Dockerfile` | multi-stage build -> small JRE image that runs the jar |
+| `docker-compose.yml` | imini + a llama.cpp server, one command |
 | `static/index.html` | the web UI (vanilla HTML/JS, served at / ) |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
@@ -499,6 +502,49 @@ buttons. `console` mode (the default) is unchanged.
    the run proceeds as `deny` and reports it.
 4. **API only**: `GET /approvals?sessionId=<id>` shows what's pending; `POST /approve` resolves it.
 
+## Docker / one-command run
+
+For a no-install run, the repo ships a `Dockerfile` and a `docker-compose.yml` that bring up imini and
+a llama.cpp model server together:
+
+```
+docker compose up --build
+```
+
+That builds the app, starts a `llama.cpp` OpenAI-compatible server, and starts imini pointed at it.
+Then open **http://localhost:8080/** for the web UI (or `POST` to the API on the same port).
+
+What the compose file wires up:
+
+- **`llama`** runs `ghcr.io/ggml-org/llama.cpp:server` and, on first start, downloads the model
+  (`Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M`, ~2 GB) into the `llama-cache` volume so later starts are
+  fast. It serves on port 8081 with `--jinja` (tool calling) enabled.
+- **`imini`** is built from the `Dockerfile` (multi-stage: Maven build -> `eclipse-temurin:21-jre`)
+  and started with `--llama.manage-server=false --llama.client-host=llama --llama.port=8081
+  --agent.workspace-root=/workspace`, so it **connects to** the `llama` container rather than
+  launching its own server. `llama.client-host` (new, default `localhost`) is the only code change
+  needed for container networking.
+- **Volumes:** `imini-data` keeps the SQLite DB + per-session checkpoints across restarts; the host
+  folder **`./workspace`** is bind-mounted at `/workspace` as the agent's working directory -- drop the
+  project files you want imini to work on there, and edits show up back on your host.
+
+> Honest scope: this is a single-node compose setup for trying imini, not a production/orchestrated
+> deployment (no TLS, no k8s, auth still off unless you enable it). The first run is slow because of
+> the model download; imini retries model calls while the model loads, so the first chat may pause.
+> The `llama.cpp` image tag is the CPU build -- for GPUs or a different platform you may need a
+> different tag (e.g. a CUDA variant); see the comment in `docker-compose.yml`.
+
+### Trying it out
+
+1. `docker compose up --build`, wait for the model to download (watch the `llama` logs), then open
+   `http://localhost:8080/` and ask something.
+2. Put a file in `./workspace` on your host (e.g. `notes.txt`), then ask imini to "read notes.txt" --
+   it sees the mounted file; ask it to edit a file and the change appears on your host.
+3. `docker compose down` then `docker compose up` again -- your sessions persist (the `imini-data`
+   volume) and the model is already cached (the `llama-cache` volume), so startup is quick.
+4. To turn on auth/remote approvals in Docker, add the relevant flags to the `imini` `command:` list
+   (e.g. `--auth.enabled=true --auth.keys=alice:s3cret --permissions.prompt-mode=remote`).
+
 ## Configuration (`application.properties`)
 
 ```
@@ -527,6 +573,7 @@ llama.hf-model=                     # override the profile's model:quant
 llama.model-path=                   # use a local .gguf (-m) instead of -hf
 llama.alias=qwen2.5-3b-instruct
 llama.port=8081
+llama.client-host=localhost         # host the client dials for llama-server; a service name in Docker
 llama.ctx-size=0                    # 0 = profile default
 llama.gpu-layers=-1                 # -1 = CPU (0); raise on a GPU build
 llama.threads=0                     # 0 = all cores

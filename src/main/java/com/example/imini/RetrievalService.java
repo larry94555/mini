@@ -57,6 +57,7 @@ public class RetrievalService {
     @Value("${retrieval.embed-base-url:}") private String embedBaseUrl;
     @Value("${retrieval.embed-model:nomic-embed-text}") private String embedModel;
     @Value("${llama.port:8081}") private int llamaPort;
+    @Value("${llama.client-host:localhost}") private String clientHost;
 
     private static final Set<String> SKIP_DIRS =
             Set.of(".git", "target", "build", "node_modules", ".imini", ".maven", ".idea", "out");
@@ -257,7 +258,7 @@ public class RetrievalService {
     private float[] embed(String text) {
         try {
             String base = (embedBaseUrl == null || embedBaseUrl.isBlank())
-                    ? "http://localhost:" + llamaPort : embedBaseUrl;
+                    ? "http://" + clientHost + ":" + llamaPort : embedBaseUrl;
             String body = mapper.writeValueAsString(Map.of("model", embedModel, "input", text));
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(base + "/v1/embeddings"))

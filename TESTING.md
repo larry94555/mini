@@ -632,3 +632,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   then `curl -X POST http://localhost:8080/approve -H "Content-Type: application/json" -d "{\"id\":\"<id>\",\"decision\":\"allow\"}"`
 - **Observe:** the first lists the pending request; the second returns `{"resolved":true,...}` and the
   run continues. (Use the streaming endpoint or the UI; a blocking POST /chat just waits.)
+
+---
+
+# Docker / one-command run
+
+## 64. One-command bring-up (manual)
+
+- **Run:** `docker compose up --build` from the repo root.
+- **Observe:** the `llama` service downloads the model on first run (visible in its logs), then imini
+  starts and logs `[llama] manage-server=false` (it connects, doesn't launch). Open
+  `http://localhost:8080/` -- the web UI loads and a chat returns a real answer once the model is up.
+
+## 65. Mounted workspace
+
+- **Setup:** with the stack up, create `./workspace/notes.txt` on the host with some text.
+- **Run (UI, auto mode):** "read notes.txt and summarize it".
+- **Observe:** imini reads the mounted file. Ask it to write/edit a file under the workspace and the
+  change appears on the host in `./workspace`.
+
+## 66. Persistence across restarts
+
+- **Run:** hold a short chat, then `docker compose down` and `docker compose up` again.
+- **Observe:** the model is already cached (fast start, no re-download), and prior sessions are still
+  listed (the `imini-data` volume preserved the SQLite DB + checkpoints).
+
+## 67. Enabling auth / remote approvals in Docker
+
+- **Setup:** add `--auth.enabled=true --auth.keys=alice:s3cret --permissions.prompt-mode=remote` to the
+  `imini` `command:` list; `docker compose up -d`.
+- **Observe:** the UI loads (open path) but API calls need the key; ask mode pops approval banners.

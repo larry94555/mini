@@ -1,0 +1,42 @@
+# One-command run:  docker compose up --build
+#
+#   - "llama"  runs a llama.cpp OpenAI-compatible server and (on first run) downloads the model.
+#   - "imini"  builds this repo and connects to that server (it does NOT launch its own).
+#
+# Then open http://localhost:8080/ in a browser. The FIRST start downloads the model (~2 GB) into the
+# llama-cache volume, so give it a few minutes; imini retries model calls while the model loads.
+services:
+  llama:
+    # CPU build of the llama.cpp server. If this tag/path differs for your platform, or you want the
+    # CUDA build, swap it (e.g. ...:server-cuda) -- see https://github.com/ggml-org/llama.cpp .
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command: >
+      -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M
+      --host 0.0.0.0 --port 8081 --jinja --ctx-size 8192
+    volumes:
+      - llama-cache:/root/.cache/llama.cpp   # cache the downloaded model across restarts
+    ports:
+      - "8081:8081"                          # optional: expose the model server for debugging
+    restart: unless-stopped
+
+  imini:
+    build: .
+    depends_on:
+      - llama
+    # Spring picks up these as program args. manage-server=false => connect, don't launch;
+    # client-host=llama => reach the model server by its compose service name.
+    command:
+      - "--llama.manage-server=false"
+      - "--llama.client-host=llama"
+      - "--llama.port=8081"
+      - "--agent.workspace-root=/workspace"
+    volumes:
+      - imini-data:/app/.imini       # SQLite DB + per-session checkpoints persist here
+      - ./workspace:/workspace       # the agent's working directory (drop your project files here)
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  llama-cache:
+  imini-data:
