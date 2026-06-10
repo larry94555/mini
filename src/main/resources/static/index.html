@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>imini</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e6e9ef; --muted:#8b93a3; --accent:#5b9dff; --good:#5fcf80; --bad:#ff6b6b; --warn:#e7c14b;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+           padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header h1 { font-size:16px; margin:0 8px 0 0; letter-spacing:.5px; }
+  header .grow { flex:1; }
+  input, select, button, textarea {
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px; font:inherit; }
+  input::placeholder, textarea::placeholder { color:var(--muted); }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#06122b; border-color:var(--accent); font-weight:600; }
+  button.danger { border-color:var(--bad); color:var(--bad); }
+  .layout { display:flex; gap:14px; padding:14px; height:calc(100vh - 57px); }
+  .chat { flex:2; display:flex; flex-direction:column; min-width:0; }
+  .side { flex:1; display:flex; flex-direction:column; gap:12px; overflow:auto; max-width:380px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .card h3 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
+  #messages { flex:1; overflow:auto; padding:6px; }
+  .msg { margin:10px 0; display:flex; gap:8px; }
+  .msg .who { font-size:11px; color:var(--muted); min-width:64px; text-transform:uppercase; padding-top:2px; }
+  .msg .body { white-space:pre-wrap; word-break:break-word; flex:1;
+               background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 11px; }
+  .msg.user .body { background:#1b2740; border-color:#27406b; }
+  .composer { display:flex; gap:8px; margin-top:10px; }
+  .composer textarea { flex:1; resize:vertical; min-height:46px; max-height:200px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row + .row { margin-top:8px; }
+  .muted { color:var(--muted); }
+  .mono { font-family:var(--mono); font-size:12px; }
+  pre.log { margin:0; max-height:160px; overflow:auto; white-space:pre-wrap;
+            font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
+  .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
+  .err { color:var(--bad); }
+  a.linklike { color:var(--accent); cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>imini</h1>
+  <select id="mode" title="Permission mode">
+    <option value="ask">ask</option>
+    <option value="auto" selected>auto</option>
+    <option value="plan">plan</option>
+  </select>
+  <span class="row">
+    <span class="muted">session</span>
+    <select id="sessionSelect" style="min-width:140px"></select>
+    <button id="newSession" title="Start a fresh session">new</button>
+  </span>
+  <span class="grow"></span>
+  <input id="apiKey" type="password" placeholder="API key (if auth on)" style="width:200px"/>
+  <span id="status" class="pill">idle</span>
+</header>
+
+<div class="layout">
+  <div class="chat card">
+    <div id="messages"></div>
+    <div class="composer">
+      <textarea id="input" placeholder="Ask imini...  (Enter to send, Shift+Enter for newline)"></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="primary" id="send">Send</button>
+        <button class="danger" id="interrupt" title="Stop this session's run">Stop</button>
+        <button id="steer" title="Inject guidance into the running turn">Steer</button>
+      </div>
+    </div>
+    <details style="margin-top:8px">
+      <summary class="muted">run log</summary>
+      <pre class="log" id="log"></pre>
+    </details>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h3>Todos</h3>
+      <div id="todos" class="muted">(none)</div>
+    </div>
+    <div class="card">
+      <h3>Checkpoints <a class="linklike" id="rewind" title="Undo this session's last file change">rewind last</a></h3>
+      <div id="checkpoints" class="muted">(none)</div>
+    </div>
+    <div class="card">
+      <h3>Memory search</h3>
+      <div class="row">
+        <input id="memq" placeholder="search the indexed project" style="flex:1"/>
+        <button id="memgo">Find</button>
+        <button id="reindex" title="Rebuild the index">Index</button>
+      </div>
+      <pre class="log" id="memout" style="margin-top:8px"></pre>
+    </div>
+    <div class="card">
+      <h3>Metrics <span class="muted" id="metricsAge"></span></h3>
+      <div class="metrics" id="metrics">loading...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const state = {
+  session: localStorage.getItem("imini.session") || newId(),
+  key: localStorage.getItem("imini.key") || "",
+  streaming: false,
+};
+$("#apiKey").value = state.key;
+
+function newId(){ return "ui-" + Math.random().toString(36).slice(2, 8); }
+function headers(json){
+  const h = {};
+  if (json) h["Content-Type"] = "application/json";
+  if (state.key) h["X-API-Key"] = state.key;
+  return h;
+}
+function setStatus(t, cls){ const e=$("#status"); e.textContent=t; e.style.color = cls||""; }
+
+function addMsg(who, cls){
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + (cls||"");
+  wrap.innerHTML = '<div class="who"></div><div class="body"></div>';
+  wrap.querySelector(".who").textContent = who;
+  $("#messages").appendChild(wrap);
+  $("#messages").scrollTop = $("#messages").scrollHeight;
+  return wrap.querySelector(".body");
+}
+function appendLog(line){
+  const el = $("#log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
+}
+
+$("#apiKey").addEventListener("change", e => {
+  state.key = e.target.value.trim(); localStorage.setItem("imini.key", state.key);
+});
+
+// --- streaming chat via fetch (so we can send POST + the API key header) ---
+async function send(){
+  const text = $("#input").value.trim();
+  if (!text || state.streaming) return;
+  $("#input").value = "";
+  addMsg("you", "user").textContent = text;
+  const body = addMsg("imini");
+  state.streaming = true; setStatus("running", "var(--warn)");
+
+  try {
+    const resp = await fetch("/chat/stream", {
+      method:"POST", headers: headers(true),
+      body: JSON.stringify({ sessionId: state.session, message: text, mode: $("#mode").value })
+    });
+    if (!resp.ok){ body.innerHTML = '<span class="err">HTTP '+resp.status+' '+(await resp.text())+'</span>'; throw 0; }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true){
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0){
+        const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+        handleEvent(parseSse(frame), body);
+      }
+    }
+  } catch(e){ if (e) appendLog("[error] "+e); }
+  finally {
+    state.streaming = false; setStatus("idle");
+    refreshTodos(); refreshCheckpoints(); refreshSessions();
+  }
+}
+function parseSse(frame){
+  let ev = "message", data = [];
+  for (const line of frame.split("\n")){
+    if (line.startsWith("event:")) ev = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /,""));
+  }
+  return { event: ev, data: data.join("\n") };
+}
+function handleEvent(e, body){
+  switch(e.event){
+    case "session": state.session = e.data; localStorage.setItem("imini.session", state.session); break;
+    case "token": body.textContent += e.data; $("#messages").scrollTop = $("#messages").scrollHeight; break;
+    case "log": appendLog(e.data); break;
+    case "answer": if (!body.textContent.trim()) body.textContent = e.data; break;
+    case "error": body.innerHTML += '<span class="err">'+e.data+'</span>'; break;
+    case "done": break;
+  }
+}
+
+// --- controls ---
+async function post(path, obj){
+  return fetch(path, { method:"POST", headers: headers(true), body: JSON.stringify(obj||{}) });
+}
+$("#send").onclick = send;
+$("#input").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); send(); }
+});
+$("#interrupt").onclick = () => post("/interrupt", {sessionId: state.session}).then(()=>appendLog("[interrupt requested]"));
+$("#steer").onclick = () => {
+  const m = prompt("Steer the running turn with:"); if (m) post("/steer", {sessionId: state.session, message: m});
+};
+$("#rewind").onclick = () => post("/rewind", {sessionId: state.session})
+  .then(r=>r.json()).then(j=>{ appendLog("[rewind] "+(j.result||"")); refreshCheckpoints(); });
+$("#newSession").onclick = () => { state.session = newId(); localStorage.setItem("imini.session", state.session);
+  $("#messages").innerHTML=""; $("#log").textContent=""; refreshSessions(); refreshTodos(); refreshCheckpoints(); };
+$("#memgo").onclick = doSearch;
+$("#memq").addEventListener("keydown", e => { if (e.key==="Enter") doSearch(); });
+$("#reindex").onclick = () => { $("#memout").textContent="indexing..."; post("/index").then(r=>r.json()).then(j=>$("#memout").textContent=j.result||""); };
+
+async function doSearch(){
+  const q = $("#memq").value.trim(); if (!q) return;
+  $("#memout").textContent = "searching...";
+  const r = await fetch("/memory?q="+encodeURIComponent(q)+"&k=5", {headers: headers(false)});
+  const j = await r.json(); $("#memout").textContent = j.result || "(no result)";
+}
+
+// --- sidebars ---
+async function getJson(path){ try { const r = await fetch(path, {headers: headers(false)}); if(!r.ok) return null; return await r.json(); } catch { return null; } }
+
+async function refreshSessions(){
+  const list = await getJson("/sessions"); const sel = $("#sessionSelect");
+  const ids = Array.isArray(list) ? list : [];
+  if (!ids.includes(state.session)) ids.unshift(state.session);
+  sel.innerHTML = ids.map(id => '<option '+(id===state.session?'selected':'')+'>'+id+'</option>').join("");
+}
+$("#sessionSelect").onchange = async (e) => {
+  state.session = e.target.value; localStorage.setItem("imini.session", state.session);
+  $("#messages").innerHTML=""; $("#log").textContent="";
+  const msgs = await getJson("/session?id="+encodeURIComponent(state.session));
+  (msgs||[]).forEach(m => {
+    if (m.role==="user" && m.content) addMsg("you","user").textContent = m.content;
+    else if (m.role==="assistant" && m.content) addMsg("imini").textContent = m.content;
+  });
+  refreshTodos(); refreshCheckpoints();
+};
+async function refreshTodos(){
+  const j = await getJson("/todos?sessionId="+encodeURIComponent(state.session));
+  $("#todos").textContent = (j && j.rendered) ? j.rendered : "(none)";
+}
+async function refreshCheckpoints(){
+  const list = await getJson("/checkpoints?sessionId="+encodeURIComponent(state.session));
+  $("#checkpoints").innerHTML = (Array.isArray(list)&&list.length)
+    ? "<ul>"+list.map(x=>"<li class='mono'>"+escapeHtml(x)+"</li>").join("")+"</ul>" : "(none)";
+}
+async function refreshMetrics(){
+  const j = await getJson("/metrics");
+  if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }
+}
+function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+// init
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshMetrics();
+setInterval(refreshMetrics, 5000);
+</script>
+</body>
+</html>

@@ -33,6 +33,7 @@ import java.util.UUID;
  *   GET /sessions, POST /rewind {sessionId}, GET /checkpoints?sessionId=, GET /runs.
  *   POST /index (build retrieval index), GET /memory?q=&k= (search the index).
  *   GET /health (open), GET /metrics (observability snapshot).
+ *   GET /session?id= (one session's messages, for the web UI at / ).
  *
  * Concurrency is bounded to the model's slot count by RunService (see GET /runs). mode = ask
  * (default) | auto | plan. NOTE: ASK-mode permission/deadline prompts are answered on the SERVER
@@ -191,6 +192,13 @@ public class AgentController {
     @GetMapping("/sessions")
     public List<String> sessions() {
         return sessions.list();
+    }
+
+    /** A single session's stored messages (for the UI to render prior history on switch). */
+    @GetMapping("/session")
+    public List<Map<String, Object>> session(@RequestParam(name = "id") String id) {
+        List<Map<String, Object>> h = sessions.get(id);
+        return h == null ? List.of() : h;
     }
 
     @GetMapping("/runs")
