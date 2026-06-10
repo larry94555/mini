@@ -98,8 +98,16 @@ public class AgentEngine {
 
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             if (System.nanoTime() > deadline) {
-                boolean extend = interactive && "ask".equalsIgnoreCase(deadlineAction)
-                        && permissions.confirmContinue(deadlineSeconds);
+                boolean extend = false;
+                if (interactive && "ask".equalsIgnoreCase(deadlineAction)) {
+                    SessionContext.Ctx prevCtx = SessionContext.get();
+                    SessionContext.set(new SessionContext.Ctx(sessionId, sink));
+                    try {
+                        extend = permissions.confirmContinue(sessionId, deadlineSeconds);
+                    } finally {
+                        SessionContext.set(prevCtx);
+                    }
+                }
                 if (extend) {
                     deadline = System.nanoTime() + deadlineSeconds * 1_000_000_000L;
                     sink.log("[deadline:" + label + "] extended by " + deadlineSeconds + "s by the user.");
@@ -201,7 +209,14 @@ public class AgentEngine {
                                 + (count - 1) + " time(s). Do NOT call it again; answer with what you have.";
                         sink.log("[guard:" + label + "] suppressed duplicate call to " + ci.name);
                     } else {
-                        Decision d = permissions.decide(sessionId, ci.name, true, ci.args, mode);
+                        Decision d;
+                        SessionContext.Ctx prevCtx = SessionContext.get();
+                        SessionContext.set(new SessionContext.Ctx(sessionId, sink));
+                        try {
+                            d = permissions.decide(sessionId, ci.name, true, ci.args, mode);
+                        } finally {
+                            SessionContext.set(prevCtx);
+                        }
                         switch (d.kind()) {
                             case ALLOW -> {
                                 sink.log("[" + label + ":tool] " + ci.name + " " + ci.args);

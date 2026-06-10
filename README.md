@@ -41,6 +41,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
 | ops | Observability | /metrics snapshot + structured run logs |
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
+| ui | Remote approvals | answer ASK-mode prompts in the browser/API instead of the server console |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -78,6 +79,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `AuthFilter.java` | API-key auth + per-key rate limiting (servlet filter) |
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
+| `Approvals.java` | pending-decision registry for remote ASK-mode approvals |
 | `static/index.html` | the web UI (vanilla HTML/JS, served at / ) |
 | `SubAgent.java` | research sub-agent (web-only tools) |
 | `McpManager.java` | optional MCP client (stdio JSON-RPC) |
@@ -93,6 +95,7 @@ AgentLoop -> AgentEngine, ToolRegistry, SessionStore, ProjectContext, SlashComma
 AgentController -> AgentLoop, SessionStore, CheckpointStore, TodoStore, InterruptService, RunService, RetrievalService.
 Persistence: SessionStore + CheckpointStore -> Database (SQLite); ToolRegistry -> RetrievalService.
 Ops: AuthFilter (servlet filter) + Metrics wrap every request; AgentEngine + AgentController feed Metrics.
+Approvals: PermissionService -> Approvals (remote mode); AgentController -> Approvals.
 
 ---
 
@@ -129,6 +132,8 @@ Helper scripts: `ask.bat "q"`, `chat.bat SESSION "msg"`, `plan.bat "q"`, `rewind
 | `GET /memory?q=&k=` | - | search the index for relevant snippets |
 | `GET /health` | - | liveness (always open, even with auth on) |
 | `GET /metrics` | - | observability snapshot (counters, latency, concurrency) |
+| `GET /approvals?sessionId=` | - | pending ASK-mode approvals (remote mode) |
+| `POST /approve` | `{"id":"...","decision":"allow|always|deny"}` | resolve a pending approval |
 | `GET /session?id=` | - | one session's messages (the UI uses this to load history) |
 | `GET /` | - | the web UI (single-page app) |
 | `POST /interrupt` | `{"sessionId":"..."}` | stop that session's run |
@@ -450,9 +455,8 @@ the endpoints you already have:
 Open it by starting imini (`run.bat`) and visiting `http://localhost:8080/`.
 
 > Honest scope: it's a minimal operator console, not a polished product -- one page, no bundler. The
-> biggest gap it exposes is that **ASK-mode approvals still happen on the server console**, not in the
-> browser; for the UI, use `auto` or `plan` mode (or answer prompts at the server). Wiring approvals
-> into the UI ("remote approvals") is the natural next step.
+> biggest gap it used to expose -- ASK-mode approvals on the server console -- is now closed: set
+> `permissions.prompt-mode=remote` and approve/deny in the browser (see **Remote approvals** below).
 
 ### Trying it out
 
@@ -461,6 +465,38 @@ Open it by starting imini (`run.bat`) and visiting `http://localhost:8080/`.
 2. Click **new**, hold a short multi-turn chat, then reload the page -- your session is remembered and
    its history reloads (SQLite persistence).
 3. Use **Memory search** (it auto-indexes) to find a snippet, and watch the **Metrics** panel update.
+
+## Remote approvals
+
+ASK-mode permission prompts (and the "continue past the time budget?" prompt) can now be answered over
+HTTP instead of only at the server console -- so human-in-the-loop works for the web UI and remote
+API clients, not just whoever is sitting at the terminal.
+
+Set `permissions.prompt-mode=remote`. When a run in **ask** mode hits a gated tool, `PermissionService`
+parks the decision in `Approvals` and the engine thread blocks on it. The waiting request is announced
+two ways: an SSE **`approval`** event on the run's stream (so the UI shows Allow/Always/Deny instantly)
+and `GET /approvals?sessionId=` (poll). A second request, `POST /approve {id, decision}` with decision
+`allow` | `always` | `deny`, resolves it and the run continues. "always" also remembers the rule for
+the session. If nobody answers within `permissions.approval-timeout-seconds`, the
+`permissions.approval-timeout-action` (default `deny`) is applied, so a run never hangs forever.
+
+The web UI wires this up: pick **ask** mode, and gated tools pop an "Approval needed" banner with
+buttons. `console` mode (the default) is unchanged.
+
+> Honest scope: remote approvals require the streaming path (or polling `/approvals`) -- a plain
+> blocking `POST /chat` in remote+ask mode will just block until approved or timed out. Use the UI or
+> `/chat/stream`. Decisions aren't authenticated beyond the API key, so anyone with a key can approve.
+
+### Trying it out
+
+1. Set `permissions.prompt-mode=remote`, restart, open the UI, pick **ask** mode, and ask it to write a
+   file ("create notes.txt with 'hello'"). An **Approval needed** banner appears with the tool + args;
+   click **Allow once** and the run continues. **Deny** makes the tool return a not-approved result the
+   model reacts to.
+2. **Always**: approve with **Allow always** and the same action won't prompt again this session.
+3. **Timeout**: set `permissions.approval-timeout-seconds=10`, trigger an approval, ignore it ~10s --
+   the run proceeds as `deny` and reports it.
+4. **API only**: `GET /approvals?sessionId=<id>` shows what's pending; `POST /approve` resolves it.
 
 ## Configuration (`application.properties`)
 
@@ -520,6 +556,9 @@ auth.header=X-API-Key               # also accepts "Authorization: Bearer <key>"
 auth.keys=                          # comma-separated "key" or "label:key"
 auth.open-paths=/health,/,/index.html  # always allowed (incl. the web UI page)
 auth.rate-limit-per-minute=0        # per-key fixed-window limit; 0 = unlimited
+permissions.prompt-mode=console     # console | remote (answer ASK prompts via /approve + the UI)
+permissions.approval-timeout-seconds=120  # parked approval waits this long, then applies...
+permissions.approval-timeout-action=deny  # ...this default (so a run never hangs forever)
 llama.cache-prompt=true             # reuse prefix KV cache per request (latency)
 llama.cache-reuse=256               # reuse KV chunks across requests; 0 to disable (old servers)
 llama.draft-hf-model=               # speculative decoding: HF draft model (off if blank)
