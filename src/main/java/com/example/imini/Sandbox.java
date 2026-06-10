@@ -48,6 +48,11 @@ public class Sandbox {
     private final List<String> allow = new ArrayList<>();
     private final List<String> deny = new ArrayList<>(DEFAULT_DENY);
 
+    /** The resolved workspace root (absolute, normalized). */
+    public Path root() {
+        return root;
+    }
+
     @PostConstruct
     public void load() {
         root = (workspaceRootCfg == null || workspaceRootCfg.isBlank()

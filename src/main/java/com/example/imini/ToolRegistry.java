@@ -16,8 +16,10 @@ public class ToolRegistry {
 
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
-    public ToolRegistry(BuiltinTools builtins, SubAgent subAgent, McpManager mcp, RetrievalService retrieval) {
+    public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
+                        McpManager mcp, RetrievalService retrieval) {
         for (Tool t : builtins.all()) register(t);
+        for (Tool t : codebase.all()) register(t);   // glob, grep, repo_tree, read_many, git_status, git_diff
         register(delegateTool(subAgent));
         register(retrieval.searchTool());          // search_memory (RAG over the workspace)
         register(retrieval.indexTool());            // index_workspace
