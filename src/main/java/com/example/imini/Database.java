@@ -39,7 +39,8 @@ public class Database {
             "CREATE TABLE mem_chunks (id TEXT PRIMARY KEY, source TEXT NOT NULL, ordinal INTEGER NOT NULL, " +
                     "text TEXT NOT NULL, embedding TEXT, indexed_at INTEGER NOT NULL)",
             "CREATE INDEX idx_chunk_source ON mem_chunks(source)",
-            "ALTER TABLE mem_chunks ADD COLUMN symbols TEXT");
+            "ALTER TABLE mem_chunks ADD COLUMN symbols TEXT",
+            "ALTER TABLE checkpoints ADD COLUMN group_id TEXT");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

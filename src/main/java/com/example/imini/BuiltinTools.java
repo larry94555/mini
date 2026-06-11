@@ -303,18 +303,23 @@ public class BuiltinTools {
                 }
                 // write only the files whose content actually changed; snapshot each first
                 List<String> changed = new ArrayList<>();
-                for (Map.Entry<String, String> en : result.entrySet()) {
-                    String original = contents.get(en.getKey());
-                    if (en.getValue().equals(original)) continue;
-                    Path p = Path.of(en.getKey());
-                    checkpoints.snapshot(p);
-                    if (p.getParent() != null) Files.createDirectories(p.getParent());
-                    Files.writeString(p, en.getValue());
-                    changed.add(en.getKey());
+                checkpoints.beginBatch();   // group this patch's snapshots into one change set
+                try {
+                    for (Map.Entry<String, String> en : result.entrySet()) {
+                        String original = contents.get(en.getKey());
+                        if (en.getValue().equals(original)) continue;
+                        Path p = Path.of(en.getKey());
+                        checkpoints.snapshot(p);
+                        if (p.getParent() != null) Files.createDirectories(p.getParent());
+                        Files.writeString(p, en.getValue());
+                        changed.add(en.getKey());
+                    }
+                } finally {
+                    checkpoints.endBatch();
                 }
                 if (changed.isEmpty()) return "No changes (edits produced identical content).";
                 return "Applied " + specs.size() + " edit(s) across " + changed.size() + " file(s): "
-                        + String.join(", ", changed) + ". Snapshots saved; review with git_diff.";
+                        + String.join(", ", changed) + ". Snapshots saved as one change set; rewind undoes them together. Review with git_diff.";
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
