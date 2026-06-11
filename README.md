@@ -19,6 +19,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | core | Agent loop + tools + streaming | think -> act -> observe; watch tokens live |
 | serving | Model profiles + GPU/threads/parallel + watchdog | config-driven llama-server: pick model/quant, offload, batch, auto-restart |
 | 1 | Precise editing + checkpoint/rewind | `view` / `edit_file`; undo any edit |
+| coding | Atomic multi-edit | `apply_patch`: many find/replace + new-file edits in one validated, rewindable step |
 | 1 | Sessions | multi-turn memory, persisted and resumable |
 | 1 | MCP client | load tools from external MCP servers (optional) |
 | 2 | Permissions + plan mode | allow/deny rules, remembered decisions, workspace confinement, plan mode |
@@ -65,7 +66,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `LlamaClient.java` | model calls: `chat`, `chatStream` (cancellable), `summaryChat`, `countTokens` |
 | `AgentEngine.java` | the loop: streaming, compaction, modes, plan, parallel tools, interrupt, fencing, guards |
 | `ContextManager.java` | real-token counting, durable memory note, tool-output trimming |
-| `BuiltinTools.java` | read_file, view, list_dir, write_file, edit_file, run_command, web_fetch, web_search, todo_write |
+| `BuiltinTools.java` | read_file, view, list_dir, write_file, edit_file, apply_patch, run_command, web_fetch, web_search, todo_write |
 | `CodebaseTools.java` | glob, grep, repo_tree, read_many, outline, find_symbol, git_status, git_diff, git_log, git_blame |
 | `HtmlExtractor.java` | jsoup main-article extraction |
 | `Untrusted.java` | fences untrusted tool output (prompt-injection hardening) |
@@ -524,6 +525,39 @@ buttons. `console` mode (the default) is unchanged.
 3. **Timeout**: set `permissions.approval-timeout-seconds=10`, trigger an approval, ignore it ~10s --
    the run proceeds as `deny` and reports it.
 4. **API only**: `GET /approvals?sessionId=<id>` shows what's pending; `POST /approve` resolves it.
+
+## Atomic multi-edit (apply_patch)
+
+`edit_file` changes one snippet at a time; a multi-file change then costs a round-trip (and an approval)
+per hunk, and a small model can leave a half-applied mess if one step fails. `apply_patch` does the
+whole change in **one validated, atomic step**.
+
+Pass an `edits` array; each entry is either a **modify** (`{path, find, replace}` -- `find` must be
+unique in the file) or a **create** (`{path, create}` -- the full content of a new file). imini:
+
+1. checks every target is inside the workspace,
+2. applies all edits to an in-memory copy and **validates everything first** -- a missing/duplicate
+   `find`, a create over an existing file, or a modify of a missing file aborts the whole batch and
+   **writes nothing**,
+3. snapshots each file it is about to change (so each is rewindable), then writes them, and
+4. reports which files changed so you can review with `git_diff`.
+
+Edits apply in order, so you can `create` a file and then `find/replace` within it in the same patch.
+It is mutating, so it goes through the usual approval flow once for the batch.
+
+> Honest scope: `find` is exact-substring-unique (same model as `edit_file`), not a fuzzy/diff patch --
+> include enough surrounding text to be unique. Atomicity covers the validation step (nothing is
+> written unless all edits validate); it is not a transaction across a crash mid-write. Rewind is
+> per-file (each changed file is snapshotted), so undoing a whole patch means rewinding each file.
+
+### Trying it out
+
+1. **Two files at once.** `ask.bat "Use apply_patch to rename the method foo to bar in Service.java
+   (its declaration and the one call in Controller.java) in a single patch, then git_diff."`
+2. **Create + wire up.** `ask.bat "apply_patch: create util/Clock.java with a now() method and add a
+   call to it in App.java, in one patch."`
+3. **Atomic abort.** Give it a patch where one `find` is wrong on purpose -- it reports
+   `PATCH ABORTED (no changes written): ...` and leaves every file untouched.
 
 ## Codebase navigation
 
