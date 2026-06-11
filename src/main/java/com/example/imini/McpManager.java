@@ -38,6 +38,8 @@ import java.util.concurrent.TimeoutException;
  */
 @Component
 public class McpManager {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(McpManager.class);
+
 
     // The protocol version we advertise. Servers negotiate; this one is widely supported.
     private static final String PROTOCOL_VERSION = "2024-11-05";
@@ -58,7 +60,7 @@ public class McpManager {
     @SuppressWarnings("unchecked")
     public void start() {
         if (!Files.exists(CONFIG)) {
-            System.out.println("[mcp] no mcp.json found; MCP integration is off.");
+            log.info("[mcp] no mcp.json found; MCP integration is off.");
             return;
         }
         int serverCount = 0;
@@ -70,9 +72,9 @@ public class McpManager {
                 serverCount++;
             }
         } catch (Exception ex) {
-            System.out.println("[mcp] failed to read mcp.json: " + ex.getMessage());
+            log.warn("[mcp] failed to read mcp.json: " + ex.getMessage());
         }
-        System.out.println("[mcp] registered " + tools.size() + " tool(s) from " + serverCount + " server(s).");
+        log.info("[mcp] registered " + tools.size() + " tool(s) from " + serverCount + " server(s).");
     }
 
     @SuppressWarnings("unchecked")
@@ -122,10 +124,10 @@ public class McpManager {
                 // MCP tools are external code -> treat as mutating so the permission gate applies.
                 tools.add(new Tool(exposedName, "[MCP:" + name + "] " + desc, schema, true, true,
                         callArgs -> srv.callTool(original, callArgs)));
-                System.out.println("[mcp] " + name + " -> tool " + exposedName);
+                log.info("[mcp] " + name + " -> tool " + exposedName);
             }
         } catch (Exception ex) {
-            System.out.println("[mcp] server '" + name + "' failed: " + ex.getMessage());
+            log.warn("[mcp] server '" + name + "' failed: " + ex.getMessage());
         }
     }
 

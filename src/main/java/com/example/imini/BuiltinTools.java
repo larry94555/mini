@@ -34,6 +34,8 @@ import java.util.stream.Collectors;
  */
 @Component
 public class BuiltinTools {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BuiltinTools.class);
+
 
     private final HttpClient http = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NORMAL)   // CNN etc. redirect; without this the body is empty
@@ -227,7 +229,7 @@ public class BuiltinTools {
                 String sid = SessionContext.sessionId();
                 todos.set(sid, items);
                 String rendered = todos.render(sid);
-                System.out.println("[todo] updated:\n" + rendered);
+                log.debug("[todo] updated:\n" + rendered);
                 return "Updated todo list:\n" + rendered;
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();

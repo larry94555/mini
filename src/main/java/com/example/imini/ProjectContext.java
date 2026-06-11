@@ -16,6 +16,8 @@ import java.util.List;
  */
 @Component
 public class ProjectContext {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ProjectContext.class);
+
 
     private static final List<String> NAMES = List.of("IMINI.md", "CLAUDE.md", "AGENTS.md");
 
@@ -29,7 +31,7 @@ public class ProjectContext {
                         return "\n\n--- Project instructions (from " + name + ") ---\n" + content;
                     }
                 } catch (Exception e) {
-                    System.out.println("[project] could not read " + name + ": " + e.getMessage());
+                    log.warn("[project] could not read " + name + ": " + e.getMessage());
                 }
             }
         }

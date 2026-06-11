@@ -760,3 +760,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** "use find_symbol to locate where 'decide' is defined, then view those lines."
 - **Observe:** `path:line: method decide` for the declaration(s) only (not every call site, which is
   what grep would give). Searching a name that isn't declared returns "(no declaration of 'X' found)".
+
+---
+
+# Structured logging
+
+## 80. Logging config wiring (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `LoggingConfigTest` passes -- `logback-spring.xml` defines a plain console appender and a
+  JSON appender using Logback's `JsonEncoder`, with the `json` Spring profile selecting JSON and the
+  default (`!json`) selecting plain text.
+
+## 81. Levels + plain logs (manual)
+
+- **Run:** `run.bat` (default profile).
+- **Observe:** logs are leveled/timestamped via Logback, e.g.
+  `... INFO  c.e.imini.LlamaServerManager : [llama] ready.` and
+  `... INFO  c.e.imini.Metrics : [metrics] run endpoint=/chat/stream ...`. Set
+  `logging.level.com.example.imini=DEBUG` to see tool/todo detail; `=WARN` to quiet it. The streamed
+  answer and the ASK-mode console prompts are unchanged (not routed through the logger).
+
+## 82. JSON logs (manual)
+
+- **Run:** `java -jar target/imini.jar --spring.profiles.active=json` (or `SPRING_PROFILES_ACTIVE=json`,
+  or add `--spring.profiles.active=json` to the imini service in `docker-compose.yml`).
+- **Observe:** each log line is a JSON object (timestamp, level, logger, thread, message). Pipe through
+  `jq` or feed to a log shipper. Switch back by dropping the profile.

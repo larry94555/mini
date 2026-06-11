@@ -19,6 +19,8 @@ import java.util.concurrent.Semaphore;
  */
 @Component
 public class RunService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RunService.class);
+
 
     @Value("${llama.parallel:1}") private int slots;
     @Value("${agent.max-concurrent-runs:0}") private int maxConcurrentCfg; // 0 => use llama.parallel
@@ -36,7 +38,7 @@ public class RunService {
             t.setDaemon(true);
             return t;
         });
-        System.out.println("[runs] concurrency bounded to " + limit + " (model slots).");
+        log.info("[runs] concurrency bounded to " + limit + " (model slots).");
     }
 
     public int limit() { return limit; }

@@ -32,6 +32,8 @@ import java.util.Set;
  */
 @Component
 public class AuthFilter implements Filter {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AuthFilter.class);
+
 
     @Value("${auth.enabled:false}") private boolean enabled;
     @Value("${auth.header:X-API-Key}") private String header;
@@ -54,7 +56,7 @@ public class AuthFilter implements Filter {
         openPaths = new LinkedHashSet<>();
         for (String p : openPathsCfg.split(",")) if (!p.isBlank()) openPaths.add(p.trim());
         limiter = new RateLimiter(rateLimitPerMinute);
-        System.out.println("[auth] enabled=" + enabled + "; keys=" + keyToLabel.size()
+        log.info("[auth] enabled=" + enabled + "; keys=" + keyToLabel.size()
                 + "; rate-limit/min=" + rateLimitPerMinute + "; open=" + openPaths);
     }
 

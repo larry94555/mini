@@ -50,6 +50,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | ui | Remote approvals | answer ASK-mode prompts in the browser/API instead of the server console |
 | ops | Docker / one-command run | `docker compose up` brings up imini + a llama.cpp server |
 | ops | Continuous integration | GitHub Actions runs `mvn test` + a Docker build on every push/PR |
+| ops | Structured logging | SLF4J/Logback with levels; optional one-JSON-object-per-line output |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -100,6 +101,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `AgentController.java` | REST endpoints |
 | `Sse.java` | SSE wire contract: JSON encode/decode + frame/parse (testable) |
 | `.github/workflows/ci.yml` | CI: `mvn test` + Docker build on push/PR |
+| `logback-spring.xml` | logging config: plain console, or JSON under the `json` profile |
 | `Tool.java`, `AgentResult.java` | value types |
 
 Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager, PermissionService, InterruptService, HookService;
@@ -659,6 +661,44 @@ So if anyone ever "simplifies" the SSE encoding back to raw text, CI goes red.
 mvn test                 # the whole suite
 mvn -Dtest=SseSerializationTest test   # just the SSE contract
 ```
+
+## Logging
+
+Operational logs go through **SLF4J/Logback** (bundled with Spring Boot -- no extra dependency)
+instead of `System.out`. Every component logs through a named logger at a sensible level: startup and
+lifecycle lines at `INFO`, recoverable problems (model not ready, falling back to in-memory, failed to
+read a config, watchdog restart) at `WARN`, and chatty internals (todo/tool detail) at `DEBUG`.
+
+Two things are deliberately *not* routed through the logger: the streamed model answer on the console
+(`ConsoleSink`, which is the CLI's actual output) and the interactive ASK-mode permission/deadline
+prompts (which read from stdin).
+
+**Levels.** Tune verbosity per package in `application.properties`:
+
+```
+logging.level.com.example.imini=INFO   # set DEBUG to see tool/todo detail; WARN to quiet it down
+```
+
+**JSON output.** Run with the `json` Spring profile to emit one JSON object per log line (timestamp,
+level, logger, thread, message, ...), using Logback's built-in `JsonEncoder` -- handy for `docker logs`
+and log shippers:
+
+```
+# local
+mvn spring-boot:run -Dspring-boot.run.profiles=json
+java -jar target/imini.jar --spring.profiles.active=json
+# docker (add to the imini service "command:" list in docker-compose.yml)
+--spring.profiles.active=json
+# or, anywhere, via env
+SPRING_PROFILES_ACTIVE=json
+```
+
+Plain text is the default; the profile only swaps the console appender (see `logback-spring.xml`).
+
+> Honest scope: messages are still human-readable strings (the JSON `message` field carries the
+> familiar `[llama] ...` / `[metrics] run ...` text); this isn't full key-per-field structured logging
+> with MDC -- it's leveled, categorized, greppable logs with a one-flag JSON mode, which is what a
+> small deployment actually needs. JSON mode needs Logback 1.5+ (shipped with Spring Boot 3.3+).
 
 ## Configuration (`application.properties`)
 
