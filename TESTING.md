@@ -811,3 +811,23 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** "git_blame README.md lines 1 to 40."
 - **Observe:** each line prefixed with the commit/author/date that last changed it. Omitting the range
   blames the whole file (output is capped); a start without an end blames a bounded window.
+
+---
+
+# Symbol-aware retrieval boost
+
+## 86. Symbol boost scoring (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RetrievalSymbolBoostTest` passes -- `symbolBoost` fires only on an exact match between a
+  query term and a chunk's declaration name, counts each query term once, is disabled by weight 0 or
+  empty/null symbols, and a chunk that *declares* `decide` outranks one that merely *mentions* it.
+
+## 87. Symbol-aware ranking end to end (manual)
+
+- **Setup:** index a repo (`POST /index` or the `index_workspace` tool).
+- **Run (auto mode):** "search_memory for 'decide'" (a method declared in PermissionService).
+- **Observe:** the chunk from the file that *declares* `decide` ranks at/near the top, above files that
+  only call it. Set `retrieval.symbol-boost-weight=0` and re-ask to see the difference (pure lexical).
+- **Note:** after upgrading an existing install, run `index_workspace` once so the new `symbols`
+  column is populated (the DB migration adds the column; re-indexing fills it).

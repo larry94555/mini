@@ -38,7 +38,7 @@ public class RetrievalService {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RetrievalService.class);
 
 
-    public record Chunk(String id, String source, int ordinal, String text, float[] embedding) {}
+    public record Chunk(String id, String source, int ordinal, String text, float[] embedding, String symbols) {}
 
     private final Database db;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -60,6 +60,7 @@ public class RetrievalService {
     @Value("${retrieval.embed-model:nomic-embed-text}") private String embedModel;
     @Value("${llama.port:8081}") private int llamaPort;
     @Value("${llama.client-host:localhost}") private String clientHost;
+    @Value("${retrieval.symbol-boost-weight:2.0}") private double symbolBoostWeight;
 
     private static final Set<String> SKIP_DIRS =
             Set.of(".git", "target", "build", "node_modules", ".imini", ".maven", ".idea", "out");
@@ -117,11 +118,12 @@ public class RetrievalService {
                     if (Files.size(p) > maxFileKb * 1024L) continue;
                     String content = Files.readString(p);
                     String rel = root.relativize(p.toAbsolutePath().normalize()).toString();
+                    String fileName = p.getFileName().toString();
                     int ord = 0;
                     for (String chunk : chunk(content, chunkSize)) {
                         if (chunk.isBlank()) continue;
                         store(new Chunk(UUID.randomUUID().toString(), rel, ord++, chunk,
-                                useEmbeddings ? embed(chunk) : null), now);
+                                useEmbeddings ? embed(chunk) : null, symbolsOf(fileName, chunk)), now);
                         chunks++;
                     }
                     files++;
@@ -152,8 +154,8 @@ public class RetrievalService {
     private void store(Chunk c, long now) {
         if (db.available()) {
             String emb = c.embedding() == null ? null : floatsToJson(c.embedding());
-            db.update("INSERT INTO mem_chunks(id, source, ordinal, text, embedding, indexed_at) VALUES(?,?,?,?,?,?)",
-                    c.id(), c.source(), c.ordinal(), c.text(), emb, now);
+            db.update("INSERT INTO mem_chunks(id, source, ordinal, text, embedding, symbols, indexed_at) VALUES(?,?,?,?,?,?,?)",
+                    c.id(), c.source(), c.ordinal(), c.text(), emb, c.symbols(), now);
         } else {
             mem.add(c);
         }
@@ -169,9 +171,9 @@ public class RetrievalService {
 
     private List<Chunk> allChunks() {
         if (db.available()) {
-            return db.query("SELECT id, source, ordinal, text, embedding FROM mem_chunks",
+            return db.query("SELECT id, source, ordinal, text, embedding, symbols FROM mem_chunks",
                     rs -> new Chunk(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getString(4),
-                            jsonToFloats(rs.getString(5))));
+                            jsonToFloats(rs.getString(5)), rs.getString(6)));
         }
         return new ArrayList<>(mem);
     }
@@ -197,7 +199,7 @@ public class RetrievalService {
         } else {
             List<String> qt = tokenize(query);
             for (Chunk c : chunks) {
-                double s = lexicalScore(qt, c.text());
+                double s = lexicalScore(qt, c.text()) + symbolBoost(qt, c.symbols(), symbolBoostWeight);
                 if (s > 0) scored.add(new Scored(c, s));
             }
         }
@@ -228,6 +230,34 @@ public class RetrievalService {
             if (count > 0) score += 1 + Math.log(1 + count);
         }
         return score;
+    }
+
+    /** Declaration names found in a chunk (via CodebaseTools), space-joined; "" if none/unsupported. */
+    private static String symbolsOf(String fileName, String chunk) {
+        List<CodebaseTools.Symbol> syms = CodebaseTools.extractSymbols(fileName, List.of(chunk.split("\n", -1)));
+        if (syms.isEmpty()) return "";
+        Set<String> names = new LinkedHashSet<>();
+        for (CodebaseTools.Symbol sym : syms) names.add(sym.name());
+        return String.join(" ", names);
+    }
+
+    /**
+     * Extra score when a query term exactly matches a declaration name in the chunk (class/method/
+     * function/...), so the file that DEFINES a symbol ranks above files that merely mention it.
+     * weight &lt;= 0 disables it. Pure + static for unit testing.
+     */
+    public static double symbolBoost(List<String> queryTokens, String symbols, double weight) {
+        if (weight <= 0 || symbols == null || symbols.isBlank() || queryTokens.isEmpty()) return 0;
+        Set<String> symSet = new LinkedHashSet<>();
+        for (String sName : symbols.toLowerCase(Locale.ROOT).split("\\s+")) {
+            if (!sName.isBlank()) symSet.add(sName);
+        }
+        double boost = 0;
+        Set<String> seen = new LinkedHashSet<>();
+        for (String q : queryTokens) {
+            if (seen.add(q) && symSet.contains(q)) boost += weight;
+        }
+        return boost;
     }
 
     public static List<String> tokenize(String s) {
