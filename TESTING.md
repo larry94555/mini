@@ -736,3 +736,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** under the repo's **Actions** tab, the `CI` workflow runs two jobs -- **build-test**
   (`mvn test` on JDK 21) and **docker-build** (`docker build .`). The badge at the top of the README
   reflects the latest result. Break a test or the Dockerfile and the corresponding job goes red.
+
+---
+
+# Symbol-aware search
+
+## 77. Symbol extraction (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SymbolToolsTest` passes -- `extractSymbols` finds Java types/methods (skipping
+  commented-out declarations), Python classes/defs (incl. async), JS/TS classes/functions/arrow
+  functions/interfaces/types; unsupported extensions return empty; and `find_symbol` reports the
+  declaration `Foo.java:1: class Foo` but not the `new Foo()` usage.
+
+## 78. outline (manual)
+
+- **Run (auto mode):** "outline AgentEngine.java"
+- **Observe:** a list like `   42  method   converse` -- declarations with line numbers. A file with no
+  recognized symbols (e.g. a `.txt`) returns a clear "(no symbols recognized...)" note.
+
+## 79. find_symbol (manual)
+
+- **Run:** "use find_symbol to locate where 'decide' is defined, then view those lines."
+- **Observe:** `path:line: method decide` for the declaration(s) only (not every call site, which is
+  what grep would give). Searching a name that isn't declared returns "(no declaration of 'X' found)".
