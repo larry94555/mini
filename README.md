@@ -1,5 +1,7 @@
 # imini — a low-end Claude Code (learning project)
 
+[![CI](https://github.com/larry94555/mini/actions/workflows/ci.yml/badge.svg)](https://github.com/larry94555/mini/actions/workflows/ci.yml)
+
 A minimal but real agent harness over a local `llama-server` running
 `Qwen/Qwen2.5-3B-Instruct`. It makes the boundary between **the model** (reasoning) and **the
 harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API key.
@@ -46,6 +48,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
 | ui | Remote approvals | answer ASK-mode prompts in the browser/API instead of the server console |
 | ops | Docker / one-command run | `docker compose up` brings up imini + a llama.cpp server |
+| ops | Continuous integration | GitHub Actions runs `mvn test` + a Docker build on every push/PR |
 | - | Runaway guards | caps on generation length, time, repetition, repeated calls |
 
 ---
@@ -94,6 +97,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `AgentLoop.java` | main agent: `run` (one-shot) and `chat` (session) |
 | `AgentProfile.java` | optional coding-workflow guidance added to the system prompt |
 | `AgentController.java` | REST endpoints |
+| `Sse.java` | SSE wire contract: JSON encode/decode + frame/parse (testable) |
+| `.github/workflows/ci.yml` | CI: `mvn test` + Docker build on push/PR |
 | `Tool.java`, `AgentResult.java` | value types |
 
 Bean wiring (no cycles): AgentEngine -> LlamaClient, ContextManager, PermissionService, InterruptService, HookService;
@@ -612,6 +617,40 @@ What the compose file wires up:
    volume) and the model is already cached (the `llama-cache` volume), so startup is quick.
 4. To turn on auth/remote approvals in Docker, add the relevant flags to the `imini` `command:` list
    (e.g. `--auth.enabled=true --auth.keys=alice:s3cret --permissions.prompt-mode=remote`).
+
+## Continuous integration
+
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`:
+
+- **build-test** -- sets up JDK 21 (Temurin, Maven cache) and runs `mvn -B -ntp test`: the whole unit
+  suite, including the SSE serialization test below.
+- **docker-build** -- runs `docker build .`, which compiles and packages inside the image, so a broken
+  `Dockerfile` or build fails CI too.
+
+The badge at the top of this file turns green/red with the latest run. Nothing to configure -- pushing
+the workflow file is enough; results show under the repo's **Actions** tab.
+
+### The SSE serialization test
+
+The "missing spaces in the UI" bug came from an untested streaming-serialization path: SSE strips a
+leading space after `data:` and treats newlines as frame separators, so raw word-piece tokens like
+`" on"` arrived as `"on"`. The fix JSON-encodes each payload (see `Sse`), and `SseSerializationTest`
+now locks that contract in:
+
+- token-leading spaces and embedded newlines survive `encode` -> `decode`;
+- the encoded payload is a quoted JSON string (so SSE's leading-space strip can't bite);
+- the regression itself: streaming the word-piece tokens `"Based"`, `" on"`, `" the"`, ... through the
+  full `frame`/`parse` round-trip reassembles to `"Based on the search results"`, not
+  `"Basedonthesearchresults"`.
+
+So if anyone ever "simplifies" the SSE encoding back to raw text, CI goes red.
+
+### Running it locally
+
+```
+mvn test                 # the whole suite
+mvn -Dtest=SseSerializationTest test   # just the SSE contract
+```
 
 ## Configuration (`application.properties`)
 

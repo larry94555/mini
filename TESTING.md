@@ -717,3 +717,22 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** imini tends to `grep`/`glob` to locate code, `view` it, make a targeted `edit_file`,
   then `git_diff` to confirm -- rather than guessing paths. Re-run with `agent.profile=general` to
   compare. (Behavioral, model-dependent; the deterministic guarantee is covered by case 73.)
+
+---
+
+# CI + SSE serialization
+
+## 75. SSE wire contract (deterministic, no model)
+
+- **Run:** `mvn test` (or `mvn -Dtest=SseSerializationTest test`)
+- **Observe:** `SseSerializationTest` passes -- token-leading spaces and newlines survive
+  `Sse.encode` -> `Sse.decode`; the encoded payload is a quoted JSON string; and the word-piece tokens
+  `"Based"`, `" on"`, `" the"`, `" search"`, `" results"` streamed through `frame`/`parse` reassemble
+  to `"Based on the search results"` (the exact regression that produced "Basedonthesearchresults").
+
+## 76. CI runs on push/PR (manual)
+
+- **Run:** push a commit or open a PR on GitHub.
+- **Observe:** under the repo's **Actions** tab, the `CI` workflow runs two jobs -- **build-test**
+  (`mvn test` on JDK 21) and **docker-build** (`docker build .`). The badge at the top of the README
+  reflects the latest result. Break a test or the Dockerfile and the corresponding job goes red.
