@@ -63,7 +63,13 @@ class CodebaseToolsTest {
         assertFalse(t1.contains("node_modules"), "ignored dirs are not listed");
         assertFalse(t1.contains("Foo.java"), "depth 1 should not reach nested files");
 
-        String t3 = CodebaseTools.tree(root, root, 3, 300);
-        assertTrue(t3.contains("Foo.java"), "depth 3 reaches the java files");
+        // src/main/java/Foo.java sits FOUR levels below the root (src -> main -> java -> Foo.java),
+        // so depth 3 reaches the java/ directory but not the files inside it; depth 4 reaches them.
+        String d3 = CodebaseTools.tree(root, root, 3, 300);
+        assertTrue(d3.contains("java/"), "depth 3 reaches the java/ directory");
+        assertFalse(d3.contains("Foo.java"), "depth 3 stops above the files inside java/");
+
+        String d4 = CodebaseTools.tree(root, root, 4, 300);
+        assertTrue(d4.contains("Foo.java"), "depth 4 reaches the java files");
     }
 }
