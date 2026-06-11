@@ -44,6 +44,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | coding | Coding profile | `agent.profile=coding` adds an explicit orient->locate->read->edit->verify workflow |
 | memory | Persistence (SQLite) | sessions + per-session checkpoints survive restarts (migrations) |
 | memory | Retrieval / RAG | index workspace files; search_memory finds relevant snippets |
+| memory | Symbol-aware ranking | search_memory boosts the chunk that *declares* a queried name |
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
 | ops | Observability | /metrics snapshot + structured run logs |
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
@@ -85,7 +86,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `GrammarBuilder.java` | builds a GBNF grammar to constrain tool calls (opt-in) |
 | `Sandbox.java` | run_command screening, read confinement, optional container exec |
 | `Database.java` | SQLite connection + migration runner (sessions/checkpoints/index) |
-| `RetrievalService.java` | workspace indexing + search_memory/index_workspace tools |
+| `RetrievalService.java` | workspace indexing + search_memory/index_workspace tools (with symbol boost) |
 | `AuthFilter.java` | API-key auth + per-key rate limiting (servlet filter) |
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
@@ -401,6 +402,15 @@ embedder).
 > that share words with the query, which is great for code/identifier lookup and weak for paraphrase.
 > Turn on embeddings for semantic search. The index is a snapshot; re-run `index_workspace` after big
 > changes (search_memory auto-indexes once if the index is empty).
+
+**Symbol-aware boost.** Lexical overlap alone ranks a file that *mentions* `decide` the same as the
+one that *defines* it. So at index time imini also extracts each chunk's declarations (reusing the
+symbol logic behind `outline`/`find_symbol` -- java, python, js/ts, kotlin, go) and stores them
+alongside the chunk. At search time, every query term that exactly matches a declaration name adds
+`retrieval.symbol-boost-weight` (default 2.0) to that chunk's score -- so "where is decide defined"
+surfaces the file that declares `decide` first. Set the weight to 0 to disable it. This augments the
+default lexical mode; embeddings mode still ranks purely by cosine. The `symbols` column is added to
+the `mem_chunks` table by a forward migration, so existing databases just need a re-`index_workspace`.
 
 ### Trying it out
 
@@ -763,6 +773,7 @@ retrieval.top-k=5
 retrieval.embeddings=false          # true = semantic search via a llama embedding endpoint
 retrieval.embed-base-url=           # blank = main server; better: a 2nd server with --embeddings
 retrieval.embed-model=nomic-embed-text
+retrieval.symbol-boost-weight=2.0   # boost chunks that DECLARE a queried name (0 disables; lexical mode)
 auth.enabled=false                  # true = require an API key on every non-open request
 auth.header=X-API-Key               # also accepts "Authorization: Bearer <key>"
 auth.keys=                          # comma-separated "key" or "label:key"
