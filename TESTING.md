@@ -787,3 +787,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   or add `--spring.profiles.active=json` to the imini service in `docker-compose.yml`).
 - **Observe:** each log line is a JSON object (timestamp, level, logger, thread, message). Pipe through
   `jq` or feed to a log shipper. Switch back by dropping the profile.
+
+---
+
+# git_log / git_blame
+
+## 83. Git arg builders (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `GitToolsTest` passes -- `gitLogArgs` builds `log --pretty=... --date=short -n N`
+  (clamped to >=1) and appends `-- <path>` when given; `gitBlameArgs` builds `-L start,end` for a
+  range, `-L start,+200` for a bounded start-only window, and no `-L` for a whole-file blame.
+
+## 84. git_log (manual)
+
+- **Setup:** workspace is a git repo with a couple of commits.
+- **Run (auto mode):** "Use git_log to show the last 5 commits, then git_log on README.md."
+- **Observe:** lines like `3c366e4 2026-06-11 alice: edit f`, newest first; the path-scoped call shows
+  only that file's history. A non-repo (or no git) returns a clean `ERROR: ... (is git installed...)`.
+
+## 85. git_blame (manual)
+
+- **Run:** "git_blame README.md lines 1 to 40."
+- **Observe:** each line prefixed with the commit/author/date that last changed it. Omitting the range
+  blames the whole file (output is capped); a start without an end blames a bounded window.
