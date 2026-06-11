@@ -61,7 +61,7 @@ public class CodebaseTools {
 
     public List<Tool> all() {
         return List.of(glob(), grep(), repoTree(), readMany(), outline(), findSymbol(),
-                gitStatus(), gitDiff());
+                gitStatus(), gitDiff(), gitLog(), gitBlame());
     }
 
     // ---------------------------------------------------------------------
@@ -204,6 +204,63 @@ public class CodebaseTools {
             String out = runGit(cmd);
             return out.isBlank() ? "(no changes)" : truncate(out, 8000);
         });
+    }
+
+    public Tool gitLog() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("path", strProp("Optional path to limit the history to (a file or directory)."));
+        props.put("max_count", intProp("How many recent commits to show (default 20)."));
+        return new Tool("git_log",
+                "Show recent commit history (hash, date, author, subject), most recent first. Pass a "
+                        + "path to see just that file's history. Use it to learn when/why something changed.",
+                schema(props), false, args -> {
+            String path = str(args, "path");
+            if (!path.isBlank()) {
+                String denied = sandbox.enforcePath("git_log", path, false);
+                if (denied != null) return denied;
+            }
+            String out = runGit(gitLogArgs(path, intArg(args, "max_count", 20)));
+            return out.isBlank() ? "(no history)" : truncate(out, 6000);
+        });
+    }
+
+    public Tool gitBlame() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("path", strProp("File to blame (who last changed each line)."));
+        props.put("start", intProp("Optional first line of a range (1-based)."));
+        props.put("end", intProp("Optional last line of the range (defaults to start+200 if only start given)."));
+        return new Tool("git_blame",
+                "Show, for each line of a file, the commit/author/date that last changed it. Pass a "
+                        + "start (and optional end) to blame just a range -- prefer a range on large files.",
+                schema(props, "path"), false, args -> {
+            String path = str(args, "path");
+            if (path.isBlank()) return "ERROR: provide a 'path'.";
+            String denied = sandbox.enforcePath("git_blame", path, false);
+            if (denied != null) return denied;
+            String out = runGit(gitBlameArgs(path, intArg(args, "start", 0), intArg(args, "end", 0)));
+            return out.isBlank() ? "(no blame output)" : truncate(out, 8000);
+        });
+    }
+
+    /** git argv for the log tool (static + pure, so it is unit-testable). */
+    public static List<String> gitLogArgs(String path, int maxCount) {
+        List<String> a = new ArrayList<>(List.of(
+                "log", "--pretty=format:%h %ad %an: %s", "--date=short", "-n",
+                String.valueOf(Math.max(1, maxCount))));
+        if (path != null && !path.isBlank()) { a.add("--"); a.add(path); }
+        return a;
+    }
+
+    /** git argv for the blame tool (static + pure, so it is unit-testable). */
+    public static List<String> gitBlameArgs(String path, int start, int end) {
+        List<String> a = new ArrayList<>(List.of("blame", "--date=short"));
+        if (start > 0 && end >= start) {
+            a.add("-L"); a.add(start + "," + end);
+        } else if (start > 0) {
+            a.add("-L"); a.add(start + ",+200");   // start to a bounded window when no end given
+        }
+        a.add("--"); a.add(path);
+        return a;
     }
 
     public Tool outline() {

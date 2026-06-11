@@ -39,7 +39,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | safety | Command sandbox | deny-only/allowlist screening of run_command (+ optional container exec) |
 | safety | Read confinement | read_file/view/list_dir restricted to the workspace |
 | coding | Codebase navigation | glob, grep, repo_tree, read_many -- deterministic repo search/read |
-| coding | Git awareness | git_status, git_diff over the workspace repo |
+| coding | Git awareness | git_status, git_diff, git_log, git_blame over the workspace repo |
 | coding | Symbol-aware search | outline (declarations in a file) + find_symbol (where a name is defined) |
 | coding | Coding profile | `agent.profile=coding` adds an explicit orient->locate->read->edit->verify workflow |
 | memory | Persistence (SQLite) | sessions + per-session checkpoints survive restarts (migrations) |
@@ -65,7 +65,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `AgentEngine.java` | the loop: streaming, compaction, modes, plan, parallel tools, interrupt, fencing, guards |
 | `ContextManager.java` | real-token counting, durable memory note, tool-output trimming |
 | `BuiltinTools.java` | read_file, view, list_dir, write_file, edit_file, run_command, web_fetch, web_search, todo_write |
-| `CodebaseTools.java` | glob, grep, repo_tree, read_many, outline, find_symbol, git_status, git_diff |
+| `CodebaseTools.java` | glob, grep, repo_tree, read_many, outline, find_symbol, git_status, git_diff, git_log, git_blame |
 | `HtmlExtractor.java` | jsoup main-article extraction |
 | `Untrusted.java` | fences untrusted tool output (prompt-injection hardening) |
 | `CheckpointStore.java` | snapshot-before-edit + rewind |
@@ -532,6 +532,8 @@ confined to the workspace root.
 | `find_symbol` | Find where a `name` is *defined* across the repo (declarations, not usages); optional `dir`, `glob`, `max_results`. |
 | `git_status` | Branch + changed/untracked files (porcelain). |
 | `git_diff` | Unified diff; optional `staged=true` (index) and `path`. |
+| `git_log` | Recent commits (hash, date, author, subject), newest first; optional `path`, `max_count` (default 20). |
+| `git_blame` | Who last changed each line of a file; optional `start`/`end` to blame just a range. |
 
 `glob`/`grep`/`repo_tree` prune heavy directories (`.git`, `target`, `build`, `node_modules`,
 `.idea`, ... ) automatically, `grep` skips files larger than `nav.grep-max-file-kb` and non-UTF-8
@@ -541,7 +543,10 @@ shell out to `git` (read-only subcommands) in the workspace root.
 > Honest scope: `outline`/`find_symbol` use per-language **regex heuristics** (java, python, js/ts,
 > kotlin, go), not a real parser/LSP -- they match the common declaration forms and skip commented-out
 > ones, but modifier-less Java methods and exotic syntax can be missed; treat them as a fast index, not
-> ground truth. `grep`'s regex is Java's `Pattern` (not PCRE/ripgrep), search is a plain file walk (no
+> ground truth. The git tools (`git_status`/`git_diff`/`git_log`/`git_blame`) shell out to read-only
+> `git` subcommands and need `git` on PATH and a real repo (they report cleanly otherwise); prefer a
+> `start`/`end` range with `git_blame` on large files. `grep`'s regex is Java's `Pattern` (not
+> PCRE/ripgrep), search is a plain file walk (no
 > precomputed index, so very large trees are linear), and the git tools require `git` on PATH and a
 > real repo -- they report cleanly when it's missing. These are deliberate, predictable building
 > blocks, not a reimplementation of ripgrep or libgit2.
@@ -557,6 +562,8 @@ shell out to `git` (read-only subcommands) in the workspace root.
 3. **Get oriented.** `ask.bat "Show me repo_tree to depth 2 and explain the project layout."`
 4. **Review changes.** Make an edit, then `ask.bat "Run git_status and git_diff and summarize what
    changed."`
+5. **Trace history.** `ask.bat "Use git_log on AgentEngine.java to see its recent commits, then
+   git_blame lines 1-40 to see who last touched them."`
 
 ## Coding profile
 
