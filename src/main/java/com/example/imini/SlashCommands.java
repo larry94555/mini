@@ -19,6 +19,8 @@ import java.util.Map;
  */
 @Component
 public class SlashCommands {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SlashCommands.class);
+
 
     private static final Path DIR = Path.of("commands");
     private final Map<String, String> templates = new LinkedHashMap<>();
@@ -26,7 +28,7 @@ public class SlashCommands {
     @PostConstruct
     public void load() {
         if (!Files.isDirectory(DIR)) {
-            System.out.println("[commands] no commands/ folder; slash commands are off.");
+            log.info("[commands] no commands/ folder; slash commands are off.");
             return;
         }
         try (var s = Files.list(DIR)) {
@@ -39,9 +41,9 @@ public class SlashCommands {
                 }
             });
         } catch (Exception e) {
-            System.out.println("[commands] could not read commands/: " + e.getMessage());
+            log.warn("[commands] could not read commands/: " + e.getMessage());
         }
-        System.out.println("[commands] loaded " + templates.size() + " slash command(s): " + templates.keySet());
+        log.info("[commands] loaded " + templates.size() + " slash command(s): " + templates.keySet());
     }
 
     public boolean isHelp(String msg) {

@@ -34,6 +34,8 @@ import java.util.stream.Stream;
  */
 @Component
 public class LlamaClient {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LlamaClient.class);
+
 
     private static final double FREQUENCY_PENALTY = 0.5;
     private static final double PRESENCE_PENALTY = 0.3;
@@ -218,7 +220,7 @@ public class LlamaClient {
         message.put("role", "assistant");
 
         if (abortReason != null) {
-            System.out.println("\n[guard] stream stopped: " + abortReason);
+            log.info("\n[guard] stream stopped: " + abortReason);
             content.append("\n[harness stopped this response: ").append(abortReason).append("]");
             message.put("content", content.toString());
             return message;

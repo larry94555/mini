@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 public class SessionStore {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SessionStore.class);
+
 
     private final Database db;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -38,7 +40,7 @@ public class SessionStore {
                     cache.put(id, h);
                     return h;
                 } catch (Exception e) {
-                    System.out.println("[session] could not parse '" + id + "': " + e.getMessage());
+                    log.warn("[session] could not parse '" + id + "': " + e.getMessage());
                 }
             }
         }
@@ -54,7 +56,7 @@ public class SessionStore {
                                 + "ON CONFLICT(session_id) DO UPDATE SET messages=excluded.messages, updated_at=excluded.updated_at",
                         id, json, System.currentTimeMillis());
             } catch (Exception e) {
-                System.out.println("[session] could not save '" + id + "': " + e.getMessage());
+                log.warn("[session] could not save '" + id + "': " + e.getMessage());
             }
         }
     }

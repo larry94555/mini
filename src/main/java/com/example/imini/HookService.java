@@ -28,6 +28,8 @@ import java.util.Map;
  */
 @Component
 public class HookService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(HookService.class);
+
 
     public record Hook(String match, String command) {}
 
@@ -41,16 +43,16 @@ public class HookService {
     @SuppressWarnings("unchecked")
     public void load() {
         if (!Files.exists(CONFIG)) {
-            System.out.println("[hooks] no hooks.json; hooks are off.");
+            log.info("[hooks] no hooks.json; hooks are off.");
             return;
         }
         try {
             Map<String, Object> cfg = mapper.readValue(Files.readAllBytes(CONFIG), Map.class);
             addHooks(pre, cfg.get("preToolUse"));
             addHooks(post, cfg.get("postToolUse"));
-            System.out.println("[hooks] loaded " + pre.size() + " pre / " + post.size() + " post hook(s).");
+            log.info("[hooks] loaded " + pre.size() + " pre / " + post.size() + " post hook(s).");
         } catch (Exception e) {
-            System.out.println("[hooks] could not read hooks.json: " + e.getMessage());
+            log.warn("[hooks] could not read hooks.json: " + e.getMessage());
         }
     }
 
@@ -123,7 +125,7 @@ public class HookService {
             int code = p.waitFor();
             return new Run(code, out);
         } catch (Exception e) {
-            System.out.println("[hooks] failed to run '" + command + "': " + e.getMessage());
+            log.warn("[hooks] failed to run '" + command + "': " + e.getMessage());
             return null; // don't block on hook failure
         }
     }

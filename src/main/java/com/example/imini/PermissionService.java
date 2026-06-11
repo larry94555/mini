@@ -32,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 public class PermissionService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PermissionService.class);
+
 
     public enum Mode { ASK, AUTO, PLAN }
     public enum Kind { ALLOW, DENY, RECORD_PLAN }
@@ -75,13 +77,13 @@ public class PermissionService {
                 Map<String, Object> cfg = mapper.readValue(Files.readAllBytes(CONFIG), Map.class);
                 addAll(allow, cfg.get("allow"));
                 addAll(deny, cfg.get("deny"));
-                System.out.println("[permissions] loaded " + allow.size() + " allow / "
+                log.info("[permissions] loaded " + allow.size() + " allow / "
                         + deny.size() + " deny rule(s) from permissions.json");
             } catch (Exception e) {
-                System.out.println("[permissions] could not read permissions.json: " + e.getMessage());
+                log.warn("[permissions] could not read permissions.json: " + e.getMessage());
             }
         }
-        System.out.println("[permissions] workspace root: " + root + (confine ? " (writes confined)" : ""));
+        log.info("[permissions] workspace root: " + root + (confine ? " (writes confined)" : ""));
     }
 
     private void addAll(Set<String> set, Object rules) {

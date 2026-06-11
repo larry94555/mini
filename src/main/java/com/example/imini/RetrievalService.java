@@ -35,6 +35,8 @@ import java.util.stream.Stream;
  */
 @Component
 public class RetrievalService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RetrievalService.class);
+
 
     public record Chunk(String id, String source, int ordinal, String text, float[] embedding) {}
 
@@ -72,7 +74,7 @@ public class RetrievalService {
                 : Path.of(workspaceRootCfg)).toAbsolutePath().normalize();
         exts = new LinkedHashSet<>();
         for (String e : extensionsCfg.split(",")) if (!e.isBlank()) exts.add(e.trim().toLowerCase(Locale.ROOT));
-        System.out.println("[retrieval] root=" + root + "; mode=" + (useEmbeddings ? "embeddings" : "lexical"));
+        log.info("[retrieval] root=" + root + "; mode=" + (useEmbeddings ? "embeddings" : "lexical"));
     }
 
     // --- tools ---------------------------------------------------------------

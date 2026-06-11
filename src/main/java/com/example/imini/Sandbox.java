@@ -27,6 +27,8 @@ import java.util.Locale;
  */
 @Component
 public class Sandbox {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Sandbox.class);
+
 
     /** Obviously-destructive patterns blocked in deny-only and allowlist modes. Not exhaustive. */
     public static final List<String> DEFAULT_DENY = List.of(
@@ -60,7 +62,7 @@ public class Sandbox {
                 : Path.of(workspaceRootCfg)).toAbsolutePath().normalize();
         addCsv(allow, allowCfg);
         addCsv(deny, denyCfg);
-        System.out.println("[sandbox] command-mode=" + commandMode
+        log.info("[sandbox] command-mode=" + commandMode
                 + (containerCommand != null && !containerCommand.isBlank() ? " (container exec on)" : "")
                 + "; reads confined=" + confineReads + "; root=" + root);
     }

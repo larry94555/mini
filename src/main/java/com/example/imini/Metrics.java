@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.LongAdder;
  */
 @Component
 public class Metrics {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Metrics.class);
+
 
     private final Instant start = Instant.now();
     private final RunService runService; // may be null in unit tests
@@ -60,7 +62,7 @@ public class Metrics {
 
     /** Structured one-line run log for tailing/grep. */
     public void logRun(String endpoint, String sessionId, String keyLabel, long ms, boolean ok) {
-        System.out.println("[metrics] run endpoint=" + endpoint + " session=" + sessionId
+        log.info("[metrics] run endpoint=" + endpoint + " session=" + sessionId
                 + " key=" + (keyLabel == null ? "-" : keyLabel) + " ms=" + ms + " ok=" + ok);
     }
 

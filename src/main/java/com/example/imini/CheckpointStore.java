@@ -27,6 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 public class CheckpointStore {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CheckpointStore.class);
+
 
     private static final Path DIR = Path.of(".imini", "checkpoints");
 
@@ -63,7 +65,7 @@ public class CheckpointStore {
                         .push(new Entry(id, abs, snapPath, existed, Instant.ofEpochMilli(now).toString()));
             }
         } catch (IOException e) {
-            System.out.println("[checkpoint] could not snapshot " + original + ": " + e.getMessage());
+            log.warn("[checkpoint] could not snapshot " + original + ": " + e.getMessage());
         }
     }
 

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging for imini.
+
+  Default: human-readable console (Spring Boot's standard pattern), level INFO.
+  JSON   : run with the "json" Spring profile to emit one JSON object per log line, using Logback's
+           built-in JsonEncoder (Logback 1.5+, bundled with Spring Boot 3.3) so no extra dependency is
+           needed. Activate it with the program argument spring.profiles.active=json (pass it with the
+           usual leading double-dash on the command line), or the env var SPRING_PROFILES_ACTIVE=json.
+
+  Per-package levels are still controlled by logging.level.* in application.properties.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- plain, human-readable console -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- structured JSON console (timestamp, level, logger, thread, message, ...) -->
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+    </appender>
+
+    <springProfile name="json">
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+    <springProfile name="!json">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

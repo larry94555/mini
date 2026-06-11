@@ -23,6 +23,8 @@ import java.util.Map;
  */
 @Component
 public class ContextManager {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ContextManager.class);
+
 
     static final String MEMORY_TAG = "[MEMORY]";
 
@@ -73,7 +75,7 @@ public class ContextManager {
         List<Map<String, Object>> toFold = messages.subList(bodyStart, keepFrom);
         String newMemory = updateMemory(oldMemory, toFold);
 
-        System.out.println("\n[compaction:" + label + "] ~" + tokens + " tokens -> folded "
+        log.info("\n[compaction:" + label + "] ~" + tokens + " tokens -> folded "
                 + toFold.size() + " older messages into memory, kept " + (n - keepFrom) + " recent.");
 
         List<Map<String, Object>> out = new ArrayList<>();

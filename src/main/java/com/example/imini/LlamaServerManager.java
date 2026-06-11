@@ -34,6 +34,8 @@ import java.util.Locale;
  */
 @Component
 public class LlamaServerManager {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LlamaServerManager.class);
+
 
     @Value("${llama.manage-server:true}") private boolean manageServer;
     @Value("${llama.binary:llama-server.exe}") private String binary;
@@ -65,17 +67,17 @@ public class LlamaServerManager {
     @PostConstruct
     public void start() {
         if (!manageServer) {
-            System.out.println("[llama] manage-server=false; expecting an external llama-server on port " + port);
+            log.info("[llama] manage-server=false; expecting an external llama-server on port " + port);
             return;
         }
         this.command = buildCommand();
-        System.out.println("[llama] launching: " + String.join(" ", command));
+        log.info("[llama] launching: " + String.join(" ", command));
         launch();
         waitUntilReady();
         if (healthy()) {
             startWatchdog();
         } else {
-            System.out.println("[llama] not healthy yet; watchdog NOT started (avoid restart-storm during model download).");
+            log.warn("[llama] not healthy yet; watchdog NOT started (avoid restart-storm during model download).");
         }
     }
 
@@ -123,10 +125,10 @@ public class LlamaServerManager {
             pb.redirectOutput(new File("llama-server.log"));
             pb.redirectError(new File("llama-server.log"));
             this.proc = pb.start();
-            System.out.println("[llama] started on port " + port + " (profile=" + profile
+            log.info("[llama] started on port " + port + " (profile=" + profile
                     + ", parallel=" + Math.max(1, parallel) + ", logs -> llama-server.log)");
         } catch (IOException e) {
-            System.err.println("[llama] failed to start: " + e.getMessage());
+            log.warn("[llama] failed to start: " + e.getMessage());
         }
     }
 
@@ -144,7 +146,7 @@ public class LlamaServerManager {
     private void waitUntilReady() {
         for (int i = 0; i < 600; i++) {
             if (healthy()) {
-                System.out.println("[llama] ready.");
+                log.info("[llama] ready.");
                 return;
             }
             try {
@@ -154,7 +156,7 @@ public class LlamaServerManager {
                 return;
             }
         }
-        System.out.println("[llama] not ready after 600s; check llama-server.log");
+        log.warn("[llama] not ready after 600s; check llama-server.log");
     }
 
     private void startWatchdog() {
@@ -169,7 +171,7 @@ public class LlamaServerManager {
                 if (shuttingDown) return;
                 boolean alive = proc != null && proc.isAlive();
                 if (!alive || !healthy()) {
-                    System.out.println("[llama] watchdog: server unhealthy; restarting...");
+                    log.warn("[llama] watchdog: server unhealthy; restarting...");
                     launch();
                     waitUntilReady();
                 }
@@ -177,7 +179,7 @@ public class LlamaServerManager {
         }, "llama-watchdog");
         watchdog.setDaemon(true);
         watchdog.start();
-        System.out.println("[llama] watchdog on (checks every " + Math.max(5, healthInterval) + "s).");
+        log.info("[llama] watchdog on (checks every " + Math.max(5, healthInterval) + "s).");
     }
 
     private String profileModel(String p) {
@@ -198,7 +200,7 @@ public class LlamaServerManager {
         if (watchdog != null) watchdog.interrupt();
         if (proc != null && proc.isAlive()) {
             proc.destroy();
-            System.out.println("[llama] stopped.");
+            log.info("[llama] stopped.");
         }
     }
 }

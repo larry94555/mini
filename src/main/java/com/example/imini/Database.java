@@ -28,6 +28,8 @@ import java.util.List;
  */
 @Component
 public class Database {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Database.class);
+
 
     private static final List<String> MIGRATIONS = List.of(
             "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, messages TEXT NOT NULL, updated_at INTEGER NOT NULL)",
@@ -47,7 +49,7 @@ public class Database {
     @PostConstruct
     public void init() {
         if (!enabled) {
-            System.out.println("[db] persistence disabled; stores run in-memory.");
+            log.info("[db] persistence disabled; stores run in-memory.");
             return;
         }
         try {
@@ -60,9 +62,9 @@ public class Database {
             }
             migrate();
             available = true;
-            System.out.println("[db] SQLite ready at " + dbPath + " (schema v" + MIGRATIONS.size() + ").");
+            log.info("[db] SQLite ready at " + dbPath + " (schema v" + MIGRATIONS.size() + ").");
         } catch (Throwable t) {
-            System.out.println("[db] could not open SQLite (" + t.getMessage() + "); using in-memory stores.");
+            log.warn("[db] could not open SQLite (" + t.getMessage() + "); using in-memory stores.");
             available = false;
         }
     }
@@ -84,7 +86,7 @@ public class Database {
                 ps.setInt(1, v + 1);
                 ps.executeUpdate();
             }
-            System.out.println("[db] applied migration -> v" + (v + 1));
+            log.info("[db] applied migration -> v" + (v + 1));
         }
     }
 
@@ -97,7 +99,7 @@ public class Database {
             bind(ps, params);
             return ps.executeUpdate();
         } catch (SQLException e) {
-            System.out.println("[db] update failed: " + e.getMessage());
+            log.warn("[db] update failed: " + e.getMessage());
             return -1;
         }
     }
@@ -114,7 +116,7 @@ public class Database {
                 while (rs.next()) out.add(mapper.map(rs));
             }
         } catch (SQLException e) {
-            System.out.println("[db] query failed: " + e.getMessage());
+            log.warn("[db] query failed: " + e.getMessage());
         }
         return out;
     }
