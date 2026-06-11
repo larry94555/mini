@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -59,7 +60,8 @@ public class CodebaseTools {
     }
 
     public List<Tool> all() {
-        return List.of(glob(), grep(), repoTree(), readMany(), gitStatus(), gitDiff());
+        return List.of(glob(), grep(), repoTree(), readMany(), outline(), findSymbol(),
+                gitStatus(), gitDiff());
     }
 
     // ---------------------------------------------------------------------
@@ -204,6 +206,63 @@ public class CodebaseTools {
         });
     }
 
+    public Tool outline() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("path", strProp("File to outline (its declarations: classes, methods, functions)."));
+        return new Tool("outline",
+                "List the declarations (classes/interfaces/methods/functions) in a single file with "
+                        + "their line numbers. Use this to understand a file's structure before reading "
+                        + "it all. Supports java, python, js/ts, kotlin, go.",
+                schema(props, "path"), false, args -> {
+            try {
+                Path root = sandbox.root();
+                String path = str(args, "path");
+                String denied = sandbox.enforcePath("outline", path, false);
+                if (denied != null) return denied;
+                Path p = root.resolve(path).normalize();
+                List<String> lines = Files.readAllLines(p, StandardCharsets.UTF_8);
+                List<Symbol> syms = extractSymbols(p.getFileName().toString(), lines);
+                if (syms.isEmpty()) {
+                    return "(no symbols recognized in " + rel(root, p)
+                            + "; supported: java, python, js/ts, kotlin, go)";
+                }
+                StringBuilder sb = new StringBuilder(rel(root, p)).append("\n");
+                for (Symbol s : syms) {
+                    sb.append(String.format("%6d  %-9s %s%n", s.line(), s.kind(), s.name()));
+                }
+                return sb.toString().strip();
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    public Tool findSymbol() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("name", strProp("Exact symbol name to find the DECLARATION of (not every mention)."));
+        props.put("dir", strProp("Optional sub-directory to search under (default: workspace root)."));
+        props.put("glob", strProp("Optional file filter, e.g. \"**/*.java\" (default: all supported files)."));
+        props.put("max_results", intProp("Optional cap on matches (default 50)."));
+        return new Tool("find_symbol",
+                "Find where a symbol (class/method/function/type) is DEFINED across the repo, returning "
+                        + "'path:line: kind name'. Unlike grep, this matches declarations, not usages.",
+                schema(props, "name"), false, args -> {
+            try {
+                Path root = sandbox.root();
+                Path base = resolveDir(args);
+                String denied = sandbox.enforcePath("find_symbol", base.toString(), false);
+                if (denied != null) return denied;
+                String name = str(args, "name");
+                if (name.isBlank()) return "ERROR: provide a symbol 'name'.";
+                String globFilter = str(args, "glob");
+                int cap = Math.max(1, intArg(args, "max_results", 50));
+                return findSymbol(root, base, name, globFilter.isBlank() ? null : globFilter, cap, grepMaxFileKb);
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
     // ---------------------------------------------------------------------
     // Pure, unit-testable core (no Spring; takes an explicit root)
     // ---------------------------------------------------------------------
@@ -303,6 +362,170 @@ public class CodebaseTools {
             count[0]++;
             if (isDir) treeInto(sb, e.getValue(), prefix + "  ", depth + 1, maxDepth, maxEntries, count);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Symbol awareness (declaration-level; regex heuristics, not a real parser)
+    // ---------------------------------------------------------------------
+
+    /** A declaration found in a file. */
+    public record Symbol(int line, String kind, String name, String text) {}
+
+    private static final Pattern JAVA_TYPE = Pattern.compile(
+            "^\\s*(?:(?:public|private|protected|static|final|abstract|sealed|non-sealed)\\s+)*"
+                    + "(class|interface|enum|record)\\s+(\\w+)");
+    private static final Pattern JAVA_METHOD = Pattern.compile(
+            "^\\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default)\\s+)+"
+                    + "[\\w$.<>\\[\\],?&\\s]*?(\\w+)\\s*\\([^;{]*\\)\\s*(?:throws [^{;]+)?[{;]");
+
+    private static final Pattern PY_DEF = Pattern.compile("^\\s*(?:async\\s+)?def\\s+(\\w+)\\s*\\(");
+    private static final Pattern PY_CLASS = Pattern.compile("^\\s*class\\s+(\\w+)");
+
+    private static final Pattern JS_CLASS = Pattern.compile(
+            "^\\s*(?:export\\s+)?(?:default\\s+)?(?:abstract\\s+)?class\\s+(\\w+)");
+    private static final Pattern JS_FUNC = Pattern.compile(
+            "^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?function\\s*\\*?\\s+(\\w+)");
+    private static final Pattern JS_ARROW = Pattern.compile(
+            "^\\s*(?:export\\s+)?(?:const|let|var)\\s+(\\w+)\\s*=\\s*(?:async\\s+)?(?:\\([^)]*\\)|[\\w$]+)\\s*=>");
+    private static final Pattern TS_TYPE = Pattern.compile(
+            "^\\s*(?:export\\s+)?(?:declare\\s+)?(interface|enum|type)\\s+(\\w+)");
+
+    private static final Pattern KT_TYPE = Pattern.compile(
+            "^\\s*(?:(?:public|private|protected|internal|open|sealed|data|abstract|final|enum)\\s+)*"
+                    + "(class|interface|object)\\s+(\\w+)");
+    private static final Pattern KT_FUN = Pattern.compile(
+            "^\\s*(?:(?:public|private|protected|internal|open|override|suspend|inline|abstract|final)\\s+)*"
+                    + "fun\\s+(?:<[^>]+>\\s*)?(\\w+)");
+
+    private static final Pattern GO_FUNC = Pattern.compile(
+            "^\\s*func\\s+(?:\\([^)]*\\)\\s*)?(\\w+)\\s*\\(");
+    private static final Pattern GO_TYPE = Pattern.compile(
+            "^\\s*type\\s+(\\w+)\\s+(?:struct|interface)\\b");
+
+    /** Declarations in a file, by extension. Empty for unsupported types. */
+    public static List<Symbol> extractSymbols(String fileName, List<String> lines) {
+        return switch (extension(fileName)) {
+            case "java" -> javaSymbols(lines);
+            case "py" -> pythonSymbols(lines);
+            case "js", "jsx", "ts", "tsx", "mjs", "cjs" -> jsSymbols(lines);
+            case "kt", "kts" -> kotlinSymbols(lines);
+            case "go" -> goSymbols(lines);
+            default -> List.of();
+        };
+    }
+
+    private static List<Symbol> javaSymbols(List<String> lines) {
+        List<Symbol> out = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i), t = line.strip();
+            if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+            Matcher m = JAVA_TYPE.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, m.group(1), m.group(2), t)); continue; }
+            m = JAVA_METHOD.matcher(line);
+            if (m.find()) out.add(new Symbol(i + 1, "method", m.group(1), t));
+        }
+        return out;
+    }
+
+    private static List<Symbol> pythonSymbols(List<String> lines) {
+        List<Symbol> out = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i), t = line.strip();
+            if (t.startsWith("#")) continue;
+            Matcher m = PY_CLASS.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, "class", m.group(1), t)); continue; }
+            m = PY_DEF.matcher(line);
+            if (m.find()) out.add(new Symbol(i + 1, "def", m.group(1), t));
+        }
+        return out;
+    }
+
+    private static List<Symbol> jsSymbols(List<String> lines) {
+        List<Symbol> out = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i), t = line.strip();
+            if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+            Matcher m = JS_CLASS.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, "class", m.group(1), t)); continue; }
+            m = TS_TYPE.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, m.group(1), m.group(2), t)); continue; }
+            m = JS_FUNC.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, "function", m.group(1), t)); continue; }
+            m = JS_ARROW.matcher(line);
+            if (m.find()) out.add(new Symbol(i + 1, "function", m.group(1), t));
+        }
+        return out;
+    }
+
+    private static List<Symbol> kotlinSymbols(List<String> lines) {
+        List<Symbol> out = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i), t = line.strip();
+            if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+            Matcher m = KT_TYPE.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, m.group(1), m.group(2), t)); continue; }
+            m = KT_FUN.matcher(line);
+            if (m.find()) out.add(new Symbol(i + 1, "fun", m.group(1), t));
+        }
+        return out;
+    }
+
+    private static List<Symbol> goSymbols(List<String> lines) {
+        List<Symbol> out = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i), t = line.strip();
+            if (t.startsWith("//")) continue;
+            Matcher m = GO_TYPE.matcher(line);
+            if (m.find()) { out.add(new Symbol(i + 1, "type", m.group(1), t)); continue; }
+            m = GO_FUNC.matcher(line);
+            if (m.find()) out.add(new Symbol(i + 1, "func", m.group(1), t));
+        }
+        return out;
+    }
+
+    /** Walk the tree and report declarations whose name equals {@code name} ('path:line: kind name'). */
+    public static String findSymbol(Path root, Path base, String name, String globFilter,
+                                    int maxMatches, int maxFileKb) throws IOException {
+        PathMatcher fileFilter = globFilter == null ? null
+                : FileSystems.getDefault().getPathMatcher("glob:" + globFilter);
+        long maxBytes = (long) maxFileKb * 1024L;
+        List<String> out = new ArrayList<>();
+        Files.walkFileTree(base, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes a) {
+                if (!dir.equals(base) && IGNORE_DIRS.contains(dir.getFileName().toString())) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes a) {
+                if (a.size() > maxBytes) return FileVisitResult.CONTINUE;
+                if (fileFilter != null && !fileFilter.matches(base.relativize(file))) return FileVisitResult.CONTINUE;
+                List<String> lines;
+                try {
+                    lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    return FileVisitResult.CONTINUE;
+                }
+                for (Symbol s : extractSymbols(file.getFileName().toString(), lines)) {
+                    if (name.equals(s.name())) {
+                        out.add(rel(root, file) + ":" + s.line() + ": " + s.kind() + " " + s.name());
+                        if (out.size() >= maxMatches) return FileVisitResult.TERMINATE;
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFileFailed(Path file, IOException e) {
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        if (out.isEmpty()) return "(no declaration of '" + name + "' found)";
+        String body = String.join("\n", out);
+        return out.size() >= maxMatches ? body + "\n...[stopped at " + maxMatches + " matches]" : body;
+    }
+
+    private static String extension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     // ---------------------------------------------------------------------
