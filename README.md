@@ -18,7 +18,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 |------|---------|--------------|
 | core | Agent loop + tools + streaming | think -> act -> observe; watch tokens live |
 | serving | Model profiles + GPU/threads/parallel + watchdog | config-driven llama-server: pick model/quant, offload, batch, auto-restart |
-| 1 | Precise editing + checkpoint/rewind | `view` / `edit_file`; undo any edit |
+| 1 | Precise editing + checkpoint/rewind | `view` / `edit_file`; undo any edit (a multi-file patch undoes as one change set) |
 | coding | Atomic multi-edit | `apply_patch`: many find/replace + new-file edits in one validated, rewindable step |
 | 1 | Sessions | multi-turn memory, persisted and resumable |
 | 1 | MCP client | load tools from external MCP servers (optional) |
@@ -70,7 +70,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `CodebaseTools.java` | glob, grep, repo_tree, read_many, outline, find_symbol, git_status, git_diff, git_log, git_blame |
 | `HtmlExtractor.java` | jsoup main-article extraction |
 | `Untrusted.java` | fences untrusted tool output (prompt-injection hardening) |
-| `CheckpointStore.java` | snapshot-before-edit + rewind |
+| `CheckpointStore.java` | snapshot-before-edit + group-aware rewind (per change set) |
 | `SessionStore.java` | per-session history, persisted to `.imini/sessions/` |
 | `TodoStore.java` | per-session task checklists |
 | `PermissionService.java` | allow/deny rules, per-session remembered decisions, confinement, plan mode |
@@ -547,8 +547,16 @@ It is mutating, so it goes through the usual approval flow once for the batch.
 
 > Honest scope: `find` is exact-substring-unique (same model as `edit_file`), not a fuzzy/diff patch --
 > include enough surrounding text to be unique. Atomicity covers the validation step (nothing is
-> written unless all edits validate); it is not a transaction across a crash mid-write. Rewind is
-> per-file (each changed file is snapshotted), so undoing a whole patch means rewinding each file.
+> written unless all edits validate); it is not a transaction across a crash mid-write. A patch's
+> snapshots form one **change set**, so a single rewind undoes the whole patch (see below).
+
+**Batch rewind / patch-level undo.** Checkpoints are grouped into change sets. A single `edit_file`
+or `write_file` is its own group (one file); `apply_patch` wraps all its snapshots in one group via
+`beginBatch()`/`endBatch()`. `rewind` (the `POST /rewind` endpoint and the web-UI button) undoes the
+**most recent change set as a whole** -- so one `apply_patch` that touched five files is undone in one
+click, while a lone edit still undoes just that file. No new endpoint or API: the existing rewind is
+now group-aware. The grouping is stored in a `group_id` column added to the `checkpoints` table by a
+forward migration; older rows that predate grouping simply undo one at a time.
 
 ### Trying it out
 

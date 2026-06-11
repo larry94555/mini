@@ -856,3 +856,25 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** a patch where one edit's `find` does not match (or duplicates) on purpose.
 - **Observe:** `PATCH ABORTED (no changes written): edit[i] <path>: ...` and **no** file is modified
   (verify with git_status). Creating a file that already exists is likewise refused.
+
+---
+
+# Batch rewind / patch-level undo
+
+## 91. Group-aware rewind (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `CheckpointRewindTest` passes -- a single snapshot rewinds one file; a `beginBatch()` /
+  `snapshot` x2 / `endBatch()` change set is restored entirely by one `rewindLast` (then "Nothing to
+  rewind"); and two unbatched snapshots rewind independently (most recent first).
+
+## 92. apply_patch + one rewind undoes the whole patch (manual)
+
+- **Setup:** a git repo workspace; persistence on (default).
+- **Run (auto mode):** "Use apply_patch to change Service.java and Controller.java in one patch."
+  Then hit **Rewind** in the web UI (or `POST /rewind`).
+- **Observe:** the rewind message reads `Rewound the last change set of 2 file(s) ...`, and `git_diff`
+  shows both files back to their pre-patch state from a single rewind. A subsequent single `edit_file`
+  + rewind still undoes just that one file.
+- **Upgrade note:** the `group_id` column is added by a forward DB migration; checkpoints created
+  before upgrading undo one at a time (no regression).
