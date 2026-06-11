@@ -831,3 +831,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   only call it. Set `retrieval.symbol-boost-weight=0` and re-ask to see the difference (pure lexical).
 - **Note:** after upgrading an existing install, run `index_workspace` once so the new `symbols`
   column is populated (the DB migration adds the column; re-indexing fills it).
+
+---
+
+# Atomic multi-edit (apply_patch)
+
+## 88. apply_patch core (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `ApplyPatchTest` passes -- multiple modifies + a create chain in order (incl. editing a
+  just-created file); empty `replace` deletes a snippet; and every invalid case (missing `find`,
+  non-unique `find`, create over an existing file, modify of a missing file) throws and leaves the
+  input untouched. The "one bad edit aborts the whole batch" case confirms atomicity.
+
+## 89. apply_patch end to end (manual)
+
+- **Run (auto mode):** "Use apply_patch to rename method foo to bar in Service.java (declaration) and
+  update the one call in Controller.java, in a single patch; then run git_diff."
+- **Observe:** one approval (in ask mode) for the batch; `Applied 2 edit(s) across 2 file(s): ...`;
+  `git_diff` shows both files changed. Each file got a snapshot (rewindable).
+
+## 90. apply_patch atomic abort (manual)
+
+- **Run:** a patch where one edit's `find` does not match (or duplicates) on purpose.
+- **Observe:** `PATCH ABORTED (no changes written): edit[i] <path>: ...` and **no** file is modified
+  (verify with git_status). Creating a file that already exists is likewise refused.

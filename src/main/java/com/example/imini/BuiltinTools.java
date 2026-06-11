@@ -56,7 +56,7 @@ public class BuiltinTools {
 
     /** Tools available to the main agent. */
     public List<Tool> all() {
-        return List.of(readFile(), view(), listDir(), writeFile(), editFile(),
+        return List.of(readFile(), view(), listDir(), writeFile(), editFile(), applyPatch(),
                 runCommand(), webFetch(), todoWrite());
     }
 
@@ -240,6 +240,129 @@ public class BuiltinTools {
     // ---------------------------------------------------------------------
     // Shell tool
     // ---------------------------------------------------------------------
+
+    public Tool applyPatch() {
+        Map<String, Object> itemProps = new LinkedHashMap<>();
+        itemProps.put("path", strProp("File path to modify or create."));
+        itemProps.put("find", strProp("Exact, unique text to replace (omit when creating a new file)."));
+        itemProps.put("replace", strProp("Replacement for 'find' (default empty = delete the snippet)."));
+        itemProps.put("create", strProp("Full content for a NEW file (use instead of find/replace; errors if it exists)."));
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("type", "object");
+        item.put("properties", itemProps);
+        Map<String, Object> editsProp = new LinkedHashMap<>();
+        editsProp.put("type", "array");
+        editsProp.put("items", item);
+        editsProp.put("description",
+                "Edits applied atomically: each is {path, find, replace} to modify, or {path, create} for a new file.");
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("edits", editsProp);
+
+        return new Tool("apply_patch",
+                "Apply SEVERAL file edits in one atomic step. Each edit either replaces a unique snippet "
+                        + "(path + find + replace) or creates a new file (path + create). Everything is "
+                        + "validated first and NOTHING is written if any edit is invalid; each changed file "
+                        + "is snapshotted so it can be rewound. Review the result with git_diff. "
+                        + "Mutating: requires approval.",
+                schema(props, "edits"), true, args -> {
+            try {
+                Object raw = args.get("edits");
+                if (!(raw instanceof List<?> list) || list.isEmpty()) {
+                    return "ERROR: provide a non-empty 'edits' array.";
+                }
+                List<EditSpec> specs = new ArrayList<>();
+                for (Object o : list) {
+                    if (!(o instanceof Map<?, ?> m)) return "ERROR: each edit must be an object.";
+                    String path = sval(m, "path");
+                    if (path == null || path.isBlank()) return "ERROR: each edit needs a 'path'.";
+                    if (m.containsKey("create")) {
+                        String c = sval(m, "create");
+                        specs.add(new EditSpec(path, null, null, c == null ? "" : c));
+                    } else {
+                        specs.add(new EditSpec(path, sval(m, "find"),
+                                sval(m, "replace") == null ? "" : sval(m, "replace"), null));
+                    }
+                }
+                // confinement check for every target BEFORE touching disk (atomic)
+                for (EditSpec e : specs) {
+                    String denied = sandbox.enforcePath("apply_patch", e.path(), true);
+                    if (denied != null) return denied;
+                }
+                // load existing files; creates simply won't be present
+                Map<String, String> contents = new LinkedHashMap<>();
+                for (EditSpec e : specs) {
+                    if (contents.containsKey(e.path())) continue;
+                    Path p = Path.of(e.path());
+                    if (Files.exists(p)) contents.put(e.path(), Files.readString(p));
+                }
+                Map<String, String> result;
+                try {
+                    result = applyEdits(contents, specs);
+                } catch (IllegalArgumentException bad) {
+                    return "PATCH ABORTED (no changes written): " + bad.getMessage();
+                }
+                // write only the files whose content actually changed; snapshot each first
+                List<String> changed = new ArrayList<>();
+                for (Map.Entry<String, String> en : result.entrySet()) {
+                    String original = contents.get(en.getKey());
+                    if (en.getValue().equals(original)) continue;
+                    Path p = Path.of(en.getKey());
+                    checkpoints.snapshot(p);
+                    if (p.getParent() != null) Files.createDirectories(p.getParent());
+                    Files.writeString(p, en.getValue());
+                    changed.add(en.getKey());
+                }
+                if (changed.isEmpty()) return "No changes (edits produced identical content).";
+                return "Applied " + specs.size() + " edit(s) across " + changed.size() + " file(s): "
+                        + String.join(", ", changed) + ". Snapshots saved; review with git_diff.";
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    /** One planned edit: a find/replace on an existing file, or a create of a new file. */
+    public record EditSpec(String path, String find, String replace, String create) {}
+
+    /**
+     * Pure, atomic application of edits to an in-memory view of file contents. Throws
+     * IllegalArgumentException (writing nothing) if any edit is invalid: a create whose file already
+     * exists, a find/replace on a missing file, or a 'find' that is absent or not unique. Edits apply
+     * in order, so a create followed by a find/replace on the same new path works. Static + dependency
+     * free so it is unit-testable.
+     */
+    public static Map<String, String> applyEdits(Map<String, String> contents, List<EditSpec> edits) {
+        Map<String, String> work = new LinkedHashMap<>(contents);
+        for (int i = 0; i < edits.size(); i++) {
+            EditSpec e = edits.get(i);
+            String tag = "edit[" + i + "] " + e.path() + ": ";
+            if (e.create() != null) {
+                if (work.containsKey(e.path())) {
+                    throw new IllegalArgumentException(tag + "file already exists (use find/replace to modify it)");
+                }
+                work.put(e.path(), e.create());
+            } else {
+                String c = work.get(e.path());
+                if (c == null) throw new IllegalArgumentException(tag + "file not found");
+                if (e.find() == null || e.find().isEmpty()) {
+                    throw new IllegalArgumentException(tag + "'find' must not be empty");
+                }
+                int first = c.indexOf(e.find());
+                if (first < 0) throw new IllegalArgumentException(tag + "'find' text not present");
+                if (c.indexOf(e.find(), first + 1) >= 0) {
+                    throw new IllegalArgumentException(tag + "'find' is not unique; include more surrounding text");
+                }
+                String repl = e.replace() == null ? "" : e.replace();
+                work.put(e.path(), c.substring(0, first) + repl + c.substring(first + e.find().length()));
+            }
+        }
+        return work;
+    }
+
+    private static String sval(Map<?, ?> m, String key) {
+        Object v = m.get(key);
+        return v == null ? null : String.valueOf(v);
+    }
 
     public Tool runCommand() {
         Map<String, Object> props = new LinkedHashMap<>();
