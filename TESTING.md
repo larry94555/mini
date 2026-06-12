@@ -994,3 +994,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `GET /audit -H "X-API-Key: bsec"` (member).
 - **Observe:** `403` (admin only). Alice (admin) gets the list. With `auth.enabled=false`, actions are
   attributed to `anonymous` and `/audit` is open.
+
+---
+
+# Plan-driven execution
+
+## 107. Plan parsing + sequencing (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlannerTest` passes -- `parsePlan` extracts numbered / `Step N:` / bulleted lines and
+  ignores prose (capped at `MAX_STEPS`); `execute` runs every step in order, flips each todo
+  `pending -> in_progress -> completed`, leaves `nextPending == -1`, and aggregates all step results;
+  `stepPrompt` is focused on the current step.
+
+## 108. Plan-then-execute end to end (manual)
+
+- **Run (auto mode):** `POST /ask {"question":"Create util/Clock.java with now() and call it in
+  App.java","mode":"auto","plan":true}` (or tick **plan&execute** in the UI and send a goal).
+- **Observe:** `GET /todos?sessionId=<id>` shows the drafted steps flipping to `[~]` then `[x]` as the
+  run proceeds; the SSE `log` lines show `plan: N step(s)`, per-step progress, then `synthesizing final
+  answer`; the final answer addresses the whole goal. Audit records the action as `ask(plan)`.
+
+## 109. Fallback when no plan is produced (manual)
+
+- **Run:** a trivial goal where the model answers without a list.
+- **Observe:** the log shows `plan: no steps parsed; running directly` and it behaves like a normal run.

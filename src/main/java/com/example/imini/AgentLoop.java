@@ -41,14 +41,16 @@ public class AgentLoop {
     private final SessionStore sessions;
     private final ProjectContext project;
     private final SlashCommands slash;
+    private final TodoStore todos;
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
-                     ProjectContext project, SlashCommands slash) {
+                     ProjectContext project, SlashCommands slash, TodoStore todos) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
         this.project = project;
         this.slash = slash;
+        this.todos = todos;
     }
 
     private String systemPrompt() {
@@ -77,6 +79,41 @@ public class AgentLoop {
         AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());
         return result.answer();
+    }
+
+    /**
+     * Plan-then-execute: draft a short plan, turn it into the session's todo list, work each step in
+     * turn (checking it off), then synthesize a final answer. Falls back to a normal run if no plan
+     * could be parsed. Each step is a focused one-shot run so a small model stays on task.
+     */
+    public String runPlan(String sessionId, String goal, Mode mode, RunSink sink) throws Exception {
+        if (slash.isHelp(goal)) return slash.help();
+        final String g = slash.expand(goal);
+
+        sink.log("plan: drafting steps");
+        // planning is read-only (PLAN mode) and should not call tools; we just want the step list
+        String planText = engine.run(systemPrompt() + Planner.PLAN_SYSTEM_PROMPT, Planner.planRequest(g),
+                registry.tools(), Mode.PLAN, "plan", sessionId, RunSink.NOOP);
+        List<String> steps = Planner.parsePlan(planText);
+        if (steps.isEmpty()) {
+            sink.log("plan: no steps parsed; running directly");
+            return engine.run(systemPrompt(), g, registry.tools(), mode, "main", sessionId, sink);
+        }
+        sink.log("plan: " + steps.size() + " step(s)");
+
+        String results = Planner.execute(g, steps,
+                stepPrompt -> {
+                    try {
+                        return engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
+                    } catch (Exception e) {
+                        return "ERROR: " + e.getMessage();
+                    }
+                },
+                items -> todos.set(sessionId, items));
+
+        sink.log("plan: synthesizing final answer");
+        return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+                registry.tools(), mode, "main", sessionId, sink);
     }
 
     private Map<String, Object> message(String role, String content) {
