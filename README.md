@@ -51,7 +51,7 @@ No cloud API key is required.
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
-| Planning | `todo_write`, plan mode, coding profile guidance |
+| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator, coding profile guidance |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -65,7 +65,8 @@ No cloud API key is required.
 | `MiniAgentApplication.java` | Spring Boot entry point |
 | `LlamaServerManager.java` | Starts and supervises `llama-server` |
 | `LlamaClient.java` | Model calls, streaming calls, summary calls, token counting |
-| `AgentLoop.java` | Prepares prompts, sessions, project context, slash commands, and tool registry |
+| `AgentLoop.java` | Prepares prompts, sessions, project context, slash commands, tool registry; `runPlan` orchestrator |
+| `Planner.java` | Plan parsing + step sequencing for plan-then-execute (pure, testable) |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
 | `Tool.java` | Tool definition: name, description, schema, mutating flag, untrusted flag, executor |
@@ -145,8 +146,8 @@ http://localhost:8081
 
 | Method and path | Purpose |
 |---|---|
-| `POST /ask` | One-shot prompt, blocking response |
-| `POST /chat` | Multi-turn session prompt, blocking response |
+| `POST /ask` | One-shot prompt, blocking response (add `"plan":true` to plan-then-execute) |
+| `POST /chat` | Multi-turn session prompt, blocking (add `"plan":true` to plan-then-execute) |
 | `POST /ask/stream` | One-shot prompt over SSE |
 | `POST /chat/stream` | Session prompt over SSE |
 | `GET /sessions` | List sessions |
@@ -166,6 +167,34 @@ http://localhost:8081
 | `GET /metrics` | Metrics snapshot (admin only) |
 | `GET /audit?user=&target=&limit=` | Audit trail of privileged actions, newest first (admin only) |
 | `GET /` | Browser UI |
+
+## Plan-driven execution
+
+For a multi-step goal, a small model often wanders. Plan mode makes it work like a checklist: draft a
+short plan, turn it into the session's todo list, then do one step at a time before a final synthesis.
+
+Enable it per run by adding `"plan": true` to the request body of `/ask`, `/chat`, `/ask/stream`, or
+`/chat/stream` (in the web UI, tick **plan&execute** next to the mode selector):
+
+```
+curl -X POST localhost:8080/ask -H "Content-Type: application/json" \
+  -d '{"question":"Add a /version endpoint and document it","mode":"auto","plan":true}'
+```
+
+What happens:
+
+1. the agent drafts a numbered plan (read-only `PLAN` mode, no tools) and it is parsed into steps;
+2. the steps become the session's todos (watch them flip to `[~]` then `[x]` at `GET /todos`);
+3. each step runs as a focused turn with the full toolset and the requested permission mode, told to do
+   only that step and report back;
+4. a final synthesis turn produces the answer for the whole goal.
+
+If no plan can be parsed, it falls back to a single normal run. The step count is capped
+(`Planner.MAX_STEPS`, 12). The plan/sequence logic is pure and unit-tested with a fake runner.
+
+> Honest scope: steps run sequentially (no parallelism) and there is no automatic re-planning on a bad
+> step yet -- a failed step is reported into the running context and the plan continues. Plan runs are
+> goal-oriented one-shots and do not append to the conversational `/chat` history.
 
 ## Permission modes
 
