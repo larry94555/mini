@@ -69,6 +69,7 @@
   </span>
   <span class="grow"></span>
   <input id="apiKey" type="password" placeholder="API key (if auth on)" style="width:200px"/>
+  <span id="whoami" class="muted" style="margin:0 8px" title="Authenticated user / role"></span>
   <span id="status" class="pill">idle</span>
 </header>
 
@@ -116,7 +117,7 @@
       </div>
       <pre class="log" id="memout" style="margin-top:8px"></pre>
     </div>
-    <div class="card">
+    <div class="card" id="metricsCard">
       <h3>Metrics <span class="muted" id="metricsAge"></span></h3>
       <div class="metrics" id="metrics">loading...</div>
     </div>
@@ -171,6 +172,7 @@ function appendLog(line){
 
 $("#apiKey").addEventListener("change", e => {
   state.key = e.target.value.trim(); localStorage.setItem("imini.key", state.key);
+  refreshIdentity();
 });
 
 // --- streaming chat via fetch (so we can send POST + the API key header) ---
@@ -312,9 +314,24 @@ async function refreshMetrics(){
 }
 function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
+// identity / RBAC: show who we are; hide admin-only panels (Metrics) for non-admins
+let metricsTimer = null;
+async function refreshIdentity(){
+  try {
+    const j = await getJson("/me");
+    const admin = !!j && j.role === "admin";
+    $("#whoami").textContent = j ? (j.user + " · " + j.role) : "";
+    const card = $("#metricsCard");
+    if (card) card.style.display = admin ? "" : "none";
+    if (admin && !metricsTimer){ refreshMetrics(); metricsTimer = setInterval(refreshMetrics, 5000); }
+    if (!admin && metricsTimer){ clearInterval(metricsTimer); metricsTimer = null; }
+  } catch (e) { /* leave UI as-is on error */ }
+}
+
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshMetrics();
-setInterval(refreshMetrics, 5000);
+refreshSessions(); refreshTodos(); refreshCheckpoints();
+refreshIdentity();
+setInterval(refreshIdentity, 15000);
 </script>
 </body>
 </html>

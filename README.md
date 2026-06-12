@@ -48,6 +48,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | memory | Symbol-aware ranking | search_memory boosts the chunk that *declares* a queried name |
 | memory | Index freshness | incremental re-index (only changed files) + auto-reindex after edits |
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
+| ops | Per-user identity / RBAC | API keys map to users + roles; admin-only endpoints; `GET /me` |
 | ops | Observability | /metrics snapshot + structured run logs |
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
 | ui | Remote approvals | answer ASK-mode prompts in the browser/API instead of the server console |
@@ -89,7 +90,8 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `Sandbox.java` | run_command screening, read confinement, optional container exec |
 | `Database.java` | SQLite connection + migration runner (sessions/checkpoints/index) |
 | `RetrievalService.java` | workspace indexing (incremental + auto-reindex) + search_memory/index_workspace tools |
-| `AuthFilter.java` | API-key auth + per-key rate limiting (servlet filter) |
+| `AuthFilter.java` | API-key auth + per-key rate limiting + RBAC gating (servlet filter) |
+| `Rbac.java` / `Principal.java` / `RequestContext.java` | role policy + caller identity (per request) |
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
 | `Approvals.java` | pending-decision registry for remote ASK-mode approvals |
@@ -453,16 +455,33 @@ as `Authorization: Bearer <key>`; an unknown key gets `401`, and exceeding
 `auth.rate-limit-per-minute` (per key, fixed window) gets `429`. `auth.open-paths` (default `/health`)
 are always allowed so health checks work. Keys are compared in constant time.
 
+**Per-user identity / RBAC (`Rbac`, `Principal`).** Each API key maps to a caller. Legacy `auth.keys`
+entries are treated as **admins** (so existing setups are unchanged). To assign roles, list users in
+`auth.principals` as `user:key:role` (role is `admin` or `member`), comma-separated:
+
+```
+auth.enabled=true
+auth.principals=alice:alice-secret:admin,bob:bob-secret:member
+auth.admin-paths=/metrics,/approve,/approvals     # paths that require the admin role (default)
+```
+
+A member calling an admin-gated path gets `403`; everything else (ask/chat/sessions/todos/index/memory
+/rewind/interrupt/steer) is open to any authenticated user. The filter resolves the key to a
+`Principal`, rate-limits per user, gates the path via `Rbac.allows`, and exposes the caller for the
+request. `GET /me` returns `{user, role}` so tools and the web UI can show identity (the UI hides the
+Metrics panel for non-admins). When `auth.enabled=false` everyone runs as the anonymous admin, so the
+open/dev experience is unchanged.
+
 **Observability (`Metrics`).** Every request is counted; runs are timed; tool calls (and tool errors),
 model calls, approximate output tokens, and per-key request counts are tallied; live concurrency
 (`limit/active/queued`) is read from `RunService`. `GET /metrics` returns the snapshot as JSON, and
 each run also prints a structured one-line log (`[metrics] run endpoint=... session=... ms=... ok=...`)
 for tailing/grep.
 
-> Honest scope: this is app-level API-key auth and in-process metrics -- right for a small shared
-> deployment behind your own network boundary. It is not OAuth/OIDC, per-user RBAC, or a real metrics
-> backend (Prometheus/OTel); those are the production follow-ons. Keys live in config, so manage that
-> file like a secret.
+> Honest scope: this is app-level API-key auth + simple two-role RBAC and in-process metrics -- right
+> for a small shared deployment behind your own network boundary. It is not OAuth/OIDC, fine-grained
+> per-resource permissions, or a real metrics backend (Prometheus/OTel); those are the production
+> follow-ons. Keys live in config, so manage that file like a secret.
 
 ### Trying it out
 
@@ -834,7 +853,9 @@ retrieval.symbol-boost-weight=2.0   # boost chunks that DECLARE a queried name (
 retrieval.auto-reindex=true         # after a write/edit/apply_patch, reindex just that file (if index non-empty)
 auth.enabled=false                  # true = require an API key on every non-open request
 auth.header=X-API-Key               # also accepts "Authorization: Bearer <key>"
-auth.keys=                          # comma-separated "key" or "label:key"
+auth.keys=                          # comma-separated "key" or "label:key" (treated as admins)
+auth.principals=                    # "user:key:role" entries (role=admin|member); assigns roles
+auth.admin-paths=/metrics,/approve,/approvals  # endpoints that require the admin role
 auth.open-paths=/health,/,/index.html  # always allowed (incl. the web UI page)
 auth.rate-limit-per-minute=0        # per-key fixed-window limit; 0 = unlimited
 permissions.prompt-mode=console     # console | remote (answer ASK prompts via /approve + the UI)

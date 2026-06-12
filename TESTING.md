@@ -904,3 +904,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   you just added.
 - **Observe:** the new text is found without a manual re-index. With `retrieval.auto-reindex=false`,
   the same search misses until you run `index_workspace`.
+
+---
+
+# Per-user identity / RBAC
+
+## 96. Role policy (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RbacTest` passes -- `parsePrincipals` reads `user:key:role` and skips malformed
+  entries; `isAdminPath` matches exact paths and subpaths (not lookalikes like `/metricsX`); members
+  are blocked from admin paths but free elsewhere; and the anonymous principal (auth disabled) is
+  admin so the open experience is unchanged.
+
+## 97. Admin vs member over HTTP (manual)
+
+- **Setup:** `auth.enabled=true`, `auth.principals=alice:alice-secret:admin,bob:bob-secret:member`.
+- **Run:**
+  - `curl localhost:8080/me -H "X-API-Key: bob-secret"` -> `{"user":"bob","role":"member"}`.
+  - `curl localhost:8080/metrics -H "X-API-Key: bob-secret"` -> `403` (admin only).
+  - same with `alice-secret` -> `200` with the metrics snapshot.
+  - `curl -X POST localhost:8080/approve -H "X-API-Key: bob-secret" ...` -> `403`; alice -> works.
+- **Observe:** ask/chat/sessions/etc. work for both. `/metrics` shows an `auth_forbidden` count.
+
+## 98. Backward compatibility (manual)
+
+- **Run:** keep using `auth.keys=alice:s3cret` (no `auth.principals`).
+- **Observe:** that key behaves as an admin (full access, as before RBAC). With `auth.enabled=false`,
+  `GET /me` returns `{"user":"anonymous","role":"admin"}` and nothing is gated.
+
+## 99. Web UI identity (manual)
+
+- **Run:** open the UI, paste a member key, and watch the header.
+- **Observe:** the header shows `bob · member` and the **Metrics** panel is hidden (and not polled);
+  an admin key shows `alice · admin` and the Metrics panel returns.

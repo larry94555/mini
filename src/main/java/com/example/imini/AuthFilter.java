@@ -40,10 +40,13 @@ public class AuthFilter implements Filter {
     @Value("${auth.keys:}") private String keysCfg;
     @Value("${auth.open-paths:/health}") private String openPathsCfg;
     @Value("${auth.rate-limit-per-minute:0}") private int rateLimitPerMinute;
+    @Value("${auth.principals:}") private String principalsCfg;
+    @Value("${auth.admin-paths:/metrics,/approve,/approvals}") private String adminPathsCfg;
 
     private final Metrics metrics;
-    private Map<String, String> keyToLabel = Map.of();
+    private Map<String, Principal> keyToPrincipal = Map.of();
     private Set<String> openPaths = Set.of();
+    private Set<String> adminPaths = Set.of();
     private RateLimiter limiter;
 
     public AuthFilter(Metrics metrics) {
@@ -52,11 +55,21 @@ public class AuthFilter implements Filter {
 
     @PostConstruct
     public void init() {
-        keyToLabel = parseKeys(keysCfg);
+        Map<String, Principal> merged = new LinkedHashMap<>();
+        // legacy auth.keys -> admins (backward compatible: before RBAC, any valid key had full access)
+        for (Map.Entry<String, String> e : parseKeys(keysCfg).entrySet()) {
+            merged.put(e.getKey(), new Principal(e.getValue(), "admin"));
+        }
+        // auth.principals ("user:key:role") assign explicit roles (override a legacy key if reused)
+        merged.putAll(Rbac.parsePrincipals(principalsCfg));
+        keyToPrincipal = merged;
+        adminPaths = Rbac.parseAdminPaths(adminPathsCfg);
         openPaths = new LinkedHashSet<>();
         for (String p : openPathsCfg.split(",")) if (!p.isBlank()) openPaths.add(p.trim());
         limiter = new RateLimiter(rateLimitPerMinute);
-        log.info("[auth] enabled=" + enabled + "; keys=" + keyToLabel.size()
+        long admins = keyToPrincipal.values().stream().filter(Principal::isAdmin).count();
+        log.info("[auth] enabled=" + enabled + "; principals=" + keyToPrincipal.size()
+                + " (admins=" + admins + "); admin-paths=" + adminPaths
                 + "; rate-limit/min=" + rateLimitPerMinute + "; open=" + openPaths);
     }
 
@@ -75,25 +88,35 @@ public class AuthFilter implements Filter {
         }
 
         String key = extractKey(req.getHeader(header), req.getHeader("Authorization"));
-        String label = matchKey(key);
-        if (label == null) {
+        Principal principal = matchPrincipal(key);
+        if (principal == null) {
             metrics.inc("auth_rejected");
             deny(res, 401, "missing or invalid API key");
             return;
         }
-        if (!limiter.allow(label, System.currentTimeMillis())) {
+        if (!limiter.allow(principal.user(), System.currentTimeMillis())) {
             metrics.inc("rate_limited");
             deny(res, 429, "rate limit exceeded");
             return;
         }
-        metrics.incKey(label);
-        chain.doFilter(request, response);
+        if (!Rbac.allows(principal, path, adminPaths)) {
+            metrics.inc("auth_forbidden");
+            deny(res, 403, "'" + principal.role() + "' role may not access " + path + " (admin only)");
+            return;
+        }
+        metrics.incKey(principal.user());
+        RequestContext.set(principal);
+        try {
+            chain.doFilter(request, response);
+        } finally {
+            RequestContext.clear();
+        }
     }
 
-    /** Constant-time match of the presented key against configured keys; returns the label or null. */
-    private String matchKey(String key) {
+    /** Constant-time match of the presented key against configured keys; returns the Principal or null. */
+    private Principal matchPrincipal(String key) {
         if (key == null) return null;
-        for (Map.Entry<String, String> e : keyToLabel.entrySet()) {
+        for (Map.Entry<String, Principal> e : keyToPrincipal.entrySet()) {
             if (constantTimeEquals(e.getKey(), key)) return e.getValue();
         }
         return null;

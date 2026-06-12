@@ -214,6 +214,12 @@ public class AgentController {
         return Map.of("status", "ok");
     }
 
+    @GetMapping("/me")
+    public Map<String, String> me() {
+        Principal p = RequestContext.current();
+        return Map.of("user", p.user(), "role", p.role());
+    }
+
     @GetMapping("/metrics")
     public Map<String, Object> metrics() {
         return metrics.snapshot();
