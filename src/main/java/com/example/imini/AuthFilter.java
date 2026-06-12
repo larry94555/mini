@@ -41,7 +41,7 @@ public class AuthFilter implements Filter {
     @Value("${auth.open-paths:/health}") private String openPathsCfg;
     @Value("${auth.rate-limit-per-minute:0}") private int rateLimitPerMinute;
     @Value("${auth.principals:}") private String principalsCfg;
-    @Value("${auth.admin-paths:/metrics}") private String adminPathsCfg;
+    @Value("${auth.admin-paths:/metrics,/audit}") private String adminPathsCfg;
 
     private final Metrics metrics;
     private Map<String, Principal> keyToPrincipal = Map.of();

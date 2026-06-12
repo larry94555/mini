@@ -54,10 +54,12 @@ public class AgentController {
     private final RetrievalService retrieval;
     private final Metrics metrics;
     private final Approvals approvals;
+    private final AuditLog audit;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
-                           RetrievalService retrieval, Metrics metrics, Approvals approvals) {
+                           RetrievalService retrieval, Metrics metrics, Approvals approvals,
+                           AuditLog audit) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -67,6 +69,7 @@ public class AgentController {
         this.retrieval = retrieval;
         this.metrics = metrics;
         this.approvals = approvals;
+        this.audit = audit;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -77,6 +80,7 @@ public class AgentController {
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
         sessions.claim(sessionId, currentUser());
+        audit.record(currentUser(), "ask", "session:" + sessionId, "started");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
         try {
@@ -96,6 +100,7 @@ public class AgentController {
         final String sessionId = resolveSession(body.get("sessionId"));
         requireAccess(sessionId);
         sessions.claim(sessionId, currentUser());
+        audit.record(currentUser(), "chat", "session:" + sessionId, "started");
         final Mode mode = parseMode(body.get("mode"));
         final String message = body.getOrDefault("message", "");
         metrics.inc("runs_started");
@@ -119,6 +124,7 @@ public class AgentController {
         final String sessionId = resolveSession(body.get("sessionId"));
         requireAccess(sessionId);
         sessions.claim(sessionId, currentUser());
+        audit.record(currentUser(), "chat/stream", "session:" + sessionId, "started");
         final Mode mode = parseMode(body.get("mode"));
         final String message = body.getOrDefault("message", "");
         SseEmitter emitter = new SseEmitter(0L); // no server-side timeout
@@ -150,6 +156,7 @@ public class AgentController {
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
         sessions.claim(sessionId, currentUser());
+        audit.record(currentUser(), "ask/stream", "session:" + sessionId, "started");
         SseEmitter emitter = new SseEmitter(0L);
         metrics.inc("runs_started");
         runService.submitAsync(() -> {
@@ -181,6 +188,7 @@ public class AgentController {
         if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to interrupt.");
         requireAccess(sessionId);
         interrupt.interrupt(sessionId);
+        audit.record(currentUser(), "interrupt", "session:" + sessionId, "requested");
         return Map.of("result", "interrupt requested for session " + sessionId
                 + "; it will stop at the next checkpoint.");
     }
@@ -192,6 +200,7 @@ public class AgentController {
         if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to steer.");
         requireAccess(sessionId);
         interrupt.steer(sessionId, message);
+        audit.record(currentUser(), "steer", "session:" + sessionId, "queued");
         return Map.of("result", "steering queued for session " + sessionId + ": " + message);
     }
 
@@ -240,6 +249,14 @@ public class AgentController {
         return metrics.snapshot();
     }
 
+    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
+    @GetMapping("/audit")
+    public List<AuditLog.Entry> audit(@RequestParam(name = "user", defaultValue = "") String user,
+                                      @RequestParam(name = "target", defaultValue = "") String target,
+                                      @RequestParam(name = "limit", defaultValue = "100") int limit) {
+        return audit.recent(user, target, limit);
+    }
+
     // ---- remote approvals --------------------------------------------------
 
     @GetMapping("/approvals")
@@ -258,6 +275,8 @@ public class AgentController {
         String sid = approvals.sessionOf(id);
         if (sid != null) requireAccess(sid);
         boolean ok = approvals.resolve(id, decision);
+        audit.record(currentUser(), "approve", "approval:" + id + (sid != null ? " session:" + sid : ""),
+                (ok ? "resolved " : "unknown ") + decision);
         return Map.of("resolved", ok, "id", id, "decision", decision);
     }
 
@@ -266,7 +285,9 @@ public class AgentController {
         String sessionId = body.getOrDefault("sessionId", "");
         if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to rewind.");
         requireAccess(sessionId);
-        return Map.of("result", checkpoints.rewindLast(sessionId));
+        String result = checkpoints.rewindLast(sessionId);
+        audit.record(currentUser(), "rewind", "session:" + sessionId, result);
+        return Map.of("result", result);
     }
 
     @GetMapping("/checkpoints")
@@ -279,7 +300,9 @@ public class AgentController {
 
     @PostMapping("/index")
     public Map<String, String> index() {
-        return Map.of("result", retrieval.index());
+        String result = retrieval.index();
+        audit.record(currentUser(), "index", "workspace", result);
+        return Map.of("result", result);
     }
 
     @GetMapping("/memory")

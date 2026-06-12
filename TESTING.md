@@ -971,3 +971,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** sessions created before upgrading have no owner and stay accessible to everyone (no
   lockout); with `auth.enabled=false`, every caller is the anonymous admin and nothing is scoped.
+
+---
+
+# Audit log
+
+## 104. Audit filter (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AuditLogTest` passes -- `filter` selects by user (case-insensitive), by target
+  substring, combines both, respects the limit (0 -> default cap), and preserves newest-first order.
+
+## 105. Privileged actions are recorded (manual)
+
+- **Setup:** `auth.enabled=true`, `auth.principals=alice:asec:admin,bob:bsec:member`.
+- **Run:** as bob, do a `/chat`, a `/rewind`, etc.; as alice approve something.
+- **Observe:** `GET /audit -H "X-API-Key: asec"` lists those actions newest-first with `user`,
+  `action`, `target`, `time`, `outcome`. Filter with `?user=bob` or `?target=session:<id>`.
+
+## 106. /audit is admin only (manual)
+
+- **Run:** `GET /audit -H "X-API-Key: bsec"` (member).
+- **Observe:** `403` (admin only). Alice (admin) gets the list. With `auth.enabled=false`, actions are
+  attributed to `anonymous` and `/audit` is open.
