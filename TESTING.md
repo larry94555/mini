@@ -938,3 +938,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** open the UI, paste a member key, and watch the header.
 - **Observe:** the header shows `bob · member` and the **Metrics** panel is hidden (and not polled);
   an admin key shows `alice · admin` and the Metrics panel returns.
+
+---
+
+# Per-resource ownership
+
+## 100. Ownership policy (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `OwnershipTest` passes -- admins access any owner (and unowned); the owner accesses
+  their own; a different member is denied; an unowned (null) resource is open; and the anonymous
+  principal (auth disabled) accesses everything.
+
+## 101. Members are isolated over HTTP (manual)
+
+- **Setup:** `auth.enabled=true`, `auth.principals=alice:asec:admin,bob:bsec:member,cara:csec:member`.
+- **Run:** as bob, `POST /chat {"sessionId":"proj","message":"hi"}` (bob now owns `proj`). Then as cara,
+  `GET /session?id=proj -H "X-API-Key: csec"`.
+- **Observe:** cara gets `403` ("belongs to another user"); `GET /sessions` as cara does not list
+  `proj`; bob and alice (admin) can read it. `/todos`, `/checkpoints`, `/rewind`, `/interrupt`,
+  `/steer` behave the same.
+
+## 102. Owner-scoped approvals (manual)
+
+- **Setup:** as above; run bob's session in ASK + `permissions.prompt-mode=remote` so a tool parks an
+  approval.
+- **Observe:** `GET /approvals` shows that approval to bob and alice but not cara; `POST /approve` for
+  it succeeds for bob/alice and is `403` for cara. (Approvals are no longer blanket admin-only; the
+  default `auth.admin-paths` is now just `/metrics`.)
+
+## 103. Backward compatibility (manual)
+
+- **Observe:** sessions created before upgrading have no owner and stay accessible to everyone (no
+  lockout); with `auth.enabled=false`, every caller is the anonymous admin and nothing is scoped.

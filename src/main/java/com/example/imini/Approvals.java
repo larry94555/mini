@@ -65,6 +65,12 @@ public class Approvals {
         return true;
     }
 
+    /** The session a pending approval belongs to, or null if the id is unknown. */
+    public String sessionOf(String id) {
+        Pending p = pending.get(id);
+        return p == null ? null : p.sessionId();
+    }
+
     /** Pending approvals for a session (or all if sessionId is null), as plain maps for JSON. */
     public List<Map<String, Object>> list(String sessionId) {
         List<Map<String, Object>> out = new ArrayList<>();
