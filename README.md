@@ -184,7 +184,7 @@ curl -X POST localhost:8080/ask -H "Content-Type: application/json" \
 What happens:
 
 1. the agent drafts a numbered plan (read-only `PLAN` mode, no tools) and it is parsed into steps;
-2. the steps become the session's todos (watch them flip to `[~]` then `[x]` at `GET /todos`);
+2. the steps become the session's todos and a live `plan` checklist in the UI (also at `GET /todos`);
 3. each step runs as a focused turn with the full toolset and the requested permission mode, told to do
    only that step and end its report with a `STEP_STATUS: done` or `STEP_STATUS: failed <reason>` line;
 4. **failure recovery:** a step that reports failure (or whose result starts with `ERROR`) is retried up
@@ -196,6 +196,13 @@ What happens:
 If no plan can be parsed, it falls back to a single normal run. The step count is capped
 (`Planner.MAX_STEPS`, 12). The classification, retry, and re-plan logic is pure and unit-tested with
 fake runners.
+
+**Live plan panel.** On the streaming endpoints the run emits a structured `plan` SSE event
+(`{"steps":[{"text","status"}]}`) every time the checklist changes -- when steps are drafted, start,
+complete, fail, or get re-planned. The web UI renders this as a live checklist above each answer, with
+`[ ]` pending, `[~]` in progress, `[x]` done, and `[!]` failed, so you can watch the agent work the
+plan in real time (no polling). Non-streaming sinks fall back to logging the event; the list is also
+always readable at `GET /todos`.
 
 > Honest scope: steps run sequentially (no parallelism). Failure detection is best-effort -- the
 > `STEP_STATUS` line the model is asked to emit, falling back to the `ERROR`-prefix convention -- so a

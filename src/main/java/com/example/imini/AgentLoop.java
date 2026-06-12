@@ -1,6 +1,7 @@
 package com.example.imini;
 
 import com.example.imini.PermissionService.Mode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -44,6 +45,7 @@ public class AgentLoop {
     private final ProjectContext project;
     private final SlashCommands slash;
     private final TodoStore todos;
+    private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, SlashCommands slash, TodoStore todos) {
@@ -121,12 +123,21 @@ public class AgentLoop {
                         return java.util.List.of();
                     }
                 },
-                items -> todos.set(sessionId, items),
+                items -> { todos.set(sessionId, items); emitPlan(sink, items); },
                 planStepRetries, planMaxReplans);
 
         sink.log("plan: synthesizing final answer");
         return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink);
+    }
+
+    /** Stream the current plan/checklist as a structured SSE "plan" event (no-op on non-SSE sinks). */
+    private void emitPlan(RunSink sink, List<TodoStore.Item> items) {
+        try {
+            sink.event("plan", mapper.writeValueAsString(Map.of("steps", Planner.planPayload(items))));
+        } catch (Exception ignore) {
+            // best effort; todos are still readable at GET /todos
+        }
     }
 
     private Map<String, Object> message(String role, String content) {

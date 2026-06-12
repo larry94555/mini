@@ -1040,3 +1040,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** at `GET /todos` a step may show `[!]` (failed); the SSE `log` lines show a retry and/or
   `plan: revising remaining steps after a failure`; the run continues with revised steps and still
   produces a final answer. Set both knobs to 0 to see it stop retrying/re-planning.
+
+---
+
+# Plan streaming to the UI
+
+## 112. Plan event payload (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlanStreamTest` passes -- `Planner.planPayload` maps the checklist to ordered
+  `{text,status}` entries and defaults a null status to `pending` (the shape sent in the `plan` SSE
+  event).
+
+## 113. Live plan panel in the UI (manual)
+
+- **Run:** open the web UI, tick **plan&execute**, and send a multi-step goal.
+- **Observe:** a "PLAN" checklist appears above the answer and updates live as the run proceeds --
+  `[ ]` -> `[~]` -> `[x]` per step, `[!]` on a failed step, and new steps appended on a re-plan -- with
+  no manual refresh. The same data remains at `GET /todos`.
+
+## 114. Plan event on the wire (manual)
+
+- **Run:** `curl -N -X POST localhost:8080/ask/stream -H "Content-Type: application/json"
+  -d '{"question":"<multi-step goal>","mode":"auto","plan":true}'`.
+- **Observe:** interleaved `event: plan` frames whose data is `{"steps":[{"text","status"},...]}`,
+  alongside the usual `log`/`token`/`answer` events.
