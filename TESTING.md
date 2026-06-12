@@ -878,3 +878,29 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   + rewind still undoes just that one file.
 - **Upgrade note:** the `group_id` column is added by a forward DB migration; checkpoints created
   before upgrading undo one at a time (no regression).
+
+---
+
+# Index freshness / auto-reindex
+
+## 93. Incremental diff (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RetrievalFreshnessTest` passes -- `diff(indexed, current)` puts new + changed-mtime
+  files in `upsert`, deleted files in `remove`, skips unchanged ones; cold start (empty index) upserts
+  everything; an empty workspace removes everything; identical maps produce an empty plan.
+
+## 94. Incremental index_workspace (manual)
+
+- **Run:** `index_workspace` once (indexes all). Edit one file. Run `index_workspace` again.
+- **Observe:** the second run reports e.g. `Refreshed index: 1 new/changed, 0 removed, N unchanged` --
+  only the edited file is re-indexed. Delete a file and refresh: it shows `1 removed`. `full=true`
+  rebuilds everything.
+
+## 95. Auto-reindex after edits (manual)
+
+- **Setup:** index the workspace (so the index is non-empty), `retrieval.auto-reindex=true` (default).
+- **Run:** ask the agent to `apply_patch`/`edit_file` a file, then immediately `search_memory` for text
+  you just added.
+- **Observe:** the new text is found without a manual re-index. With `retrieval.auto-reindex=false`,
+  the same search misses until you run `index_workspace`.

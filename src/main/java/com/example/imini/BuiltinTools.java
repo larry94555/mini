@@ -45,13 +45,16 @@ public class BuiltinTools {
     private final CheckpointStore checkpoints;
     private final TodoStore todos;
     private final Sandbox sandbox;
+    private final RetrievalService retrieval;
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
 
-    public BuiltinTools(CheckpointStore checkpoints, TodoStore todos, Sandbox sandbox) {
+    public BuiltinTools(CheckpointStore checkpoints, TodoStore todos, Sandbox sandbox,
+                        RetrievalService retrieval) {
         this.checkpoints = checkpoints;
         this.todos = todos;
         this.sandbox = sandbox;
+        this.retrieval = retrieval;
     }
 
     /** Tools available to the main agent. */
@@ -144,6 +147,7 @@ public class BuiltinTools {
                 checkpoints.snapshot(p);                       // save before overwriting
                 if (p.getParent() != null) Files.createDirectories(p.getParent());
                 Files.writeString(p, str(args, "content"));
+                retrieval.reindexFile(p);
                 return "Wrote " + p.toAbsolutePath() + " (snapshot saved for rewind).";
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
@@ -177,6 +181,7 @@ public class BuiltinTools {
                 }
                 checkpoints.snapshot(p);
                 Files.writeString(p, content.replace(oldStr, newStr));
+                retrieval.reindexFile(p);
                 return "Edited " + p.toAbsolutePath() + " (1 replacement; snapshot saved for rewind).";
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
@@ -312,6 +317,7 @@ public class BuiltinTools {
                         checkpoints.snapshot(p);
                         if (p.getParent() != null) Files.createDirectories(p.getParent());
                         Files.writeString(p, en.getValue());
+                        retrieval.reindexFile(p);
                         changed.add(en.getKey());
                     }
                 } finally {
