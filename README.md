@@ -56,7 +56,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI, remote approvals |
-| Ops | API-key auth, rate limiting, `/metrics`, structured logging, Docker, CI |
+| Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership, audit log, `/metrics`, structured logging, Docker, CI |
 
 ## File map
 
@@ -90,7 +90,10 @@ No cloud API key is required.
 | `RunService.java` | Slot-bounded job queue for concurrent runs |
 | `RunSink.java` | Output abstraction for console and SSE streaming |
 | `Sse.java` | SSE event framing/parsing helpers |
-| `AuthFilter.java` | API-key auth and request attribution |
+| `AuthFilter.java` | API-key auth, request attribution, and RBAC gating |
+| `Rbac.java` / `Principal.java` / `RequestContext.java` | role policy and per-request caller identity |
+| `Ownership.java` | per-resource access policy (owner / admin / unowned) |
+| `AuditLog.java` | append-only audit trail of privileged actions |
 | `RateLimiter.java` | Fixed-window per-key rate limiter |
 | `Metrics.java` | In-process metrics snapshot and run logs |
 | `static/index.html` | Browser UI |
@@ -159,7 +162,9 @@ http://localhost:8081
 | `POST /index` | Build or rebuild retrieval index |
 | `GET /memory?q=&k=` | Search indexed workspace memory |
 | `GET /health` | Health check |
-| `GET /metrics` | Metrics snapshot |
+| `GET /me` | Current caller identity (`user`, `role`) |
+| `GET /metrics` | Metrics snapshot (admin only) |
+| `GET /audit?user=&target=&limit=` | Audit trail of privileged actions, newest first (admin only) |
 | `GET /` | Browser UI |
 
 ## Permission modes
@@ -212,8 +217,28 @@ Important limitations:
 - Pattern-based command screening is not the same as a syscall sandbox.
 - For strong isolation, use allowlist mode and containerized command execution.
 - MCP servers should be treated as powerful external tool providers.
-- API-key auth is app-level protection, not OAuth/OIDC or RBAC.
+- Auth is app-level: API keys map to users with a simple two-role RBAC (admin/member) and per-resource
+  ownership of sessions; it is not OAuth/OIDC or fine-grained per-resource ACLs.
 - Metrics are in-process JSON, not a production observability backend.
+- The audit log records privileged actions for accountability; it is not tamper-proof storage.
+
+## Audit log
+
+Every privileged action is recorded to an append-only `audit` table (with an in-memory fallback): the
+acting `user`, the `action` (`ask`, `chat`, `chat/stream`, `interrupt`, `steer`, `rewind`, `approve`,
+`index`), the `target` (e.g. `session:proj` or `approval:<id>`), an ISO timestamp, and the `outcome`.
+
+Read it (admin only) at `GET /audit`, newest first, with optional filters:
+
+```
+curl "localhost:8080/audit?limit=50"               -H "X-API-Key: <admin>"
+curl "localhost:8080/audit?user=bob"               -H "X-API-Key: <admin>"
+curl "localhost:8080/audit?target=session:proj"    -H "X-API-Key: <admin>"
+```
+
+Identity comes from the API key (see RBAC: legacy `auth.keys` are admins; `auth.principals` of the form
+`user:key:role` assign roles). When `auth.enabled=false` actions are attributed to the anonymous admin.
+`/audit` is admin-gated via `auth.admin-paths` (default `/metrics,/audit`).
 
 ## Recommended learning sequence
 

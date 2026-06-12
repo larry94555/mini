@@ -42,7 +42,9 @@ public class Database {
             "ALTER TABLE mem_chunks ADD COLUMN symbols TEXT",
             "ALTER TABLE checkpoints ADD COLUMN group_id TEXT",
             "ALTER TABLE mem_chunks ADD COLUMN mtime INTEGER",
-            "CREATE TABLE session_owners (session_id TEXT PRIMARY KEY, owner TEXT NOT NULL)");
+            "CREATE TABLE session_owners (session_id TEXT PRIMARY KEY, owner TEXT NOT NULL)",
+            "CREATE TABLE audit (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, user TEXT, action TEXT, "
+                    + "target TEXT, outcome TEXT)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;
