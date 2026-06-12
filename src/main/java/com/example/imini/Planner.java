@@ -1,8 +1,10 @@
 package com.example.imini;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -80,6 +82,18 @@ public final class Planner {
         List<TodoStore.Item> items = new ArrayList<>();
         for (String s : steps) items.add(new TodoStore.Item(s, "pending"));
         return items;
+    }
+
+    /** Serialize the plan to a list of {text,status} maps for the SSE "plan" event (pure/testable). */
+    public static List<Map<String, String>> planPayload(List<TodoStore.Item> items) {
+        List<Map<String, String>> out = new ArrayList<>();
+        for (TodoStore.Item it : items) {
+            Map<String, String> m = new LinkedHashMap<>();
+            m.put("text", it.content());
+            m.put("status", it.status() == null ? "pending" : it.status());
+            out.add(m);
+        }
+        return out;
     }
 
     /** Index of the first not-completed item, or -1 if all are completed. */

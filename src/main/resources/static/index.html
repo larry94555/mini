@@ -159,10 +159,12 @@ function addTurn(){
   const wrap = document.createElement("div");
   wrap.className = "msg";
   wrap.innerHTML = '<div class="who">imini</div><div style="flex:1;min-width:0">'
+                 + '<div class="plan" style="display:none;margin-bottom:6px"></div>'
                  + '<div class="activity"></div><div class="body"></div></div>';
   $("#messages").appendChild(wrap);
   $("#messages").scrollTop = $("#messages").scrollHeight;
-  return { body: wrap.querySelector(".body"), activity: wrap.querySelector(".activity") };
+  return { body: wrap.querySelector(".body"), activity: wrap.querySelector(".activity"),
+           plan: wrap.querySelector(".plan") };
 }
 function addActivity(turn, line){
   const d = document.createElement("div"); d.textContent = line;
@@ -171,6 +173,20 @@ function addActivity(turn, line){
 }
 function appendLog(line){
   const el = $("#log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
+}
+// live plan checklist, updated on every "plan" SSE event
+function renderPlan(turn, obj){
+  if (!turn || !turn.plan || !obj || !Array.isArray(obj.steps)) return;
+  const icon = s => s==="completed"?"[x]" : s==="in_progress"?"[~]" : s==="failed"?"[!]" : "[ ]";
+  const color = s => s==="completed"?"#3a9" : s==="failed"?"#c33" : s==="in_progress"?"#c80" : "#888";
+  let html = '<div class="muted" style="font-size:11px;letter-spacing:.04em;margin:0 0 2px">PLAN</div>';
+  for (const st of obj.steps){
+    html += '<div style="font-family:monospace;font-size:12px;line-height:1.5;color:'+color(st.status)+'">'
+          + icon(st.status) + ' ' + escapeHtml(String(st.text||"")) + '</div>';
+  }
+  turn.plan.innerHTML = html;
+  turn.plan.style.display = "";
+  $("#messages").scrollTop = $("#messages").scrollHeight;
 }
 
 $("#apiKey").addEventListener("change", e => {
@@ -230,6 +246,7 @@ function handleEvent(e, turn){
     case "token": turn.body.textContent += e.data; $("#messages").scrollTop = $("#messages").scrollHeight; break;
     case "log": addActivity(turn, e.data); appendLog(e.data); break;
     case "approval": try { showApproval(JSON.parse(e.data)); } catch(_){} break;
+    case "plan": try { renderPlan(turn, JSON.parse(e.data)); } catch(_){} break;
     case "answer": if (!turn.body.textContent.trim()) turn.body.textContent = e.data; break;
     case "error": turn.body.innerHTML += '<span class="err">'+e.data+'</span>'; break;
     case "done": break;
