@@ -1,152 +1,194 @@
-# Roadmap: from learning harness to stronger local coding agent
+# ROADMAP
 
-`imini` is intentionally a teaching kit: local-first, small-model friendly, and designed to make the harness visible.
+This roadmap tracks the next improvements for `imini` as a Claude Code-style learning harness.
 
-This roadmap focuses on what should be improved **next**, without re-listing features that are already present.
+`imini` already has the core educational harness pieces: agent loop, local llama.cpp model serving, tool calling, file tools, `apply_patch`, codebase navigation, git tools, sessions, checkpoints, retrieval, project memory, permissions, plan mode, todos, MCP, hooks, slash commands, web UI, remote approvals, auth/rate limiting, metrics, Docker, and CI.
 
----
+The next work should not re-add those features. It should make the existing system easier to learn from, easier to trust, and safer to run.
 
-## Current baseline
+## 1. Educational completeness
 
-The repository already includes:
+Goal: a developer should be able to learn Claude Code-style harness architecture from this repository in a weekend.
 
-- a real agent loop with tools, streaming, retries, and guards,
-- ask / auto / plan modes,
-- approvals, session persistence, checkpoints, and rewind,
-- project memory loading, compaction, and retrieval,
-- MCP, hooks, slash commands, and a sub-agent,
-- auth, rate limiting, metrics, a web UI, and remote approvals,
-- deterministic tests for key harness behaviors.
+### Next
 
-The next work should build on that baseline rather than restating it.
+- Keep `docs/LEARNING_PATH.md` current as the main guided curriculum.
+- Keep `docs/TRACE_EDIT.md` current as the canonical end-to-end trace.
+- Keep `docs/CONCEPT_MAP.md` current as the mapping from agent concepts to implementation files.
+- Add more trace documents:
+  - `docs/traces/plan-mode.md`
+  - `docs/traces/remote-approval.md`
+  - `docs/traces/bad-tool-call-recovery.md`
+  - `docs/traces/mcp-tool-call.md`
+- Add small exercises at the end of each learning module.
+- Add a short demo script for recording a walkthrough video.
 
----
+### Later
 
-## 1. Code readability and maintainability
+- Add diagrams for the agent loop, approval flow, and persistence flow.
+- Add a glossary for terms such as tool call, schema, compaction, checkpoint, MCP, hook, slash command, and sandbox.
+- Add a `docs/PRODUCTION_NOTES.md` file that explains what is educational versus production-grade.
 
-This is the highest-leverage repo-quality improvement.
+## 2. Source readability
 
-- Reformat the source consistently so the project is easy to read, review, and teach from.
-- Keep docs synchronized with the actual implementation.
-- Add simple contribution rules for formatting, test expectations, and documentation updates.
-- Prefer smaller methods and clearer type boundaries in core classes such as the loop, controller, and permission/sandbox layers.
+Goal: the most important classes should be readable without a formatter or IDE magic.
 
-This does not make the agent smarter, but it makes the project much more useful as a learning repo.
+### Next
 
----
+- Continue manually reformatting high-value teaching files:
+  - `AgentEngine.java`
+  - `BuiltinTools.java`
+  - `CodebaseTools.java`
+  - `ContextManager.java`
+  - `CheckpointStore.java`
+  - `SessionStore.java`
+  - `AgentController.java`
+  - `LlamaClient.java`
+- Keep formatting-only changes separate from behavior changes whenever possible.
+- Avoid huge one-line Java and Markdown files.
 
-## 2. Codebase navigation and diff-first editing
+### Later
 
-This is the highest-leverage agent-quality improvement.
+- Reintroduce automated formatting once the local JDK and formatter versions are pinned and verified.
+- Add a formatting check in CI after the formatter is stable.
 
-Add deterministic repo tools such as:
+## 3. Deterministic harness tests
 
-- `glob`
-- `grep`
-- `repo_tree`
-- `read_many`
-- `git_status`
-- `git_diff`
+Goal: test harness behavior without depending on a live model.
 
-Then make the default coding flow look more like:
+### Done baseline
 
-1. inspect,
-2. plan,
-3. patch,
-4. verify,
-5. summarize.
+- Schema validation tests.
+- Retry tests.
+- Sandbox tests.
+- Codebase navigation tests.
+- SSE serialization tests.
+- Fake-model harness tests.
+- Bad-model behavior scenarios.
 
-For a small local model, better harness-provided navigation is usually more valuable than a more complicated prompt.
+### Next
 
----
+- Add scripted traces for the real `AgentEngine` using a fake `LlamaClient` once the engine is easier to instantiate in tests.
+- Test plan mode end-to-end: a mutating call should be recorded but not executed.
+- Test denied approval recovery: the model should receive a `DENIED` tool result and continue safely.
+- Test interrupt/steer behavior with a fake streaming model.
+- Test checkpoint grouping for multi-file patches.
 
-## 3. Verification and edit review
+### Later
 
-The next trust improvement is better verification around edits.
+- Add a small offline eval suite that runs against fake model scripts.
+- Add a live smoke suite that runs only when a local `llama-server` is available.
 
-- Show diffs before or alongside edits.
-- Add patch-oriented editing and diff previews.
-- Run verification commands or hooks after changes when a project supports them.
-- Summarize what changed and what was verified in the final answer.
-- Track verification outcomes in session history.
+## 4. Edit trust and verification
 
-This pushes the harness from “it can edit files” toward “it can make reviewable changes.”
+Goal: file changes should be easy to review and hard to misrepresent.
 
----
+### Next
 
-## 4. Stronger sandboxing and isolation
+- Automatically run `git_status` after any mutating file tool.
+- Automatically run `git_diff` after any mutating file tool.
+- Feed the diff summary into the final model context.
+- Require final coding answers to include:
+  - changed files,
+  - commands run,
+  - verification performed,
+  - tests not run, if applicable,
+  - known risks.
 
-This remains the biggest production blocker.
+### Later
 
-- Move from command screening toward real execution isolation for `run_command`.
-- Prevent path escape and symlink escape robustly.
-- Isolate per-session working state more strongly.
-- Reduce default privileges for risky actions.
-- Treat secrets and external tool credentials more carefully end-to-end.
+- Add explicit patch preview tools:
+  - `preview_patch`
+  - `apply_previewed_patch`
+  - `discard_previewed_patch`
+- Add a UI diff viewer.
+- Add a final-answer schema for coding tasks.
+- Add project-specific verification commands in `IMINI.md` or `.imini/config`.
 
-The current sandbox/policy layer is useful for learning, but a production-safe system needs a stronger execution boundary.
+## 5. Codebase understanding
 
----
+Goal: improve the quality of repo understanding now that the deterministic navigation tools exist.
 
-## 5. Better session and multi-user discipline
+### Next
 
-The repo now has broader session-oriented behavior, but this area still deserves hardening.
+- Improve `repo_tree` output for larger repositories.
+- Add better caps and paging for `grep`, `read_many`, `git_log`, and `git_blame`.
+- Make symbol extraction easier to extend by language.
+- Add tests for symbol extraction edge cases.
+- Add a simple repository map summary that combines tree, key files, and top symbols.
 
-- Keep mutable state clearly scoped by session.
-- Make long-running jobs, approvals, interrupts, and progress easier to reason about under concurrency.
-- Ensure persistence and recovery are consistent across restart and failure cases.
-- Expand tests around session concurrency and cancellation.
+### Later
 
-This is important if the project evolves from a single-user learning harness into a small-team tool.
+- Add optional LSP-backed symbol lookup.
+- Add dependency graph summaries for Java/Maven projects.
+- Add call-site search for selected languages.
+- Add smarter retrieval refresh after file mutation.
 
----
+## 6. Production safety
 
-## 6. Retrieval and memory quality
+Goal: move from educational safety controls to enforceable execution boundaries.
 
-The retrieval layer is already useful, but it can become much stronger.
+### Biggest gap
 
-- Improve indexing quality and refresh behavior.
-- Add better query/result inspection for learning and debugging.
-- Consider stronger ranking or optional embedding-backed retrieval where it helps.
-- Make memory use more transparent in the UI and logs.
+The biggest production gap is still command and tool isolation. Command screening and path checks are useful, but they are not a complete security boundary.
 
-The goal is not “more memory everywhere,” but “better selection of the right context.”
+### Next
 
----
+- Document the difference between policy checks and real isolation.
+- Make `sandbox.command-mode=allowlist` the recommended shared-deployment setting.
+- Add a `/doctor` or startup check that warns when running without containerized command execution.
+- Add stricter defaults for shared or Docker deployment profiles.
+- Ensure all tool calls include run/session IDs in logs.
 
-## 7. Observability and evaluation
+### Later
 
-The repo already has metrics; the next step is to make evaluation more systematic.
+- Run shell commands in a per-run or per-session container/jail.
+- Disable network by default for tool execution.
+- Mount only the workspace.
+- Add CPU, memory, and process limits.
+- Harden MCP server execution and permissions.
+- Add append-only audit logs for prompts, tool calls, approvals, diffs, and results.
 
-- Add more deterministic harness tests for bad model behavior and recovery paths.
-- Add a small eval set for tool selection, confinement, retry behavior, and plan-mode correctness.
-- Improve structured logs so debugging long runs is easier.
-- Expose enough run metadata to understand failures without digging through code.
+## 7. Multi-user and operations
 
-For a harness project, evaluation matters as much as feature count.
+Goal: make the app safer to run for more than one user.
 
----
+### Next
 
-## 8. Product surface and UX
+- Clarify that API-key auth is app-level auth, not full identity/RBAC.
+- Add per-key attribution to run logs where missing.
+- Add docs for running behind a reverse proxy.
+- Add backup/restore notes for `.imini/imini.db`.
 
-The web UI already helps a lot. The next step is refinement rather than invention.
+### Later
 
-- Improve plan review and diff review flows.
-- Make approvals, job progress, and session history easier to inspect.
-- Expose retrieval/debug information only where useful.
-- Keep the UI aligned with the learning goals of the repo rather than turning it into a heavy product shell too early.
+- Per-user workspaces.
+- Per-user permission policies.
+- OAuth/OIDC or external auth integration.
+- Prometheus/OpenTelemetry metrics.
+- Admin audit dashboard.
 
----
+## 8. Monetization and packaging
 
-## Suggested order
+Goal: package the project as a learning asset before trying to sell it as a developer tool.
 
-1. source readability + doc synchronization,
-2. codebase navigation tools,
-3. diff-first editing + verification,
-4. stronger sandboxing,
-5. session/concurrency hardening,
-6. retrieval improvements,
-7. evaluation and observability refinement,
-8. UX polish.
+### Next
 
-That order keeps the repo useful as a teaching project while steadily making it more capable.
+- Add a course outline.
+- Add a five-minute demo script.
+- Add a landing-page-style section to the README: who this is for and what they will learn.
+- Add a clear license if one is missing.
+
+### Later
+
+- Create workshop materials.
+- Add optional enterprise hardening modules.
+- Consider paid support or consulting only after the learning path is polished.
+
+## Current recommended priority
+
+The next highest-leverage engineering change is:
+
+> Automatically verify edits with `git_status` and `git_diff`, then require final coding answers to summarize changed files and verification.
+
+This is much smaller than full sandboxing and significantly improves trust.

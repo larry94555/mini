@@ -2,9 +2,6 @@ package com.example.imini;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -15,203 +12,258 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
- * Tier 2 permissions. The old y/N gate grows into a policy:
+ * Permission policy for mutating tools.
  *
- *   - allow / deny RULES loaded from permissions.json ("edit_file", or "run_command:git status").
- *     A deny rule always wins; an allow rule skips the prompt.
- *   - REMEMBERED decisions: answering "a" (always) at a prompt adds an allow rule for the rest of
- *     the run.
- *   - WORKSPACE CONFINEMENT: write_file / edit_file targeting a path outside the workspace root are
- *     denied outright, even in auto mode -- a hard safety boundary.
- *   - MODES: ASK (prompt per mutating call), AUTO (approve, still confined), PLAN (record the
- *     intended action and DON'T execute it, so the model produces a plan you can review).
+ * <p>This layer demonstrates the harness-side safety boundary:
  *
- * Read-only tools are always allowed and never prompt.
+ * <ul>
+ *   <li>Allow and deny rules loaded from {@code permissions.json}.
+ *   <li>Per-session remembered decisions.
+ *   <li>Workspace confinement for writes.
+ *   <li>ASK, AUTO, and PLAN modes.
+ * </ul>
+ *
+ * <p>Read-only tools are allowed and do not prompt.
  */
 @Component
 public class PermissionService {
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PermissionService.class);
 
+  private static final org.slf4j.Logger log =
+      org.slf4j.LoggerFactory.getLogger(PermissionService.class);
 
-    public enum Mode { ASK, AUTO, PLAN }
-    public enum Kind { ALLOW, DENY, RECORD_PLAN }
-    public record Decision(Kind kind, String note) {}
+  public enum Mode {
+    ASK,
+    AUTO,
+    PLAN
+  }
 
-    private static final Path CONFIG = Path.of("permissions.json");
+  public enum Kind {
+    ALLOW,
+    DENY,
+    RECORD_PLAN
+  }
 
-    @Value("${agent.auto-approve:false}")
-    private boolean autoApprove;
-    @Value("${agent.confine-to-workspace:true}")
-    private boolean confine;
-    @Value("${agent.workspace-root:}")
-    private String workspaceRootCfg;
-    @Value("${permissions.prompt-mode:console}")
-    private String promptMode;                       // console | remote
-    @Value("${permissions.approval-timeout-seconds:120}")
-    private int approvalTimeoutSeconds;
-    @Value("${permissions.approval-timeout-action:deny}")
-    private String approvalTimeoutAction;
+  public record Decision(Kind kind, String note) {}
 
-    private final Approvals approvals;
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final Set<String> allow = new LinkedHashSet<>();
-    private final Set<String> deny = new LinkedHashSet<>();
-    private final Map<String, Set<String>> remembered = new ConcurrentHashMap<>();
-    private final BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
-    private Path root;
+  private static final Path CONFIG = Path.of("permissions.json");
 
-    public PermissionService(Approvals approvals) {
-        this.approvals = approvals;
-    }
+  @Value("${agent.auto-approve:false}")
+  private boolean autoApprove;
 
-    @PostConstruct
-    @SuppressWarnings("unchecked")
-    public void load() {
-        root = (workspaceRootCfg == null || workspaceRootCfg.isBlank()
+  @Value("${agent.confine-to-workspace:true}")
+  private boolean confine;
+
+  @Value("${agent.workspace-root:}")
+  private String workspaceRootCfg;
+
+  @Value("${permissions.prompt-mode:console}")
+  private String promptMode;
+
+  @Value("${permissions.approval-timeout-seconds:120}")
+  private int approvalTimeoutSeconds;
+
+  @Value("${permissions.approval-timeout-action:deny}")
+  private String approvalTimeoutAction;
+
+  private final Approvals approvals;
+  private final ObjectMapper mapper = new ObjectMapper();
+  private final Set<String> allow = new LinkedHashSet<>();
+  private final Set<String> deny = new LinkedHashSet<>();
+  private final Map<String, Set<String>> remembered = new ConcurrentHashMap<>();
+  private final BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+
+  private Path root;
+
+  public PermissionService(Approvals approvals) {
+    this.approvals = approvals;
+  }
+
+  @PostConstruct
+  @SuppressWarnings("unchecked")
+  public void load() {
+    root =
+        (workspaceRootCfg == null || workspaceRootCfg.isBlank()
                 ? Path.of(System.getProperty("user.dir"))
-                : Path.of(workspaceRootCfg)).toAbsolutePath().normalize();
-        if (Files.exists(CONFIG)) {
-            try {
-                Map<String, Object> cfg = mapper.readValue(Files.readAllBytes(CONFIG), Map.class);
-                addAll(allow, cfg.get("allow"));
-                addAll(deny, cfg.get("deny"));
-                log.info("[permissions] loaded " + allow.size() + " allow / "
-                        + deny.size() + " deny rule(s) from permissions.json");
-            } catch (Exception e) {
-                log.warn("[permissions] could not read permissions.json: " + e.getMessage());
-            }
-        }
-        log.info("[permissions] workspace root: " + root + (confine ? " (writes confined)" : ""));
+                : Path.of(workspaceRootCfg))
+            .toAbsolutePath()
+            .normalize();
+
+    if (Files.exists(CONFIG)) {
+      try {
+        Map<String, Object> cfg = mapper.readValue(Files.readAllBytes(CONFIG), Map.class);
+        addAll(allow, cfg.get("allow"));
+        addAll(deny, cfg.get("deny"));
+        log.info(
+            "[permissions] loaded "
+                + allow.size()
+                + " allow / "
+                + deny.size()
+                + " deny rule(s) from permissions.json");
+      } catch (Exception e) {
+        log.warn("[permissions] could not read permissions.json: " + e.getMessage());
+      }
     }
 
-    private void addAll(Set<String> set, Object rules) {
-        if (rules instanceof List<?> l) for (Object r : l) set.add(String.valueOf(r));
+    log.info("[permissions] workspace root: " + root + (confine ? " (writes confined)" : ""));
+  }
+
+  private void addAll(Set<String> set, Object rules) {
+    if (rules instanceof List<?> list) {
+      for (Object rule : list) {
+        set.add(String.valueOf(rule));
+      }
+    }
+  }
+
+  /** Decide whether a tool call may proceed. */
+  public Decision decide(String sessionId, String tool, boolean mutating, Map args, Mode mode) {
+    if (!mutating) {
+      return new Decision(Kind.ALLOW, null);
+    }
+    if (matches(deny, tool, args)) {
+      return new Decision(Kind.DENY, "blocked by a deny rule");
+    }
+    if (confine && writesOutsideRoot(tool, args)) {
+      return new Decision(Kind.DENY, "target path is outside the workspace (" + root + ")");
+    }
+    if (matches(allow, tool, args) || matches(rememberedFor(sessionId), tool, args)) {
+      return new Decision(Kind.ALLOW, "allowed by rule");
+    }
+    if (mode == Mode.PLAN) {
+      return new Decision(Kind.RECORD_PLAN, null);
+    }
+    if (mode == Mode.AUTO || autoApprove) {
+      return new Decision(Kind.ALLOW, "auto-approved");
+    }
+    if ("remote".equalsIgnoreCase(promptMode)) {
+      return decideRemote(sessionId, tool, args);
+    }
+    return promptConsole(sessionId, tool, args);
+  }
+
+  private Decision decideRemote(String sessionId, String tool, Map args) {
+    String argsJson;
+    try {
+      argsJson = mapper.writeValueAsString(args);
+    } catch (Exception e) {
+      argsJson = String.valueOf(args);
     }
 
-    /** Decide whether a (mutating) tool call may proceed. */
-    public Decision decide(String sessionId, String tool, boolean mutating, Map<String, Object> args, Mode mode) {
-        if (!mutating) return new Decision(Kind.ALLOW, null);
+    String decision =
+        approvals.await(
+            sessionId, tool, argsJson, approvalTimeoutSeconds * 1000L, approvalTimeoutAction);
 
-        if (matches(deny, tool, args)) {
-            return new Decision(Kind.DENY, "blocked by a deny rule");
-        }
-        if (confine && writesOutsideRoot(tool, args)) {
-            return new Decision(Kind.DENY, "target path is outside the workspace (" + root + ")");
-        }
-        if (matches(allow, tool, args) || matches(rememberedFor(sessionId), tool, args)) {
-            return new Decision(Kind.ALLOW, "allowed by rule");
-        }
-        if (mode == Mode.PLAN) {
-            return new Decision(Kind.RECORD_PLAN, null);
-        }
-        if (mode == Mode.AUTO || autoApprove) {
-            return new Decision(Kind.ALLOW, "auto-approved");
-        }
-        if ("remote".equalsIgnoreCase(promptMode)) {
-            return decideRemote(sessionId, tool, args);
-        }
-        return promptConsole(sessionId, tool, args);
+    return switch (decision == null ? "deny" : decision) {
+      case "always" -> {
+        rememberedFor(sessionId).add(ruleKey(tool, args));
+        yield new Decision(Kind.ALLOW, "approved (remembered)");
+      }
+      case "allow" -> new Decision(Kind.ALLOW, "approved");
+      default -> new Decision(Kind.DENY, "not approved");
+    };
+  }
+
+  private Decision promptConsole(String sessionId, String tool, Map args) {
+    System.out.println("\n[permission] Tool '" + tool + "' wants to run with:");
+    System.out.println("  " + args);
+    System.out.print("[permission] Allow? (y = once, a = always, N = no): ");
+
+    try {
+      String line = in.readLine();
+      String answer = line == null ? "" : line.trim().toLowerCase();
+      if (answer.equals("a")) {
+        rememberedFor(sessionId).add(ruleKey(tool, args));
+        System.out.println("[permission] will always allow this from now on.");
+        return new Decision(Kind.ALLOW, "remembered");
+      }
+      if (answer.equals("y")) {
+        return new Decision(Kind.ALLOW, "approved once");
+      }
+      return new Decision(Kind.DENY, "the user declined");
+    } catch (IOException e) {
+      return new Decision(Kind.DENY, "no console input available");
+    }
+  }
+
+  /**
+   * Asked when a run hits its time budget. Returns false if no console or remote approval is
+   * available, so a detached run still terminates.
+   */
+  public boolean confirmContinue(String sessionId, int seconds) {
+    if ("remote".equalsIgnoreCase(promptMode)) {
+      String decision =
+          approvals.await(
+              sessionId,
+              "(continue run)",
+              "used " + seconds + "s budget",
+              approvalTimeoutSeconds * 1000L,
+              approvalTimeoutAction);
+      return "allow".equals(decision) || "always".equals(decision);
     }
 
-    private Decision decideRemote(String sessionId, String tool, Map<String, Object> args) {
-        String argsJson;
-        try { argsJson = mapper.writeValueAsString(args); } catch (Exception e) { argsJson = String.valueOf(args); }
-        String dec = approvals.await(sessionId, tool, argsJson,
-                approvalTimeoutSeconds * 1000L, approvalTimeoutAction);
-        switch (dec == null ? "deny" : dec) {
-            case "always":
-                rememberedFor(sessionId).add(ruleKey(tool, args));
-                return new Decision(Kind.ALLOW, "approved (remembered)");
-            case "allow":
-                return new Decision(Kind.ALLOW, "approved");
-            default:
-                return new Decision(Kind.DENY, "not approved");
-        }
+    System.out.println("\n[deadline] This run has used its " + seconds + "s time budget.");
+    System.out.print("[deadline] Continue for another " + seconds + "s? (y = yes, N = stop): ");
+    try {
+      String line = in.readLine();
+      return line != null && line.trim().equalsIgnoreCase("y");
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  /** A rule matches a tool by exact name, or {@code run_command:} by command prefix. */
+  private boolean matches(Set<String> rules, String tool, Map args) {
+    if (rules.contains(tool)) {
+      return true;
     }
 
-    private Decision promptConsole(String sessionId, String tool, Map<String, Object> args) {
-        System.out.println("\n[permission] Tool '" + tool + "' wants to run with:");
-        System.out.println("            " + args);
-        System.out.print("[permission] Allow? (y = once, a = always, N = no): ");
-        try {
-            String line = in.readLine();
-            String ans = line == null ? "" : line.trim().toLowerCase();
-            if (ans.equals("a")) {
-                rememberedFor(sessionId).add(ruleKey(tool, args));
-                System.out.println("[permission] will always allow this from now on.");
-                return new Decision(Kind.ALLOW, "remembered");
-            }
-            if (ans.equals("y")) return new Decision(Kind.ALLOW, "approved once");
-            return new Decision(Kind.DENY, "the user declined");
-        } catch (IOException e) {
-            return new Decision(Kind.DENY, "no console input available");
+    if (tool.equals("run_command")) {
+      String command = String.valueOf(args.getOrDefault("command", "")).trim();
+      for (String rule : rules) {
+        if (rule.startsWith("run_command:")) {
+          String prefix = rule.substring("run_command:".length()).trim();
+          if (!prefix.isEmpty() && command.startsWith(prefix)) {
+            return true;
+          }
         }
+      }
     }
 
-    /**
-     * Asked when a run hits its time budget: lets the user grant another window or let it stop.
-     * Returns false (stop) if no console is attached, so a detached run still terminates.
-     */
-    public boolean confirmContinue(String sessionId, int seconds) {
-        if ("remote".equalsIgnoreCase(promptMode)) {
-            String dec = approvals.await(sessionId, "(continue run)", "used " + seconds + "s budget",
-                    approvalTimeoutSeconds * 1000L, approvalTimeoutAction);
-            return "allow".equals(dec) || "always".equals(dec);
-        }
-        System.out.println("\n[deadline] This run has used its " + seconds + "s time budget.");
-        System.out.print("[deadline] Continue for another " + seconds + "s? (y = yes, N = stop): ");
-        try {
-            String line = in.readLine();
-            return line != null && line.trim().equalsIgnoreCase("y");
-        } catch (IOException e) {
-            return false;
-        }
-    }
+    return false;
+  }
 
-    /** A rule matches a tool by exact name, or "run_command:<prefix>" by command prefix. */
-    private boolean matches(Set<String> rules, String tool, Map<String, Object> args) {
-        if (rules.contains(tool)) return true;
-        if (tool.equals("run_command")) {
-            String cmd = String.valueOf(args.getOrDefault("command", "")).trim();
-            for (String r : rules) {
-                if (r.startsWith("run_command:")) {
-                    String prefix = r.substring("run_command:".length()).trim();
-                    if (!prefix.isEmpty() && cmd.startsWith(prefix)) return true;
-                }
-            }
-        }
-        return false;
-    }
+  private Set<String> rememberedFor(String sessionId) {
+    return remembered.computeIfAbsent(sessionId, key -> ConcurrentHashMap.newKeySet());
+  }
 
-    private Set<String> rememberedFor(String sessionId) {
-        return remembered.computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet());
+  private String ruleKey(String tool, Map args) {
+    if (tool.equals("run_command")) {
+      String command = String.valueOf(args.getOrDefault("command", "")).trim();
+      String first = command.isEmpty() ? "" : command.split("\\s+")[0];
+      return "run_command:" + first;
     }
+    return tool;
+  }
 
-    private String ruleKey(String tool, Map<String, Object> args) {
-        if (tool.equals("run_command")) {
-            String cmd = String.valueOf(args.getOrDefault("command", "")).trim();
-            String first = cmd.isEmpty() ? "" : cmd.split("\\s+")[0];
-            return "run_command:" + first;
-        }
-        return tool;
+  private boolean writesOutsideRoot(String tool, Map args) {
+    if (!(tool.equals("write_file") || tool.equals("edit_file"))) {
+      return false;
     }
+    Object path = args.get("path");
+    return path != null && !isWithin(root, String.valueOf(path));
+  }
 
-    private boolean writesOutsideRoot(String tool, Map<String, Object> args) {
-        if (!(tool.equals("write_file") || tool.equals("edit_file"))) return false;
-        Object p = args.get("path");
-        if (p == null) return false;
-        return !isWithin(root, String.valueOf(p));
+  /** True if {@code candidate}, resolved against {@code root}, stays inside {@code root}. */
+  public static boolean isWithin(Path root, String candidate) {
+    try {
+      Path target = root.resolve(candidate).normalize();
+      return target.startsWith(root);
+    } catch (Exception e) {
+      return false;
     }
-
-    /** True if {@code candidate}, resolved against {@code root}, stays inside {@code root}. */
-    public static boolean isWithin(Path root, String candidate) {
-        try {
-            Path target = root.resolve(candidate).normalize();
-            return target.startsWith(root);
-        } catch (Exception e) {
-            return false; // if we can't resolve it, treat as unsafe
-        }
-    }
+  }
 }
