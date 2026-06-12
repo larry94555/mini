@@ -49,6 +49,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | memory | Index freshness | incremental re-index (only changed files) + auto-reindex after edits |
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
 | ops | Per-user identity / RBAC | API keys map to users + roles; admin-only endpoints; `GET /me` |
+| ops | Per-resource ownership | sessions/todos/checkpoints/approvals scoped to their owner; admins see all |
 | ops | Observability | /metrics snapshot + structured run logs |
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
 | ui | Remote approvals | answer ASK-mode prompts in the browser/API instead of the server console |
@@ -73,7 +74,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `HtmlExtractor.java` | jsoup main-article extraction |
 | `Untrusted.java` | fences untrusted tool output (prompt-injection hardening) |
 | `CheckpointStore.java` | snapshot-before-edit + group-aware rewind (per change set) |
-| `SessionStore.java` | per-session history, persisted to `.imini/sessions/` |
+| `SessionStore.java` | per-session history + per-session owner, persisted to `.imini/sessions/` |
 | `TodoStore.java` | per-session task checklists |
 | `PermissionService.java` | allow/deny rules, per-session remembered decisions, confinement, plan mode |
 | `InterruptService.java` | per-session interrupt + steering signals |
@@ -92,6 +93,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `RetrievalService.java` | workspace indexing (incremental + auto-reindex) + search_memory/index_workspace tools |
 | `AuthFilter.java` | API-key auth + per-key rate limiting + RBAC gating (servlet filter) |
 | `Rbac.java` / `Principal.java` / `RequestContext.java` | role policy + caller identity (per request) |
+| `Ownership.java` | per-resource access policy (owner / admin / unowned) |
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
 | `Approvals.java` | pending-decision registry for remote ASK-mode approvals |
@@ -471,6 +473,17 @@ A member calling an admin-gated path gets `403`; everything else (ask/chat/sessi
 request. `GET /me` returns `{user, role}` so tools and the web UI can show identity (the UI hides the
 Metrics panel for non-admins). When `auth.enabled=false` everyone runs as the anonymous admin, so the
 open/dev experience is unchanged.
+
+**Per-resource ownership (`Ownership`).** Roles gate *endpoints*; ownership gates *resources*. The
+first user to use a session becomes its owner (`SessionStore.claim`, stored in a `session_owners`
+table). After that, a member may only read or act on **their own** sessions -- `/chat`, `/session`,
+`/todos`, `/checkpoints`, `/rewind`, `/interrupt`, `/steer` return `403` for someone else's session,
+`GET /sessions` lists only the caller's, and `/approvals` / `/approve` are scoped to the owning
+session (so a member approves their own run's tool requests, not everyone's). Admins see and act on
+everything; an **unowned** session (created before this change, or brand-new) stays open so nobody is
+locked out. Because approvals are now owner-scoped, they were removed from the default
+`auth.admin-paths` (now just `/metrics`) -- members need to approve their own runs. Workspace-global
+actions (`/index`, `/memory`) are not session-scoped and remain open to any authenticated user.
 
 **Observability (`Metrics`).** Every request is counted; runs are timed; tool calls (and tool errors),
 model calls, approximate output tokens, and per-key request counts are tallied; live concurrency

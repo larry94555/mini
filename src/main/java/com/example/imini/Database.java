@@ -41,7 +41,8 @@ public class Database {
             "CREATE INDEX idx_chunk_source ON mem_chunks(source)",
             "ALTER TABLE mem_chunks ADD COLUMN symbols TEXT",
             "ALTER TABLE checkpoints ADD COLUMN group_id TEXT",
-            "ALTER TABLE mem_chunks ADD COLUMN mtime INTEGER");
+            "ALTER TABLE mem_chunks ADD COLUMN mtime INTEGER",
+            "CREATE TABLE session_owners (session_id TEXT PRIMARY KEY, owner TEXT NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

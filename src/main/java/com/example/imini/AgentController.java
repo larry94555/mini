@@ -1,12 +1,14 @@
 package com.example.imini;
 
 import com.example.imini.PermissionService.Mode;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
@@ -74,6 +76,7 @@ public class AgentController {
         final String sessionId = "oneshot-" + UUID.randomUUID().toString().substring(0, 8);
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
+        sessions.claim(sessionId, currentUser());
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
         try {
@@ -91,6 +94,8 @@ public class AgentController {
     @PostMapping("/chat")
     public Map<String, String> chat(@RequestBody Map<String, String> body) throws Exception {
         final String sessionId = resolveSession(body.get("sessionId"));
+        requireAccess(sessionId);
+        sessions.claim(sessionId, currentUser());
         final Mode mode = parseMode(body.get("mode"));
         final String message = body.getOrDefault("message", "");
         metrics.inc("runs_started");
@@ -112,6 +117,8 @@ public class AgentController {
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chatStream(@RequestBody Map<String, String> body) {
         final String sessionId = resolveSession(body.get("sessionId"));
+        requireAccess(sessionId);
+        sessions.claim(sessionId, currentUser());
         final Mode mode = parseMode(body.get("mode"));
         final String message = body.getOrDefault("message", "");
         SseEmitter emitter = new SseEmitter(0L); // no server-side timeout
@@ -142,6 +149,7 @@ public class AgentController {
         final String sessionId = "oneshot-" + UUID.randomUUID().toString().substring(0, 8);
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
+        sessions.claim(sessionId, currentUser());
         SseEmitter emitter = new SseEmitter(0L);
         metrics.inc("runs_started");
         runService.submitAsync(() -> {
@@ -171,6 +179,7 @@ public class AgentController {
     public Map<String, String> interrupt(@RequestBody Map<String, String> body) {
         String sessionId = body.getOrDefault("sessionId", "");
         if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to interrupt.");
+        requireAccess(sessionId);
         interrupt.interrupt(sessionId);
         return Map.of("result", "interrupt requested for session " + sessionId
                 + "; it will stop at the next checkpoint.");
@@ -181,12 +190,14 @@ public class AgentController {
         String sessionId = body.getOrDefault("sessionId", "");
         String message = body.getOrDefault("message", "");
         if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to steer.");
+        requireAccess(sessionId);
         interrupt.steer(sessionId, message);
         return Map.of("result", "steering queued for session " + sessionId + ": " + message);
     }
 
     @GetMapping("/todos")
     public Map<String, Object> todos(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireAccess(sessionId);
         return Map.of("sessionId", sessionId, "todos", todos.get(sessionId), "rendered", todos.render(sessionId));
     }
 
@@ -194,12 +205,16 @@ public class AgentController {
 
     @GetMapping("/sessions")
     public List<String> sessions() {
-        return sessions.list();
+        Principal caller = RequestContext.current();
+        return sessions.list().stream()
+                .filter(id -> Ownership.canAccess(caller, sessions.owner(id)))
+                .toList();
     }
 
     /** A single session's stored messages (for the UI to render prior history on switch). */
     @GetMapping("/session")
     public List<Map<String, Object>> session(@RequestParam(name = "id") String id) {
+        requireAccess(id);
         List<Map<String, Object>> h = sessions.get(id);
         return h == null ? List.of() : h;
     }
@@ -230,13 +245,18 @@ public class AgentController {
     @GetMapping("/approvals")
     public List<Map<String, Object>> approvals(
             @RequestParam(name = "sessionId", defaultValue = "") String sessionId) {
-        return approvals.list(sessionId.isBlank() ? null : sessionId);
+        Principal caller = RequestContext.current();
+        return approvals.list(sessionId.isBlank() ? null : sessionId).stream()
+                .filter(a -> Ownership.canAccess(caller, sessions.owner(String.valueOf(a.get("sessionId")))))
+                .toList();
     }
 
     @PostMapping("/approve")
     public Map<String, Object> approve(@RequestBody Map<String, String> body) {
         String id = body.getOrDefault("id", "");
         String decision = body.getOrDefault("decision", "deny"); // allow | always | deny
+        String sid = approvals.sessionOf(id);
+        if (sid != null) requireAccess(sid);
         boolean ok = approvals.resolve(id, decision);
         return Map.of("resolved", ok, "id", id, "decision", decision);
     }
@@ -245,11 +265,13 @@ public class AgentController {
     public Map<String, String> rewind(@RequestBody Map<String, String> body) {
         String sessionId = body.getOrDefault("sessionId", "");
         if (sessionId.isBlank()) return Map.of("result", "provide a sessionId to rewind.");
+        requireAccess(sessionId);
         return Map.of("result", checkpoints.rewindLast(sessionId));
     }
 
     @GetMapping("/checkpoints")
     public List<String> checkpoints(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireAccess(sessionId);
         return checkpoints.list(sessionId);
     }
 
@@ -270,6 +292,18 @@ public class AgentController {
 
     private String resolveSession(String s) {
         return (s == null || s.isBlank()) ? UUID.randomUUID().toString().substring(0, 8) : s;
+    }
+
+    private static String currentUser() {
+        return RequestContext.current().user();
+    }
+
+    /** 403 unless the caller owns this session (or is admin, or the session is unowned). */
+    private void requireAccess(String sessionId) {
+        if (!Ownership.canAccess(RequestContext.current(), sessions.owner(sessionId))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "session '" + sessionId + "' belongs to another user");
+        }
     }
 
     private static RunSink sseSink(SseEmitter emitter) {

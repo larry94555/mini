@@ -22,6 +22,7 @@ public class SessionStore {
     private final Database db;
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, List<Map<String, Object>>> cache = new ConcurrentHashMap<>();
+    private final Map<String, String> owners = new ConcurrentHashMap<>(); // session_id -> owner
 
     public SessionStore(Database db) {
         this.db = db;
@@ -59,6 +60,32 @@ public class SessionStore {
                 log.warn("[session] could not save '" + id + "': " + e.getMessage());
             }
         }
+    }
+
+    /** Record the owner of a session the first time it is used (no-op if already owned). */
+    public synchronized void claim(String id, String user) {
+        if (id == null || id.isBlank() || user == null || user.isBlank()) return;
+        if (owner(id) != null) return;
+        owners.put(id, user);
+        if (db.available()) {
+            try {
+                db.update("INSERT INTO session_owners(session_id, owner) VALUES(?,?) "
+                        + "ON CONFLICT(session_id) DO NOTHING", id, user);
+            } catch (Exception e) {
+                log.warn("[session] could not set owner for '" + id + "': " + e.getMessage());
+            }
+        }
+    }
+
+    /** The owning user of a session, or null if unowned (legacy/new). */
+    public synchronized String owner(String id) {
+        if (owners.containsKey(id)) return owners.get(id);
+        if (db.available()) {
+            List<String> r = db.query("SELECT owner FROM session_owners WHERE session_id=?",
+                    rs -> rs.getString(1), id);
+            if (!r.isEmpty()) { owners.put(id, r.get(0)); return r.get(0); }
+        }
+        return null;
     }
 
     public synchronized List<String> list() {
