@@ -9,10 +9,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -44,6 +46,7 @@ public class RetrievalService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final List<Chunk> mem = new ArrayList<>(); // fallback index when DB unavailable
+    private final Map<String, Long> memMtime = new HashMap<>(); // source -> mtime (fallback)
 
     public RetrievalService(Database db) {
         this.db = db;
@@ -61,6 +64,7 @@ public class RetrievalService {
     @Value("${llama.port:8081}") private int llamaPort;
     @Value("${llama.client-host:localhost}") private String clientHost;
     @Value("${retrieval.symbol-boost-weight:2.0}") private double symbolBoostWeight;
+    @Value("${retrieval.auto-reindex:true}") private boolean autoReindex;
 
     private static final Set<String> SKIP_DIRS =
             Set.of(".git", "target", "build", "node_modules", ".imini", ".maven", ".idea", "out");
@@ -81,10 +85,18 @@ public class RetrievalService {
     // --- tools ---------------------------------------------------------------
 
     public Tool indexTool() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("full", Map.of("type", "boolean",
+                "description", "Rebuild from scratch instead of an incremental refresh (default false)."));
         return new Tool("index_workspace",
-                "(Re)build the retrieval index over the project's text files. Run once before "
-                        + "search_memory, or after large changes.",
-                objectSchema(Map.of(), List.of()), false, args -> index());
+                "Update the retrieval index over the project's text files. INCREMENTAL by default (only "
+                        + "new/changed/removed files since last time); pass full=true to rebuild from scratch. "
+                        + "Run before search_memory.",
+                objectSchema(props, List.of()), false, args -> {
+            Object f = args.get("full");
+            boolean full = f instanceof Boolean b ? b : "true".equalsIgnoreCase(String.valueOf(f));
+            return full ? index() : refresh();
+        });
     }
 
     public Tool searchTool() {
@@ -104,29 +116,18 @@ public class RetrievalService {
 
     // --- indexing ------------------------------------------------------------
 
+    /** Full rebuild: clear everything and index every included file. */
     public synchronized String index() {
         clear();
         int files = 0, chunks = 0;
         long now = System.currentTimeMillis();
         if (!Files.isDirectory(root)) return "Workspace root not found: " + root;
         try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> candidates = walk.filter(Files::isRegularFile)
-                    .filter(this::included)
-                    .toList();
+            List<Path> candidates = walk.filter(Files::isRegularFile).filter(this::included).toList();
             for (Path p : candidates) {
                 try {
-                    if (Files.size(p) > maxFileKb * 1024L) continue;
-                    String content = Files.readString(p);
-                    String rel = root.relativize(p.toAbsolutePath().normalize()).toString();
-                    String fileName = p.getFileName().toString();
-                    int ord = 0;
-                    for (String chunk : chunk(content, chunkSize)) {
-                        if (chunk.isBlank()) continue;
-                        store(new Chunk(UUID.randomUUID().toString(), rel, ord++, chunk,
-                                useEmbeddings ? embed(chunk) : null, symbolsOf(fileName, chunk)), now);
-                        chunks++;
-                    }
-                    files++;
+                    int n = indexOneFile(p, now);
+                    if (n >= 0) { chunks += n; files++; }
                 } catch (Exception perFile) {
                     // skip unreadable/binary files
                 }
@@ -136,6 +137,112 @@ public class RetrievalService {
         }
         return "Indexed " + chunks + " chunk(s) from " + files + " file(s)"
                 + (useEmbeddings ? " with embeddings." : " (lexical).");
+    }
+
+    /** Incremental refresh: only (re)index new/changed files and drop removed ones. */
+    public synchronized String refresh() {
+        if (!Files.isDirectory(root)) return "Workspace root not found: " + root;
+        Map<String, Long> indexed = indexedMtimes();
+        Map<String, Long> current = currentFiles();
+        IndexPlan plan = diff(indexed, current);
+        long now = System.currentTimeMillis();
+        int reindexed = 0, removed = 0;
+        for (String src : plan.remove()) { deleteSource(src); removed++; }
+        for (String src : plan.upsert()) {
+            deleteSource(src); // clear stale chunks before re-adding
+            try { indexOneFile(root.resolve(src), now); reindexed++; } catch (Exception ignore) { }
+        }
+        int unchanged = current.size() - plan.upsert().size();
+        return "Refreshed index: " + reindexed + " new/changed, " + removed + " removed, "
+                + unchanged + " unchanged" + (useEmbeddings ? " (embeddings)." : " (lexical).");
+    }
+
+    /** Index a single file; returns chunk count, or -1 if skipped (too large). */
+    private int indexOneFile(Path p, long now) throws IOException {
+        if (Files.size(p) > maxFileKb * 1024L) return -1;
+        String content = Files.readString(p);
+        String rel = root.relativize(p.toAbsolutePath().normalize()).toString();
+        String fileName = p.getFileName().toString();
+        long mtime = Files.getLastModifiedTime(p).toMillis();
+        int ord = 0, n = 0;
+        for (String chunk : chunk(content, chunkSize)) {
+            if (chunk.isBlank()) continue;
+            store(new Chunk(UUID.randomUUID().toString(), rel, ord++, chunk,
+                    useEmbeddings ? embed(chunk) : null, symbolsOf(fileName, chunk)), now, mtime);
+            n++;
+        }
+        return n;
+    }
+
+    /**
+     * Auto-reindex a single file after it is written/edited. Best-effort and quiet: does nothing if
+     * auto-reindex is off or the index is empty (so a write never silently builds the whole index).
+     */
+    public synchronized void reindexFile(Path file) {
+        if (!autoReindex) return;
+        try {
+            if (count() == 0) return;
+            String rel = root.relativize(file.toAbsolutePath().normalize()).toString();
+            deleteSource(rel);
+            if (Files.exists(file) && included(file)) {
+                indexOneFile(file, System.currentTimeMillis());
+            }
+        } catch (Exception e) {
+            log.debug("[retrieval] auto-reindex skipped " + file + ": " + e.getMessage());
+        }
+    }
+
+    /** source -> latest indexed mtime. */
+    private Map<String, Long> indexedMtimes() {
+        Map<String, Long> m = new HashMap<>();
+        if (db.available()) {
+            record SM(String s, long m) {}
+            List<SM> rows = db.query("SELECT source, MAX(mtime) FROM mem_chunks GROUP BY source",
+                    rs -> new SM(rs.getString(1), rs.getLong(2)));
+            for (SM r : rows) m.put(r.s(), r.m());
+        } else {
+            m.putAll(memMtime);
+        }
+        return m;
+    }
+
+    /** Included files currently on disk -> mtime. */
+    private Map<String, Long> currentFiles() {
+        Map<String, Long> cur = new HashMap<>();
+        if (!Files.isDirectory(root)) return cur;
+        try (Stream<Path> walk = Files.walk(root)) {
+            for (Path p : walk.filter(Files::isRegularFile).filter(this::included).toList()) {
+                try {
+                    if (Files.size(p) > maxFileKb * 1024L) continue;
+                    String rel = root.relativize(p.toAbsolutePath().normalize()).toString();
+                    cur.put(rel, Files.getLastModifiedTime(p).toMillis());
+                } catch (Exception ignore) { }
+            }
+        } catch (Exception ignore) { }
+        return cur;
+    }
+
+    /** What an incremental refresh would do, given indexed vs current file->mtime. Pure + testable. */
+    public record IndexPlan(Set<String> upsert, Set<String> remove) {}
+
+    public static IndexPlan diff(Map<String, Long> indexed, Map<String, Long> current) {
+        Set<String> upsert = new LinkedHashSet<>();
+        for (Map.Entry<String, Long> e : current.entrySet()) {
+            Long was = indexed.get(e.getKey());
+            if (was == null || !was.equals(e.getValue())) upsert.add(e.getKey());
+        }
+        Set<String> remove = new LinkedHashSet<>();
+        for (String src : indexed.keySet()) if (!current.containsKey(src)) remove.add(src);
+        return new IndexPlan(upsert, remove);
+    }
+
+    private void deleteSource(String source) {
+        if (db.available()) {
+            db.update("DELETE FROM mem_chunks WHERE source=?", source);
+        } else {
+            mem.removeIf(c -> c.source().equals(source));
+            memMtime.remove(source);
+        }
     }
 
     private boolean included(Path p) {
@@ -148,16 +255,18 @@ public class RetrievalService {
 
     private void clear() {
         if (db.available()) db.update("DELETE FROM mem_chunks");
-        else mem.clear();
+        else { mem.clear(); memMtime.clear(); }
     }
 
-    private void store(Chunk c, long now) {
+    private void store(Chunk c, long now, long mtime) {
         if (db.available()) {
             String emb = c.embedding() == null ? null : floatsToJson(c.embedding());
-            db.update("INSERT INTO mem_chunks(id, source, ordinal, text, embedding, symbols, indexed_at) VALUES(?,?,?,?,?,?,?)",
-                    c.id(), c.source(), c.ordinal(), c.text(), emb, c.symbols(), now);
+            db.update("INSERT INTO mem_chunks(id, source, ordinal, text, embedding, symbols, indexed_at, mtime) "
+                    + "VALUES(?,?,?,?,?,?,?,?)",
+                    c.id(), c.source(), c.ordinal(), c.text(), emb, c.symbols(), now, mtime);
         } else {
             mem.add(c);
+            memMtime.put(c.source(), mtime);
         }
     }
 

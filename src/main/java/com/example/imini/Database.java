@@ -40,7 +40,8 @@ public class Database {
                     "text TEXT NOT NULL, embedding TEXT, indexed_at INTEGER NOT NULL)",
             "CREATE INDEX idx_chunk_source ON mem_chunks(source)",
             "ALTER TABLE mem_chunks ADD COLUMN symbols TEXT",
-            "ALTER TABLE checkpoints ADD COLUMN group_id TEXT");
+            "ALTER TABLE checkpoints ADD COLUMN group_id TEXT",
+            "ALTER TABLE mem_chunks ADD COLUMN mtime INTEGER");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

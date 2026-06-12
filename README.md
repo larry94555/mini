@@ -46,6 +46,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | memory | Persistence (SQLite) | sessions + per-session checkpoints survive restarts (migrations) |
 | memory | Retrieval / RAG | index workspace files; search_memory finds relevant snippets |
 | memory | Symbol-aware ranking | search_memory boosts the chunk that *declares* a queried name |
+| memory | Index freshness | incremental re-index (only changed files) + auto-reindex after edits |
 | ops | API-key auth + rate limiting | protect the HTTP surface; per-key limits and attribution |
 | ops | Observability | /metrics snapshot + structured run logs |
 | ui | Web UI | single-page app at / : streaming chat, sessions, todos, rewind, memory, metrics |
@@ -87,7 +88,7 @@ harness** (tools, loop, memory, safety) concrete and readable. No cloud, no API 
 | `GrammarBuilder.java` | builds a GBNF grammar to constrain tool calls (opt-in) |
 | `Sandbox.java` | run_command screening, read confinement, optional container exec |
 | `Database.java` | SQLite connection + migration runner (sessions/checkpoints/index) |
-| `RetrievalService.java` | workspace indexing + search_memory/index_workspace tools (with symbol boost) |
+| `RetrievalService.java` | workspace indexing (incremental + auto-reindex) + search_memory/index_workspace tools |
 | `AuthFilter.java` | API-key auth + per-key rate limiting (servlet filter) |
 | `RateLimiter.java` | fixed-window per-key limiter |
 | `Metrics.java` | counters/latency/gauges for GET /metrics |
@@ -412,6 +413,20 @@ alongside the chunk. At search time, every query term that exactly matches a dec
 surfaces the file that declares `decide` first. Set the weight to 0 to disable it. This augments the
 default lexical mode; embeddings mode still ranks purely by cosine. The `symbols` column is added to
 the `mem_chunks` table by a forward migration, so existing databases just need a re-`index_workspace`.
+
+**Index freshness.** The index used to be a one-shot snapshot that went stale as soon as you edited a
+file. Now each chunk records its file's modification time (`mtime`), and `index_workspace` is
+**incremental by default**: it walks the workspace, compares mtimes against what's indexed, and only
+re-indexes new/changed files while dropping chunks for deleted ones (pass `full=true` to force a clean
+rebuild). On top of that, after every `write_file`, `edit_file`, or `apply_patch`, imini
+**auto-reindexes just the touched file(s)** so `search_memory` reflects your latest edits immediately.
+Auto-reindex only runs once an index exists (a write never silently builds the whole index) and can be
+turned off with `retrieval.auto-reindex=false`. The `mtime` column is added by a forward migration; run
+`index_workspace` once after upgrading so existing chunks pick up their mtimes.
+
+> Honest scope: freshness is tracked by file mtime (not content hash), so touching a file without
+> changing its bytes still re-indexes it (cheap and safe). Auto-reindex is synchronous and per-file
+> (fine for single edits/patches); large files still respect `retrieval.max-file-kb`.
 
 ### Trying it out
 
@@ -816,6 +831,7 @@ retrieval.embeddings=false          # true = semantic search via a llama embeddi
 retrieval.embed-base-url=           # blank = main server; better: a 2nd server with --embeddings
 retrieval.embed-model=nomic-embed-text
 retrieval.symbol-boost-weight=2.0   # boost chunks that DECLARE a queried name (0 disables; lexical mode)
+retrieval.auto-reindex=true         # after a write/edit/apply_patch, reindex just that file (if index non-empty)
 auth.enabled=false                  # true = require an API key on every non-open request
 auth.header=X-API-Key               # also accepts "Authorization: Bearer <key>"
 auth.keys=                          # comma-separated "key" or "label:key"
