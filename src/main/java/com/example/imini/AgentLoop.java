@@ -35,6 +35,8 @@ public class AgentLoop {
 
     @Value("${agent.profile:general}")
     private String profile;          // general (default) | coding
+    @Value("${agent.plan.step-retries:1}") private int planStepRetries;
+    @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -101,7 +103,7 @@ public class AgentLoop {
         }
         sink.log("plan: " + steps.size() + " step(s)");
 
-        String results = Planner.execute(g, steps,
+        String results = Planner.executeWithRecovery(g, steps,
                 stepPrompt -> {
                     try {
                         return engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
@@ -109,7 +111,18 @@ public class AgentLoop {
                         return "ERROR: " + e.getMessage();
                     }
                 },
-                items -> todos.set(sessionId, items));
+                replanPrompt -> {
+                    try {
+                        sink.log("plan: revising remaining steps after a failure");
+                        String revised = engine.run(systemPrompt() + Planner.PLAN_SYSTEM_PROMPT, replanPrompt,
+                                registry.tools(), Mode.PLAN, "plan", sessionId, RunSink.NOOP);
+                        return Planner.parsePlan(revised);
+                    } catch (Exception e) {
+                        return java.util.List.of();
+                    }
+                },
+                items -> todos.set(sessionId, items),
+                planStepRetries, planMaxReplans);
 
         sink.log("plan: synthesizing final answer");
         return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),

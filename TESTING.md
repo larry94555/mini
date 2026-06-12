@@ -1019,3 +1019,24 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Run:** a trivial goal where the model answers without a list.
 - **Observe:** the log shows `plan: no steps parsed; running directly` and it behaves like a normal run.
+
+---
+
+# Plan-driven execution: failure recovery
+
+## 110. Classify + retry/re-plan (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlanRecoveryTest` passes -- `classify` reads an explicit `STEP_STATUS` line then falls
+  back (ERROR-prefix -> failed, null -> failed, otherwise done); a failed step is retried then
+  completes; with no replans it is left `failed`; a failure triggers a re-plan that appends new steps
+  (which then complete); and re-planning is bounded by `agent.plan.max-replans`.
+
+## 111. Recovery end to end (manual)
+
+- **Setup:** `agent.plan.step-retries=1`, `agent.plan.max-replans=2` (defaults).
+- **Run (plan mode):** give a goal whose first approach is likely to fail (e.g. edit a file with a
+  guessed path), with `"plan":true`.
+- **Observe:** at `GET /todos` a step may show `[!]` (failed); the SSE `log` lines show a retry and/or
+  `plan: revising remaining steps after a failure`; the run continues with revised steps and still
+  produces a final answer. Set both knobs to 0 to see it stop retrying/re-planning.

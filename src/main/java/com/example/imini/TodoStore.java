@@ -35,6 +35,7 @@ public class TodoStore {
             String box = switch (status) {
                 case "completed" -> "[x]";
                 case "in_progress" -> "[~]";
+                case "failed" -> "[!]";
                 default -> "[ ]";
             };
             sb.append(box).append(" ").append(it.content()).append("\n");

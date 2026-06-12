@@ -51,7 +51,7 @@ No cloud API key is required.
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
-| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator, coding profile guidance |
+| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry + re-planning, coding profile guidance |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -186,15 +186,21 @@ What happens:
 1. the agent drafts a numbered plan (read-only `PLAN` mode, no tools) and it is parsed into steps;
 2. the steps become the session's todos (watch them flip to `[~]` then `[x]` at `GET /todos`);
 3. each step runs as a focused turn with the full toolset and the requested permission mode, told to do
-   only that step and report back;
-4. a final synthesis turn produces the answer for the whole goal.
+   only that step and end its report with a `STEP_STATUS: done` or `STEP_STATUS: failed <reason>` line;
+4. **failure recovery:** a step that reports failure (or whose result starts with `ERROR`) is retried up
+   to `agent.plan.step-retries` times (default 1, with the prior failure fed back in); if it still
+   fails it is marked `[!]` in the todos and -- up to `agent.plan.max-replans` times for the whole run
+   (default 2) -- the model is asked to revise the REMAINING plan, whose new steps are appended and run;
+5. a final synthesis turn produces the answer for the whole goal.
 
 If no plan can be parsed, it falls back to a single normal run. The step count is capped
-(`Planner.MAX_STEPS`, 12). The plan/sequence logic is pure and unit-tested with a fake runner.
+(`Planner.MAX_STEPS`, 12). The classification, retry, and re-plan logic is pure and unit-tested with
+fake runners.
 
-> Honest scope: steps run sequentially (no parallelism) and there is no automatic re-planning on a bad
-> step yet -- a failed step is reported into the running context and the plan continues. Plan runs are
-> goal-oriented one-shots and do not append to the conversational `/chat` history.
+> Honest scope: steps run sequentially (no parallelism). Failure detection is best-effort -- the
+> `STEP_STATUS` line the model is asked to emit, falling back to the `ERROR`-prefix convention -- so a
+> step that silently does the wrong thing can still read as done. Retries and re-plans are bounded.
+> Plan runs are goal-oriented one-shots and do not append to the conversational `/chat` history.
 
 ## Permission modes
 
