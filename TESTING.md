@@ -1121,3 +1121,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** resume a session with no saved plan -> "No saved plan to resume for this session."; resume a
   fully-completed plan -> "The saved plan is already complete." Resume is ownership-scoped (403 for
   another user's session).
+
+---
+
+# Plan-driven execution: check suggestions
+
+## 121. Suggestion library (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `CheckLibraryTest` passes -- `CheckLibrary.suggest` returns a compile check per build
+  system (`mvn -q -DskipTests compile`, `gradle -q compileJava`, `npm run build --silent`), the test
+  command when the step mentions tests, `python -m py_compile <file>` / `test -f <file>` when a file is
+  named, and null when nothing confident applies; `firstFile` respects an extension filter. The
+  suggested check is run when the model emits none, and the model's own `CHECK:` takes priority.
+
+## 122. Auto-suggested check end to end (manual)
+
+- **Setup:** a Maven workspace, `agent.plan.verify=true`, `agent.plan.suggest-checks=true` (defaults),
+  commands allowed.
+- **Run (plan mode):** a goal whose steps don't include `CHECK:` lines.
+- **Observe:** the SSE `log` shows `plan: suggested check mvn -q -DskipTests compile` and
+  `plan: check passed/FAILED (...)`; a step that breaks compilation fails its suggested check and is
+  retried / re-planned. Set `agent.plan.suggest-checks=false` to fall back to self-report only.
+
+## 123. Project detection (manual)
+
+- **Observe:** in a repo with `pom.xml` the suggester picks Maven; `build.gradle` -> Gradle;
+  `package.json` -> Node; `pyproject.toml`/`requirements.txt`/`setup.py` -> Python; otherwise file
+  existence checks only.

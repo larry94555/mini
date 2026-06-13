@@ -41,6 +41,7 @@ public class AgentLoop {
     @Value("${agent.plan.step-retries:1}") private int planStepRetries;
     @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
     @Value("${agent.plan.verify:true}") private boolean planVerify;
+    @Value("${agent.plan.suggest-checks:true}") private boolean planSuggestChecks;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -50,11 +51,12 @@ public class AgentLoop {
     private final TodoStore todos;
     private final CheckRunner checks;
     private final PlanStore plans;
+    private final CheckSuggester suggester;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
-                     PlanStore plans) {
+                     PlanStore plans, CheckSuggester suggester) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -63,6 +65,7 @@ public class AgentLoop {
         this.todos = todos;
         this.checks = checks;
         this.plans = plans;
+        this.suggester = suggester;
     }
 
     private String systemPrompt() {
@@ -115,7 +118,8 @@ public class AgentLoop {
 
         String results = Planner.executeWithRecovery(g, steps,
                 planStepRunner(sessionId, mode, sink), planReplanner(sessionId, sink),
-                planTodos(sessionId, g, sink), planStepRetries, planMaxReplans, planVerifier(sink));
+                planTodos(sessionId, g, sink), planStepRetries, planMaxReplans, planVerifier(sink),
+                planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
         return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
@@ -137,7 +141,8 @@ public class AgentLoop {
 
         String results = Planner.executeFrom(g, saved.items(),
                 planStepRunner(sessionId, mode, sink), planReplanner(sessionId, sink),
-                planTodos(sessionId, g, sink), planStepRetries, planMaxReplans, planVerifier(sink));
+                planTodos(sessionId, g, sink), planStepRetries, planMaxReplans, planVerifier(sink),
+                planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
         return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
@@ -175,6 +180,16 @@ public class AgentLoop {
             Planner.CheckResult r = checks.run(cmd);
             sink.log("plan: check " + (r.passed() ? "passed" : "FAILED") + " (" + cmd + ")");
             return r;
+        };
+    }
+
+    /** Suggest a check for a step (used only when the model emits none, and only if verify is on). */
+    private Function<String, String> planSuggester(RunSink sink) {
+        if (!planVerify || !planSuggestChecks) return null;
+        return stepText -> {
+            String cmd = suggester.suggest(stepText);
+            if (cmd != null) sink.log("plan: suggested check " + cmd);
+            return cmd;
         };
     }
 
