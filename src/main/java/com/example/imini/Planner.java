@@ -369,6 +369,7 @@ public final class Planner {
     public static String synthesisPrompt(String goal, String allResults) {
         return "Overall goal: " + goal + "\n\nThe plan has been carried out. Step results:\n\n"
                 + allResults.strip() + "\n\nNow give the user a concise final answer for the goal. "
-                + "Do not call any more tools.";
+                + "Briefly note which files you changed, how you verified them (checks/commands run), "
+                + "and any risks or tests not run. Do not call any more tools.";
     }
 }

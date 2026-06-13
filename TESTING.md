@@ -1194,3 +1194,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** as each step completes, its mutating tool calls appear indented under the step in the
   PLAN panel -- `· write_file src/App.java [ok]`, `· run_command $ mvn -q test [error]` (errors in
   red). The same detail is at `GET /plan?sessionId=`. Read-only tools are not shown.
+
+---
+
+# Edit trust: auto-verify mutations
+
+## 129. Edit-summary parsing/formatting (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `EditSummaryTest` passes -- `parseStatus` reads `git status --porcelain` (ignoring the
+  `##` branch header), `parseStat`/`oneLine` extract the `git diff --stat` summary, `format` builds the
+  verified block (changed files + stat), returns empty when nothing changed, and falls back to the
+  run's touched paths when git sees nothing.
+
+## 130. Verified edits appended to answers (manual)
+
+- **Setup:** a git workspace, `agent.verify-edits=true` (default).
+- **Run:** `/ask` or plan a goal that writes/edits files.
+- **Observe:** the final answer ends with an `Edits (verified with git):` block listing changed files
+  and `git diff --stat`; the activity log shows a one-line `edits: …`. For streaming the block appears
+  in the answer body; for `POST /ask` it is in the returned JSON. Set `agent.verify-edits=false` to
+  omit it.
+
+## 131. Non-git workspace fallback (manual)
+
+- **Run:** in a directory that is not a git repo, make an edit via a run.
+- **Observe:** the block lists the files the run touched and notes "no tracked diff … not a git repo"
+  rather than failing.
