@@ -38,6 +38,7 @@ public class AgentLoop {
     private String profile;          // general (default) | coding
     @Value("${agent.plan.step-retries:1}") private int planStepRetries;
     @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
+    @Value("${agent.plan.verify:true}") private boolean planVerify;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -45,16 +46,18 @@ public class AgentLoop {
     private final ProjectContext project;
     private final SlashCommands slash;
     private final TodoStore todos;
+    private final CheckRunner checks;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
-                     ProjectContext project, SlashCommands slash, TodoStore todos) {
+                     ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
         this.project = project;
         this.slash = slash;
         this.todos = todos;
+        this.checks = checks;
     }
 
     private String systemPrompt() {
@@ -124,7 +127,12 @@ public class AgentLoop {
                     }
                 },
                 items -> { todos.set(sessionId, items); emitPlan(sink, items); },
-                planStepRetries, planMaxReplans);
+                planStepRetries, planMaxReplans,
+                planVerify ? (cmd -> {
+                    Planner.CheckResult r = checks.run(cmd);
+                    sink.log("plan: check " + (r.passed() ? "passed" : "FAILED") + " (" + cmd + ")");
+                    return r;
+                }) : null);
 
         sink.log("plan: synthesizing final answer");
         return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),

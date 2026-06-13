@@ -51,7 +51,7 @@ No cloud API key is required.
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
-| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry + re-planning, coding profile guidance |
+| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, and step verification, coding profile guidance |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -187,11 +187,15 @@ What happens:
 2. the steps become the session's todos and a live `plan` checklist in the UI (also at `GET /todos`);
 3. each step runs as a focused turn with the full toolset and the requested permission mode, told to do
    only that step and end its report with a `STEP_STATUS: done` or `STEP_STATUS: failed <reason>` line;
-4. **failure recovery:** a step that reports failure (or whose result starts with `ERROR`) is retried up
-   to `agent.plan.step-retries` times (default 1, with the prior failure fed back in); if it still
-   fails it is marked `[!]` in the todos and -- up to `agent.plan.max-replans` times for the whole run
-   (default 2) -- the model is asked to revise the REMAINING plan, whose new steps are appended and run;
-5. a final synthesis turn produces the answer for the whole goal.
+4. **verification:** if a step's report includes a `CHECK: <shell command>` line, the harness runs it
+   (exit code 0 = success, through the same `Sandbox` screening as `run_command`) and the result is
+   AUTHORITATIVE -- it overrides the model's self-report, so a step that *claims* success but does not
+   actually work is caught;
+5. **failure recovery:** a step that fails (a failed check, a `STEP_STATUS: failed`, or an `ERROR`
+   result) is retried up to `agent.plan.step-retries` times (default 1, prior failure fed back in); if
+   it still fails it is marked `[!]` in the todos and -- up to `agent.plan.max-replans` times for the
+   whole run (default 2) -- the model is asked to revise the REMAINING plan, whose new steps are run;
+6. a final synthesis turn produces the answer for the whole goal.
 
 If no plan can be parsed, it falls back to a single normal run. The step count is capped
 (`Planner.MAX_STEPS`, 12). The classification, retry, and re-plan logic is pure and unit-tested with
@@ -203,6 +207,14 @@ complete, fail, or get re-planned. The web UI renders this as a live checklist a
 `[ ]` pending, `[~]` in progress, `[x]` done, and `[!]` failed, so you can watch the agent work the
 plan in real time (no polling). Non-streaming sinks fall back to logging the event; the list is also
 always readable at `GET /todos`.
+
+**Step verification.** Self-reported status is best-effort, so a step may declare a concrete check.
+When a step's report contains a `CHECK: <command>` line, the harness runs that command and uses its
+exit code (0 = pass) as the real outcome -- overriding the self-report and feeding the retry/re-plan
+loop. Checks run through the same `Sandbox` command screening as `run_command`, in the workspace root,
+with a `agent.plan.check-timeout-seconds` timeout (default 20). Turn it off with
+`agent.plan.verify=false`. Good checks are cheap and decisive, e.g. `CHECK: test -f build/out.jar`,
+`CHECK: grep -q "/version" src/Main.java`, or `CHECK: mvn -q -DskipTests compile`.
 
 > Honest scope: steps run sequentially (no parallelism). Failure detection is best-effort -- the
 > `STEP_STATUS` line the model is asked to emit, falling back to the `ERROR`-prefix convention -- so a
