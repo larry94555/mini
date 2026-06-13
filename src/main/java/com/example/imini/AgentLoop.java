@@ -42,6 +42,7 @@ public class AgentLoop {
     @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
     @Value("${agent.plan.verify:true}") private boolean planVerify;
     @Value("${agent.plan.suggest-checks:true}") private boolean planSuggestChecks;
+    @Value("${agent.verify-edits:true}") private boolean verifyEdits;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -53,11 +54,12 @@ public class AgentLoop {
     private final PlanStore plans;
     private final CheckSuggester suggester;
     private final RunRecorder recorder;
+    private final GitInspector git;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
-                     PlanStore plans, CheckSuggester suggester, RunRecorder recorder) {
+                     PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -68,6 +70,7 @@ public class AgentLoop {
         this.plans = plans;
         this.suggester = suggester;
         this.recorder = recorder;
+        this.git = git;
     }
 
     private String systemPrompt() {
@@ -78,7 +81,8 @@ public class AgentLoop {
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userQuestion)) return slash.help();
         String question = slash.expand(userQuestion);
-        return engine.run(systemPrompt(), question, registry.tools(), mode, "main", sessionId, sink);
+        recorder.beginEdits(sessionId);
+        return withEditTrust(sessionId, engine.run(systemPrompt(), question, registry.tools(), mode, "main", sessionId, sink), sink);
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
@@ -93,9 +97,10 @@ public class AgentLoop {
         }
         history.add(message("user", expanded));
 
+        recorder.beginEdits(sessionId);
         AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());
-        return result.answer();
+        return withEditTrust(sessionId, result.answer(), sink);
     }
 
     /**
@@ -115,7 +120,7 @@ public class AgentLoop {
         List<String> steps = Planner.parsePlan(planText);
         if (steps.isEmpty()) {
             sink.log("plan: no steps parsed; running directly");
-            return engine.run(systemPrompt(), g, registry.tools(), mode, "main", sessionId, sink);
+            return withEditTrust(sessionId, engine.run(systemPrompt(), g, registry.tools(), mode, "main", sessionId, sink), sink);
         }
         sink.log("plan: " + steps.size() + " step(s)");
 
@@ -125,8 +130,8 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
-                registry.tools(), mode, "main", sessionId, sink);
+        return withEditTrust(sessionId, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+                registry.tools(), mode, "main", sessionId, sink), sink);
     }
 
     /** Resume a previously saved plan from its first not-completed step. */
@@ -139,6 +144,7 @@ public class AgentLoop {
             return "The saved plan is already complete.";
         }
         final String g = saved.goal();
+        recorder.beginEdits(sessionId);
         long remaining = saved.items().stream().filter(it -> !"completed".equals(it.status())).count();
         sink.log("plan: resuming (" + remaining + " of " + saved.items().size() + " step(s) remaining)");
 
@@ -148,8 +154,8 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
-                registry.tools(), mode, "main", sessionId, sink);
+        return withEditTrust(sessionId, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+                registry.tools(), mode, "main", sessionId, sink), sink);
     }
 
     // ---- plan-run building blocks (shared by runPlan + resumePlan) ----------
@@ -207,6 +213,22 @@ public class AgentLoop {
     }
 
     /** Stream the current plan/checklist as a structured SSE "plan" event (no-op on non-SSE sinks). */
+    /** Append a git-verified summary of edits to the final answer (and stream it for SSE clients). */
+    private String withEditTrust(String sessionId, String answer, RunSink sink) {
+        if (!verifyEdits) return answer;
+        try {
+            String status = git.status();
+            String stat = git.diffStat();
+            String block = EditSummary.format(status, stat, recorder.changedPaths(sessionId));
+            if (block.isBlank()) return answer;
+            sink.log("edits: " + EditSummary.oneLine(status, stat));
+            sink.token("\n\n" + block);   // streams into the body for SSE runs (no-op on console sinks)
+            return answer + "\n\n" + block;
+        } catch (Exception e) {
+            return answer; // edit-trust is best-effort; never break the answer
+        }
+    }
+
     private void emitPlan(RunSink sink, String sessionId, List<TodoStore.Item> items) {
         try {
             Map<Integer, List<String>> tx = recorder.transcript(sessionId);

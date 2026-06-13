@@ -52,6 +52,7 @@ No cloud API key is required.
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
 | Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), and persist/resume, coding profile guidance |
+| Edit trust | auto `git status`/`git diff --stat` verification appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -70,7 +71,9 @@ No cloud API key is required.
 | `CheckLibrary.java` | Suggests a verification command from project type + step text (pure) |
 | `CheckSuggester.java` | Detects the build system and suggests a step check |
 | `ToolCall.java` | Pure summary/outcome formatting for a recorded tool call |
-| `RunRecorder.java` | Records mutating tool calls to the audit log + per-step transcript |
+| `RunRecorder.java` | Records mutating tool calls to the audit log + per-step transcript; tracks edited paths |
+| `GitInspector.java` | Read-only `git status`/`git diff --stat` over the workspace |
+| `EditSummary.java` | Pure parsing/formatting of git output into an edit-trust block |
 | `PlanStore.java` | Persists the per-session plan (goal + checklist) for inspect/resume |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
@@ -254,6 +257,31 @@ checklist and continues from the FIRST not-completed step -- completed steps are
 > `STEP_STATUS` line the model is asked to emit, falling back to the `ERROR`-prefix convention -- so a
 > step that silently does the wrong thing can still read as done. Retries and re-plans are bounded.
 > Plan runs are goal-oriented one-shots and do not append to the conversational `/chat` history.
+
+## Edit trust
+
+A coding answer is easy to overstate, so after any run that changed files `imini` appends a
+**git-verified summary** of the edits to the final answer:
+
+```
+---
+Edits (verified with git):
+- changed files: src/App.java (M), src/New.java (A)
+- git diff --stat: 2 files changed, 12 insertions(+), 2 deletions(-)
+```
+
+It runs read-only `git status --porcelain` and `git diff --stat` over the workspace root (the same way
+the `git_*` tools shell out), so the model cannot misrepresent what it touched. In plan mode the
+synthesis step is also asked to note changed files, how it verified them, and any risks or tests not
+run. For streaming clients the block is streamed into the answer body; for blocking calls it is part of
+the returned answer; either way a one-line `edits: …` shows in the activity log.
+
+This works for `/ask`, `/chat`, and plan runs. Turn it off with `agent.verify-edits=false`.
+
+> Honest scope: the summary reflects the workspace's git state (working tree), not strictly the diff of
+> this one run; when the workspace is not a git repo (or git is missing) it falls back to listing the
+> files the run's tools touched and notes that no tracked diff was available. It is descriptive, not a
+> gate -- it does not block answers.
 
 ## Permission modes
 

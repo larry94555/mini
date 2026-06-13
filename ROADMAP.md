@@ -87,17 +87,19 @@ Goal: test harness behavior without depending on a live model.
 
 Goal: file changes should be easy to review and hard to misrepresent.
 
+### Done since
+
+- Edit-trust summary: after any run that changed files, a git-verified block (`git status` +
+  `git diff --stat`) is appended to the final answer (`EditSummary` + `GitInspector`), and the plan
+  synthesis step is prompted to note changed files, verification, and risks. Pure parsing is unit
+  tested (`EditSummaryTest`). Toggle with `agent.verify-edits`.
+
 ### Next
 
-- Automatically run `git_status` after any mutating file tool.
-- Automatically run `git_diff` after any mutating file tool.
-- Feed the diff summary into the final model context.
-- Require final coding answers to include:
-  - changed files,
-  - commands run,
-  - verification performed,
-  - tests not run, if applicable,
-  - known risks.
+- Feed the diff summary into the *intermediate* step context too (not only the final answer), so the
+  model can react to unexpected diffs mid-plan.
+- Require a structured final-answer schema for coding tasks (changed files, commands run, verification,
+  tests not run, known risks) rather than a free-text note.
 
 ### Later
 
@@ -197,10 +199,9 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Edit trust (Section 4): automatically run `git_status`/`git_diff` after mutating file tools and
->    require final coding answers to summarize changed files, commands run, and verification. Now
->    cheaper to build on top of the tool-call transcript.
-> 2. Plan history (multiple plans + transcripts per session) so a session keeps an inspectable record
+> 1. Plan history (multiple plans + transcripts per session) so a session keeps an inspectable record
 >    of past goals and what was done, not just the latest plan.
+> 2. A structured final-answer schema for coding tasks (changed files, commands run, verification,
+>    tests not run, known risks), building on the new edit-trust summary.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
