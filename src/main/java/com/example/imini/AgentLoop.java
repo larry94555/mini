@@ -44,6 +44,7 @@ public class AgentLoop {
     @Value("${agent.plan.suggest-checks:true}") private boolean planSuggestChecks;
     @Value("${agent.verify-edits:true}") private boolean verifyEdits;
     @Value("${agent.coding-report:true}") private boolean codingReport;
+    @Value("${agent.plan.step-diff:true}") private boolean planStepDiff;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -163,8 +164,19 @@ public class AgentLoop {
 
     private Function<String, String> planStepRunner(String sessionId, Mode mode, RunSink sink) {
         return stepPrompt -> {
+            java.util.Set<String> before = planStepDiff ? recorder.changedPaths(sessionId) : java.util.Set.of();
             try {
-                return engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
+                String out = engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
+                if (planStepDiff) {
+                    java.util.List<String> delta = new java.util.ArrayList<>(recorder.changedPaths(sessionId));
+                    delta.removeAll(before);
+                    String note = EditSummary.stepNote(delta, EditSummary.parseStat(git.diffStat()));
+                    if (!note.isBlank()) {
+                        sink.log("step edits: " + note.replace("\n", " | "));
+                        out = out + "\n\n[edits this step]\n" + note; // fed into later steps + synthesis
+                    }
+                }
+                return out;
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }

@@ -43,6 +43,14 @@ public final class EditSummary {
         return last;
     }
 
+    /** Context note fed into later plan steps: which files this step changed + the diff so far. Pure. */
+    public static String stepNote(Collection<String> paths, String diffStat) {
+        if (paths == null || paths.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("files changed this step: ").append(String.join(", ", paths));
+        if (diffStat != null && !diffStat.isBlank()) sb.append("\ndiff so far: ").append(diffStat);
+        return sb.toString();
+    }
+
     /** A one-line summary for logs. */
     public static String oneLine(String statusPorcelain, String diffStat) {
         String stat = parseStat(diffStat);

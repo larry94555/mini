@@ -51,4 +51,16 @@ class EditSummaryTest {
         assertTrue(block.contains("files this run touched: scratch/out.txt"));
         assertTrue(block.contains("not a git repo"));
     }
+
+    @Test
+    void stepNoteSummarizesAStepsEditsForLaterContext() {
+        String note = EditSummary.stepNote(List.of("src/App.java", "src/New.java"),
+                "2 files changed, 12 insertions(+)");
+        assertTrue(note.startsWith("files changed this step: src/App.java, src/New.java"));
+        assertTrue(note.contains("diff so far: 2 files changed"));
+
+        assertEquals("files changed this step: only.java", EditSummary.stepNote(List.of("only.java"), ""));
+        assertEquals("", EditSummary.stepNote(List.of(), "x"));
+        assertEquals("", EditSummary.stepNote(null, "x"));
+    }
 }

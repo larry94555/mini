@@ -100,12 +100,19 @@ Goal: file changes should be easy to review and hard to misrepresent.
   run, verification, tests not run, risks). Factual fields come from git + the tool recorder; soft
   fields from a small JSON model call (`CodingReport`, unit-tested). Toggle with `agent.coding-report`.
 
+### Done since
+
+- Intermediate diff feedback: after each plan step that changes files, an `[edits this step]` note
+  (files changed + `git diff --stat`) is fed into later steps and the final synthesis, so the model can
+  react to unexpected diffs mid-plan (`EditSummary.stepNote`, unit-tested). Toggle with
+  `agent.plan.step-diff`.
+
 ### Next
 
-- Feed the diff summary into the *intermediate* step context too (not only the final answer), so the
-  model can react to unexpected diffs mid-plan.
 - Validate/enforce the report schema (e.g. require non-empty verification for risky changes) rather
   than only rendering what is provided.
+- Per-step diff *deltas* (snapshot/restore) rather than the cumulative working-tree stat, for precise
+  attribution of which step caused which change.
 
 ### Later
 
@@ -207,7 +214,7 @@ The next highest-leverage engineering changes are:
 
 > 1. Plan history (multiple plans + transcripts + reports per session) so a session keeps an
 >    inspectable record of past goals and what was done, not just the latest plan.
-> 2. Feed the edit/diff summary into intermediate step context (not only the final answer) so the model
->    can react to unexpected diffs mid-plan.
+> 2. Validate/enforce the coding-report schema (e.g. require verification for risky changes) instead of
+>    only rendering whatever the model provides.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
