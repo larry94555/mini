@@ -55,11 +55,12 @@ public class AgentController {
     private final Metrics metrics;
     private final Approvals approvals;
     private final AuditLog audit;
+    private final PlanStore plans;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
-                           AuditLog audit) {
+                           AuditLog audit, PlanStore plans) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -70,6 +71,7 @@ public class AgentController {
         this.metrics = metrics;
         this.approvals = approvals;
         this.audit = audit;
+        this.plans = plans;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -79,14 +81,16 @@ public class AgentController {
         final String sessionId = "oneshot-" + UUID.randomUUID().toString().substring(0, 8);
         final Mode mode = parseMode(body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
+        final boolean resume = isPlan(body.get("resume"));
         final String q = body.getOrDefault("question", "");
         sessions.claim(sessionId, currentUser());
-        audit.record(currentUser(), plan ? "ask(plan)" : "ask", "session:" + sessionId, "started");
+        audit.record(currentUser(), planAction("ask", plan, resume), "session:" + sessionId, "started");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
         try {
             String answer = runService.runBounded(() ->
-                    plan ? loop.runPlan(sessionId, q, mode, new ConsoleSink())
+                    (plan && resume) ? loop.resumePlan(sessionId, mode, new ConsoleSink())
+                         : plan ? loop.runPlan(sessionId, q, mode, new ConsoleSink())
                          : loop.run(sessionId, q, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
             metrics.recordRun(ms, true);
@@ -105,13 +109,15 @@ public class AgentController {
         sessions.claim(sessionId, currentUser());
         final Mode mode = parseMode(body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
-        audit.record(currentUser(), plan ? "chat(plan)" : "chat", "session:" + sessionId, "started");
+        final boolean resume = isPlan(body.get("resume"));
+        audit.record(currentUser(), planAction("chat", plan, resume), "session:" + sessionId, "started");
         final String message = body.getOrDefault("message", "");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
         try {
             String answer = runService.runBounded(() ->
-                    plan ? loop.runPlan(sessionId, message, mode, new ConsoleSink())
+                    (plan && resume) ? loop.resumePlan(sessionId, mode, new ConsoleSink())
+                         : plan ? loop.runPlan(sessionId, message, mode, new ConsoleSink())
                          : loop.chat(sessionId, message, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
             metrics.recordRun(ms, true);
@@ -132,7 +138,8 @@ public class AgentController {
         sessions.claim(sessionId, currentUser());
         final Mode mode = parseMode(body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
-        audit.record(currentUser(), plan ? "chat/stream(plan)" : "chat/stream", "session:" + sessionId, "started");
+        final boolean resume = isPlan(body.get("resume"));
+        audit.record(currentUser(), planAction("chat/stream", plan, resume), "session:" + sessionId, "started");
         final String message = body.getOrDefault("message", "");
         SseEmitter emitter = new SseEmitter(0L); // no server-side timeout
         metrics.inc("runs_started");
@@ -142,7 +149,8 @@ public class AgentController {
             try {
                 send(emitter, "session", sessionId);
                 String answer = runService.runBounded(() ->
-                        plan ? loop.runPlan(sessionId, message, mode, sink)
+                        (plan && resume) ? loop.resumePlan(sessionId, mode, sink)
+                             : plan ? loop.runPlan(sessionId, message, mode, sink)
                              : loop.chat(sessionId, message, mode, sink));
                 long ms = (System.nanoTime() - t0) / 1_000_000L;
                 metrics.recordRun(ms, true);
@@ -165,8 +173,9 @@ public class AgentController {
         final Mode mode = parseMode(body.get("mode"));
         final String q = body.getOrDefault("question", "");
         final boolean plan = isPlan(body.get("plan"));
+        final boolean resume = isPlan(body.get("resume"));
         sessions.claim(sessionId, currentUser());
-        audit.record(currentUser(), plan ? "ask/stream(plan)" : "ask/stream", "session:" + sessionId, "started");
+        audit.record(currentUser(), planAction("ask/stream", plan, resume), "session:" + sessionId, "started");
         SseEmitter emitter = new SseEmitter(0L);
         metrics.inc("runs_started");
         runService.submitAsync(() -> {
@@ -175,7 +184,8 @@ public class AgentController {
             try {
                 send(emitter, "session", sessionId);
                 String answer = runService.runBounded(() ->
-                        plan ? loop.runPlan(sessionId, q, mode, sink)
+                        (plan && resume) ? loop.resumePlan(sessionId, mode, sink)
+                             : plan ? loop.runPlan(sessionId, q, mode, sink)
                              : loop.run(sessionId, q, mode, sink));
                 long ms = (System.nanoTime() - t0) / 1_000_000L;
                 metrics.recordRun(ms, true);
@@ -214,6 +224,15 @@ public class AgentController {
         interrupt.steer(sessionId, message);
         audit.record(currentUser(), "steer", "session:" + sessionId, "queued");
         return Map.of("result", "steering queued for session " + sessionId + ": " + message);
+    }
+
+    @GetMapping("/plan")
+    public Map<String, Object> plan(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireAccess(sessionId);
+        PlanStore.Saved saved = plans.load(sessionId);
+        if (saved == null) return Map.of("sessionId", sessionId, "goal", "", "steps", List.of());
+        return Map.of("sessionId", sessionId, "goal", saved.goal() == null ? "" : saved.goal(),
+                "steps", Planner.planPayload(saved.items()));
     }
 
     @GetMapping("/todos")
@@ -356,6 +375,12 @@ public class AgentController {
         } catch (Exception e) {
             // client disconnected or emitter completed; nothing to do
         }
+    }
+
+    private static String planAction(String base, boolean plan, boolean resume) {
+        if (plan && resume) return base + "(resume)";
+        if (plan) return base + "(plan)";
+        return base;
     }
 
     private static boolean isPlan(String raw) {
