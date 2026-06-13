@@ -200,16 +200,17 @@ public class AgentLoop {
     private Consumer<List<TodoStore.Item>> planTodos(String sessionId, String goal, RunSink sink) {
         return items -> {
             todos.set(sessionId, items);
-            emitPlan(sink, items);
+            emitPlan(sink, sessionId, items);
             plans.save(sessionId, goal, items);
             recorder.syncStep(sessionId, RunRecorder.activeStep(items));
         };
     }
 
     /** Stream the current plan/checklist as a structured SSE "plan" event (no-op on non-SSE sinks). */
-    private void emitPlan(RunSink sink, List<TodoStore.Item> items) {
+    private void emitPlan(RunSink sink, String sessionId, List<TodoStore.Item> items) {
         try {
-            sink.event("plan", mapper.writeValueAsString(Map.of("steps", Planner.planPayload(items))));
+            Map<Integer, List<String>> tx = recorder.transcript(sessionId);
+            sink.event("plan", mapper.writeValueAsString(Map.of("steps", Planner.planPayload(items, tx))));
         } catch (Exception ignore) {
             // best effort; todos are still readable at GET /todos
         }

@@ -120,6 +120,21 @@ public final class Planner {
         return out;
     }
 
+    /** Like {@link #planPayload(List)} but each step also carries its tool-call transcript lines. */
+    public static List<Map<String, Object>> planPayload(List<TodoStore.Item> items,
+                                                        Map<Integer, List<String>> toolsByStep) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("text", items.get(i).content());
+            m.put("status", items.get(i).status() == null ? "pending" : items.get(i).status());
+            List<String> tools = (toolsByStep == null) ? null : toolsByStep.get(i);
+            m.put("tools", tools == null ? List.of() : tools);
+            out.add(m);
+        }
+        return out;
+    }
+
     /** Inverse of {@link #planPayload}: rebuild checklist items from persisted {text,status} maps. */
     public static List<TodoStore.Item> itemsFromPayload(List<Map<String, String>> payload) {
         List<TodoStore.Item> items = new ArrayList<>();

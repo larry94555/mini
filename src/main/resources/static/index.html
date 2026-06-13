@@ -180,10 +180,16 @@ function renderPlan(turn, obj){
   if (!turn || !turn.plan || !obj || !Array.isArray(obj.steps)) return;
   const icon = s => s==="completed"?"[x]" : s==="in_progress"?"[~]" : s==="failed"?"[!]" : "[ ]";
   const color = s => s==="completed"?"#3a9" : s==="failed"?"#c33" : s==="in_progress"?"#c80" : "#888";
+  const toolColor = t => /\[error\]\s*$/.test(t) ? "#c33" : "#7a8";
   let html = '<div class="muted" style="font-size:11px;letter-spacing:.04em;margin:0 0 2px">PLAN</div>';
   for (const st of obj.steps){
     html += '<div style="font-family:monospace;font-size:12px;line-height:1.5;color:'+color(st.status)+'">'
           + icon(st.status) + ' ' + escapeHtml(String(st.text||"")) + '</div>';
+    const tools = Array.isArray(st.tools) ? st.tools : [];
+    for (const t of tools){
+      html += '<div style="font-family:monospace;font-size:11px;line-height:1.45;margin-left:20px;color:'
+            + toolColor(t) + '">· ' + escapeHtml(String(t)) + '</div>';
+    }
   }
   turn.plan.innerHTML = html;
   turn.plan.style.display = "";

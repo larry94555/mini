@@ -1175,3 +1175,22 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** start a plan, let a step or two complete, then `Stop`/restart and `GET /plan` -- completed
   steps still show their recorded tool calls (persisted in `plan_steps`). Resuming continues recording
   for the remaining steps without clearing the earlier transcript.
+
+---
+
+# Per-step transcript in the web UI
+
+## 127. Plan payload carries the per-step tools (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlanStreamTest` passes the tools cases -- `Planner.planPayload(items, toolsByStep)`
+  attaches each step's recorded tool-call lines, gives steps with no tools an empty list, and treats a
+  null transcript as all-empty (the shape the `plan` SSE event now carries).
+
+## 128. Live tool calls under each step (manual)
+
+- **Run:** open the web UI, tick **plan&execute**, send a multi-step goal whose steps write files / run
+  commands.
+- **Observe:** as each step completes, its mutating tool calls appear indented under the step in the
+  PLAN panel -- `· write_file src/App.java [ok]`, `· run_command $ mvn -q test [error]` (errors in
+  red). The same detail is at `GET /plan?sessionId=`. Read-only tools are not shown.
