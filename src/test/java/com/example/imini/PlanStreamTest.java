@@ -33,4 +33,27 @@ class PlanStreamTest {
         List<Map<String, String>> payload = Planner.planPayload(List.of(new TodoStore.Item("x", null)));
         assertEquals("pending", payload.get(0).get("status"));
     }
+
+    @Test
+    void payloadWithToolsAttachesPerStepTranscript() {
+        List<TodoStore.Item> items = List.of(
+                new TodoStore.Item("Add endpoint", "completed"),
+                new TodoStore.Item("Test it", "in_progress"));
+        Map<Integer, List<String>> tx = Map.of(
+                0, List.of("write_file src/App.java [ok]", "run_command $ mvn -q test [ok]"));
+
+        List<Map<String, Object>> payload = Planner.planPayload(items, tx);
+
+        assertEquals("completed", payload.get(0).get("status"));
+        assertEquals(List.of("write_file src/App.java [ok]", "run_command $ mvn -q test [ok]"),
+                payload.get(0).get("tools"));
+        assertEquals(List.of(), payload.get(1).get("tools"), "steps with no recorded tools get an empty list");
+    }
+
+    @Test
+    void payloadWithNullTranscriptGivesEmptyToolLists() {
+        List<Map<String, Object>> payload =
+                Planner.planPayload(List.of(new TodoStore.Item("a", "pending")), null);
+        assertEquals(List.of(), payload.get(0).get("tools"));
+    }
 }

@@ -66,6 +66,10 @@ Goal: test harness behavior without depending on a live model.
 - Fake-model harness tests.
 - Bad-model behavior scenarios.
 
+### Done since
+
+- Plan-mode executor with retry, re-planning, step verification (declared + auto-suggested checks), live SSE streaming, persistence/resume, and tool-call-level audit + per-step transcript -- all with deterministic pure-logic tests (`PlannerTest`, `PlanRecoveryTest`, `StepCheckTest`, `PlanPersistenceTest`, `PlanStreamTest`, `CheckLibraryTest`, `ToolCallTest`).
+
 ### Next
 
 - Add scripted traces for the real `AgentEngine` using a fake `LlamaClient` once the engine is easier to instantiate in tests.
@@ -138,7 +142,7 @@ The biggest production gap is still command and tool isolation. Command screenin
 - Make `sandbox.command-mode=allowlist` the recommended shared-deployment setting.
 - Add a `/doctor` or startup check that warns when running without containerized command execution.
 - Add stricter defaults for shared or Docker deployment profiles.
-- Ensure all tool calls include run/session IDs in logs.
+- Ensure all tool calls include run/session IDs in logs. (Done: mutating tool calls are audited with `session:<id>[ step:N]` attribution.)
 
 ### Later
 
@@ -147,7 +151,7 @@ The biggest production gap is still command and tool isolation. Command screenin
 - Mount only the workspace.
 - Add CPU, memory, and process limits.
 - Harden MCP server execution and permissions.
-- Add append-only audit logs for prompts, tool calls, approvals, diffs, and results.
+- Add append-only audit logs for prompts, tool calls, approvals, diffs, and results. (Partly done: request-level + per-tool-call audit entries and a per-step tool transcript now exist; prompts/diffs/results not yet captured.)
 
 ## 7. Multi-user and operations
 
@@ -187,8 +191,16 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Current recommended priority
 
-The next highest-leverage engineering change is:
+The plan-mode arc is now complete end to end: structured execution, retry, re-planning, step
+verification (declared + suggested checks), live UI streaming, persistence/resume, and tool-call-level
+audit with a per-step transcript that is now surfaced in the web UI.
 
-> Automatically verify edits with `git_status` and `git_diff`, then require final coding answers to summarize changed files and verification.
+The next highest-leverage engineering changes are:
 
-This is much smaller than full sandboxing and significantly improves trust.
+> 1. Edit trust (Section 4): automatically run `git_status`/`git_diff` after mutating file tools and
+>    require final coding answers to summarize changed files, commands run, and verification. Now
+>    cheaper to build on top of the tool-call transcript.
+> 2. Plan history (multiple plans + transcripts per session) so a session keeps an inspectable record
+>    of past goals and what was done, not just the latest plan.
+
+Both are much smaller than full sandboxing and continue to improve trust and learnability.

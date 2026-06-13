@@ -208,11 +208,14 @@ If no plan can be parsed, it falls back to a single normal run. The step count i
 fake runners.
 
 **Live plan panel.** On the streaming endpoints the run emits a structured `plan` SSE event
-(`{"steps":[{"text","status"}]}`) every time the checklist changes -- when steps are drafted, start,
-complete, fail, or get re-planned. The web UI renders this as a live checklist above each answer, with
-`[ ]` pending, `[~]` in progress, `[x]` done, and `[!]` failed, so you can watch the agent work the
-plan in real time (no polling). Non-streaming sinks fall back to logging the event; the list is also
-always readable at `GET /todos`.
+(`{"steps":[{"text","status","tools"}]}`) every time the checklist changes -- when steps are drafted,
+start, complete, fail, or get re-planned. The web UI renders this as a live checklist above each
+answer, with `[ ]` pending, `[~]` in progress, `[x]` done, and `[!]` failed, so you can watch the agent
+work the plan in real time (no polling). **Each step also lists the mutating tool calls it made** --
+e.g. `· write_file src/App.java [ok]`, `· run_command $ mvn -q test [error]` (failures in red) --
+straight from the per-step transcript, so you see not just *that* a step ran but *what it did*.
+Non-streaming sinks fall back to logging the event; the checklist is also at `GET /todos` and the full
+plan + transcript at `GET /plan`.
 
 **Step verification.** Self-reported status is best-effort, so a step may declare a concrete check.
 When a step's report contains a `CHECK: <command>` line, the harness runs that command and uses its
