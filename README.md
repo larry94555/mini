@@ -51,7 +51,7 @@ No cloud API key is required.
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
-| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification, and persist/resume, coding profile guidance |
+| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), and persist/resume, coding profile guidance |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -67,6 +67,8 @@ No cloud API key is required.
 | `LlamaClient.java` | Model calls, streaming calls, summary calls, token counting |
 | `AgentLoop.java` | Prepares prompts, sessions, project context, slash commands, tool registry; `runPlan` orchestrator |
 | `Planner.java` | Plan parsing + step sequencing for plan-then-execute (pure, testable) |
+| `CheckLibrary.java` | Suggests a verification command from project type + step text (pure) |
+| `CheckSuggester.java` | Detects the build system and suggests a step check |
 | `PlanStore.java` | Persists the per-session plan (goal + checklist) for inspect/resume |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
@@ -217,6 +219,19 @@ loop. Checks run through the same `Sandbox` command screening as `run_command`, 
 with a `agent.plan.check-timeout-seconds` timeout (default 20). Turn it off with
 `agent.plan.verify=false`. Good checks are cheap and decisive, e.g. `CHECK: test -f build/out.jar`,
 `CHECK: grep -q "/version" src/Main.java`, or `CHECK: mvn -q -DskipTests compile`.
+
+**Suggested checks.** Weak models often forget to add a `CHECK:` line. When a step has none, the
+harness can suggest one from the detected build system and the step text and run it anyway:
+`mvn -q -DskipTests compile` for a Maven repo (`mvn -q test` if the step is about tests), the
+equivalents for Gradle/Node/Python, or `test -f <file>` when the step names a file to create. The
+model's own `CHECK:` always wins; suggestions only fill the gap, only when `agent.plan.verify=true`,
+and can be turned off with `agent.plan.suggest-checks=false`. Suggested checks show up in the log as
+`check passed (suggested)` / `check FAILED (suggested)`.
+
+> Honest scope: suggestions are heuristics, not guarantees -- a suggested compile/test can fail for
+> reasons unrelated to the step (and trigger extra retries/re-plans), and `test -f` only confirms a
+> file exists, not that its contents are correct. Disable with `agent.plan.suggest-checks=false` if a
+> project's build is slow or noisy.
 
 **Persistence & resume.** The plan (goal + every step's status) is saved to a `plans` table on each
 change, so it survives a restart and can be inspected at `GET /plan?sessionId=` (ownership-scoped). If a

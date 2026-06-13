@@ -198,6 +198,18 @@ public final class Planner {
                 maxRetriesPerStep, maxReplans, verifier);
     }
 
+    /** As above, plus a {@code suggester} (step text -> check command) for steps with no model check. */
+    public static String executeWithRecovery(String goal, List<String> initialSteps,
+                                             Function<String, String> stepRunner,
+                                             Function<String, List<String>> replanner,
+                                             Consumer<List<TodoStore.Item>> onTodos,
+                                             int maxRetriesPerStep, int maxReplans,
+                                             Function<String, CheckResult> verifier,
+                                             Function<String, String> suggester) {
+        return executeFrom(goal, toItems(initialSteps), stepRunner, replanner, onTodos,
+                maxRetriesPerStep, maxReplans, verifier, suggester);
+    }
+
     /**
      * Resume-aware core: run from a saved checklist, STARTING at the first not-completed step, so a
      * persisted plan can continue after an interruption while completed steps are left untouched.
@@ -209,6 +221,22 @@ public final class Planner {
                                      Consumer<List<TodoStore.Item>> onTodos,
                                      int maxRetriesPerStep, int maxReplans,
                                      Function<String, CheckResult> verifier) {
+        return executeFrom(goal, seedItems, stepRunner, replanner, onTodos,
+                maxRetriesPerStep, maxReplans, verifier, null);
+    }
+
+    /**
+     * As above, plus a {@code suggester} (step text -> check command, or null). When the model does not
+     * emit its own {@code CHECK:} line for a step, a suggested check is run instead -- so weak models
+     * still get verification. The model's own check always takes priority.
+     */
+    public static String executeFrom(String goal, List<TodoStore.Item> seedItems,
+                                     Function<String, String> stepRunner,
+                                     Function<String, List<String>> replanner,
+                                     Consumer<List<TodoStore.Item>> onTodos,
+                                     int maxRetriesPerStep, int maxReplans,
+                                     Function<String, CheckResult> verifier,
+                                     Function<String, String> suggester) {
         List<TodoStore.Item> items = new ArrayList<>(seedItems);
         List<String> steps = new ArrayList<>();
         for (TodoStore.Item it : items) steps.add(it.content());
@@ -229,10 +257,16 @@ public final class Planner {
             for (int attempt = 0; attempt <= Math.max(0, maxRetriesPerStep); attempt++) {
                 result = stepRunner.apply(stepPrompt(goal, steps, i, results.toString(), attempt, lastFailure));
                 String checkCmd = parseCheck(result);
+                boolean suggested = false;
+                if (checkCmd == null && suggester != null) {
+                    checkCmd = suggester.apply(steps.get(i));
+                    suggested = checkCmd != null;
+                }
                 CheckResult cr = (checkCmd != null && verifier != null) ? verifier.apply(checkCmd) : null;
                 outcome = verdict(result, cr);
                 checkNote = cr == null ? "" : "\n[check " + (cr.passed() ? "passed" : "FAILED")
-                        + ": " + checkCmd + (cr.detail() == null || cr.detail().isBlank() ? "" : " -> " + cr.detail()) + "]";
+                        + (suggested ? " (suggested)" : "") + ": " + checkCmd
+                        + (cr.detail() == null || cr.detail().isBlank() ? "" : " -> " + cr.detail()) + "]";
                 if (outcome == StepOutcome.DONE) break;
                 lastFailure = result + checkNote;
             }
