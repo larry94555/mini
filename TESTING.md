@@ -1221,3 +1221,25 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** in a directory that is not a git repo, make an edit via a run.
 - **Observe:** the block lists the files the run touched and notes "no tracked diff … not a git repo"
   rather than failing.
+
+---
+
+# Structured coding report
+
+## 132. Report parse / merge / render (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `CodingReportTest` passes -- `extractJson` pulls a JSON object from a ```json fence, a
+  bare `{...}`, or returns null; `parse` reads the soft fields tolerantly (risks as array or string,
+  missing fields -> null/empty); `withFacts` overlays the authoritative changed-files / commands /
+  diff-stat over the model's soft fields; `render` produces the report with `(not reported)` / `(none)`
+  placeholders.
+
+## 133. Structured report on a coding run (manual)
+
+- **Setup:** a git workspace, `agent.coding-report=true` (default).
+- **Run:** `/ask` or plan a goal that edits files and runs a command.
+- **Observe:** the answer ends with a `Coding report:` block whose Changed files / Commands run / git
+  diff --stat are factual, and whose Summary / Verification / Tests not run / Risks are filled by the
+  model (or `(not reported)`). Set `agent.coding-report=false` for the plain edit-trust block; runs
+  that change nothing get no report.

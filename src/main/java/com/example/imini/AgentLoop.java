@@ -43,6 +43,7 @@ public class AgentLoop {
     @Value("${agent.plan.verify:true}") private boolean planVerify;
     @Value("${agent.plan.suggest-checks:true}") private boolean planSuggestChecks;
     @Value("${agent.verify-edits:true}") private boolean verifyEdits;
+    @Value("${agent.coding-report:true}") private boolean codingReport;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -82,7 +83,7 @@ public class AgentLoop {
         if (slash.isHelp(userQuestion)) return slash.help();
         String question = slash.expand(userQuestion);
         recorder.beginEdits(sessionId);
-        return withEditTrust(sessionId, engine.run(systemPrompt(), question, registry.tools(), mode, "main", sessionId, sink), sink);
+        return withEditTrust(sessionId, engine.run(systemPrompt(), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
@@ -100,7 +101,7 @@ public class AgentLoop {
         recorder.beginEdits(sessionId);
         AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());
-        return withEditTrust(sessionId, result.answer(), sink);
+        return withEditTrust(sessionId, result.answer(), mode, sink);
     }
 
     /**
@@ -120,7 +121,7 @@ public class AgentLoop {
         List<String> steps = Planner.parsePlan(planText);
         if (steps.isEmpty()) {
             sink.log("plan: no steps parsed; running directly");
-            return withEditTrust(sessionId, engine.run(systemPrompt(), g, registry.tools(), mode, "main", sessionId, sink), sink);
+            return withEditTrust(sessionId, engine.run(systemPrompt(), g, registry.tools(), mode, "main", sessionId, sink), mode, sink);
         }
         sink.log("plan: " + steps.size() + " step(s)");
 
@@ -131,7 +132,7 @@ public class AgentLoop {
 
         sink.log("plan: synthesizing final answer");
         return withEditTrust(sessionId, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
-                registry.tools(), mode, "main", sessionId, sink), sink);
+                registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
     /** Resume a previously saved plan from its first not-completed step. */
@@ -155,7 +156,7 @@ public class AgentLoop {
 
         sink.log("plan: synthesizing final answer");
         return withEditTrust(sessionId, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
-                registry.tools(), mode, "main", sessionId, sink), sink);
+                registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
     // ---- plan-run building blocks (shared by runPlan + resumePlan) ----------
@@ -214,19 +215,50 @@ public class AgentLoop {
 
     /** Stream the current plan/checklist as a structured SSE "plan" event (no-op on non-SSE sinks). */
     /** Append a git-verified summary of edits to the final answer (and stream it for SSE clients). */
-    private String withEditTrust(String sessionId, String answer, RunSink sink) {
-        if (!verifyEdits) return answer;
+    private String withEditTrust(String sessionId, String answer, Mode mode, RunSink sink) {
+        if (!verifyEdits && !codingReport) return answer;
         try {
             String status = git.status();
             String stat = git.diffStat();
-            String block = EditSummary.format(status, stat, recorder.changedPaths(sessionId));
+            String statLine = EditSummary.parseStat(stat);
+            List<String> changedFiles = mergedChangedFiles(status, recorder.changedPaths(sessionId));
+            boolean hasEdits = !changedFiles.isEmpty() || !statLine.isBlank();
+            if (!hasEdits) return answer; // not a coding task / nothing changed
+
+            String block = codingReport
+                    ? buildCodingReport(sessionId, answer, mode, changedFiles, statLine)
+                    : EditSummary.format(status, stat, recorder.changedPaths(sessionId));
             if (block.isBlank()) return answer;
+
             sink.log("edits: " + EditSummary.oneLine(status, stat));
             sink.token("\n\n" + block);   // streams into the body for SSE runs (no-op on console sinks)
             return answer + "\n\n" + block;
         } catch (Exception e) {
-            return answer; // edit-trust is best-effort; never break the answer
+            return answer; // best-effort; never break the answer
         }
+    }
+
+    /** Union of git-reported changed files and the paths this run's tools touched (git first). */
+    private List<String> mergedChangedFiles(String status, java.util.Set<String> runPaths) {
+        java.util.LinkedHashSet<String> files = new java.util.LinkedHashSet<>();
+        for (EditSummary.FileChange c : EditSummary.parseStatus(status)) files.add(c.path());
+        if (files.isEmpty()) files.addAll(runPaths);
+        return new java.util.ArrayList<>(files);
+    }
+
+    /** Build the structured coding report: facts from git/recorder + soft fields from a JSON model call. */
+    private String buildCodingReport(String sessionId, String answer, Mode mode,
+                                     List<String> changedFiles, String statLine) {
+        List<String> commands = recorder.commandsRun(sessionId);
+        CodingReport report = CodingReport.withFacts(null, changedFiles, commands, statLine);
+        try {
+            String json = engine.run(systemPrompt(), CodingReport.reportPrompt(answer, changedFiles, commands),
+                    registry.tools(), Mode.PLAN, "report", sessionId, RunSink.NOOP);
+            report = CodingReport.withFacts(CodingReport.parse(json), changedFiles, commands, statLine);
+        } catch (Exception ignore) {
+            // keep the facts-only report
+        }
+        return report.render();
     }
 
     private void emitPlan(RunSink sink, String sessionId, List<TodoStore.Item> items) {

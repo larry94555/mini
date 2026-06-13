@@ -52,7 +52,7 @@ No cloud API key is required.
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
 | Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), and persist/resume, coding profile guidance |
-| Edit trust | auto `git status`/`git diff --stat` verification appended to coding answers |
+| Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -74,6 +74,7 @@ No cloud API key is required.
 | `RunRecorder.java` | Records mutating tool calls to the audit log + per-step transcript; tracks edited paths |
 | `GitInspector.java` | Read-only `git status`/`git diff --stat` over the workspace |
 | `EditSummary.java` | Pure parsing/formatting of git output into an edit-trust block |
+| `CodingReport.java` | Pure parse/merge/render of the structured final-answer coding report |
 | `PlanStore.java` | Persists the per-session plan (goal + checklist) for inspect/resume |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
@@ -276,7 +277,33 @@ synthesis step is also asked to note changed files, how it verified them, and an
 run. For streaming clients the block is streamed into the answer body; for blocking calls it is part of
 the returned answer; either way a one-line `edits: …` shows in the activity log.
 
-This works for `/ask`, `/chat`, and plan runs. Turn it off with `agent.verify-edits=false`.
+**Structured coding report.** With `agent.coding-report=true` (default), a run that changed files ends
+with a consistent report instead of the bare git block:
+
+```
+---
+Coding report:
+- Summary: Added a /version endpoint and documented it
+- Changed files: src/App.java, README.md
+- Commands run: mvn -q -DskipTests compile
+- Verification: compiled cleanly; hit /version returns the build number
+- Tests not run: integration tests
+- Risks:
+  - no auth on the new endpoint
+- git diff --stat: 2 files changed, 14 insertions(+)
+```
+
+The **changed files**, **commands run**, and **diff stat** are factual -- taken from git and the tool
+recorder, so the model cannot misstate them. The **summary**, **verification**, **tests not run**, and
+**risks** come from a small dedicated JSON model call after the answer (kept out of the streamed body),
+and degrade to `(not reported)` if that call fails. This works for `/ask`, `/chat`, and plan runs.
+
+Turn the report off with `agent.coding-report=false` (falls back to the plain edit-trust block), or
+disable edit verification entirely with `agent.verify-edits=false`.
+
+> Honest scope: the report is appended only when the run changed files; the factual fields reflect the
+> git working tree (not strictly this run's diff); the soft fields are model-authored and best-effort
+> (one extra short model call), and the report is descriptive, not a gate.
 
 > Honest scope: the summary reflects the workspace's git state (working tree), not strictly the diff of
 > this one run; when the workspace is not a git repo (or git is missing) it falls back to listing the
