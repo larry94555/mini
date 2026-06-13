@@ -242,6 +242,13 @@ and can be turned off with `agent.plan.suggest-checks=false`. Suggested checks s
 > file exists, not that its contents are correct. Disable with `agent.plan.suggest-checks=false` if a
 > project's build is slow or noisy.
 
+**Intermediate diff feedback.** After each step that changes files, the executor appends a short
+`[edits this step]` note -- the files that step touched plus the current `git diff --stat` -- to the
+running context. Later steps and the final synthesis see it, so the model can react to unexpected diffs
+mid-plan (e.g. notice it edited the wrong file) instead of only learning what changed at the end. It is
+derived from the tool recorder's tracked paths, so it is independent of the audit toggle. Turn it off
+with `agent.plan.step-diff=false`.
+
 **Persistence & resume.** The plan (goal + every step's status) is saved to a `plans` table on each
 change, so it survives a restart and can be inspected at `GET /plan?sessionId=` (ownership-scoped). If a
 run is interrupted (a `Stop`, a crash, a closed tab), resume it: send `"resume": true` (with

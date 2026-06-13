@@ -1243,3 +1243,22 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   diff --stat are factual, and whose Summary / Verification / Tests not run / Risks are filled by the
   model (or `(not reported)`). Set `agent.coding-report=false` for the plain edit-trust block; runs
   that change nothing get no report.
+
+---
+
+# Intermediate diff feedback (plan steps)
+
+## 134. Step-note formatting (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `EditSummaryTest` passes the step-note cases -- `EditSummary.stepNote` lists the files a
+  step changed and the `git diff --stat` so far, drops the diff line when none is available, and
+  returns "" when no files changed.
+
+## 135. Mid-plan diff feedback end to end (manual)
+
+- **Setup:** a git workspace, plan mode, `agent.plan.step-diff=true` (default).
+- **Run:** a multi-step goal whose early steps write/edit files.
+- **Observe:** the SSE `log` shows `step edits: files changed this step: … | diff so far: …` after a
+  mutating step; later steps' prompts include an `[edits this step]` note in "Progress so far", and the
+  final synthesis sees the accumulated edit notes. Set `agent.plan.step-diff=false` to omit them.
