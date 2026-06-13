@@ -54,6 +54,30 @@ public final class Planner {
         return StepOutcome.DONE;
     }
 
+    /** Result of running a step's declared verification command. */
+    public record CheckResult(boolean passed, String detail) {}
+
+    private static final Pattern CHECK_LINE =
+            Pattern.compile("(?im)^\\s*CHECK\\s*[:=]\\s*(.+\\S)\\s*$");
+
+    /** Extract a step's optional {@code CHECK: <command>} verification directive (last one wins). */
+    public static String parseCheck(String stepResult) {
+        if (stepResult == null) return null;
+        Matcher m = CHECK_LINE.matcher(stepResult);
+        String cmd = null;
+        while (m.find()) cmd = m.group(1).trim();
+        return (cmd == null || cmd.isBlank()) ? null : cmd;
+    }
+
+    /**
+     * Decide a step's outcome: a run verification check is AUTHORITATIVE (evidence beats the model's
+     * self-report) -- pass -> DONE, fail -> FAILED. With no check, fall back to {@link #classify}.
+     */
+    public static StepOutcome verdict(String stepResult, CheckResult check) {
+        if (check != null) return check.passed() ? StepOutcome.DONE : StepOutcome.FAILED;
+        return classify(stepResult);
+    }
+
     /** Extract ordered steps from a model's plan text (numbered, "Step N:", or bulleted lines). */
     public static List<String> parsePlan(String text) {
         List<String> steps = new ArrayList<>();
@@ -146,6 +170,17 @@ public final class Planner {
                                              Function<String, List<String>> replanner,
                                              Consumer<List<TodoStore.Item>> onTodos,
                                              int maxRetriesPerStep, int maxReplans) {
+        return executeWithRecovery(goal, initialSteps, stepRunner, replanner, onTodos,
+                maxRetriesPerStep, maxReplans, null);
+    }
+
+    /** As above, plus a {@code verifier} that runs a step's {@code CHECK:} command to confirm success. */
+    public static String executeWithRecovery(String goal, List<String> initialSteps,
+                                             Function<String, String> stepRunner,
+                                             Function<String, List<String>> replanner,
+                                             Consumer<List<TodoStore.Item>> onTodos,
+                                             int maxRetriesPerStep, int maxReplans,
+                                             Function<String, CheckResult> verifier) {
         List<String> steps = new ArrayList<>(initialSteps);
         List<TodoStore.Item> items = toItems(steps);
         onTodos.accept(items);
@@ -159,16 +194,21 @@ public final class Planner {
             String result = "";
             String lastFailure = null;
             StepOutcome outcome = StepOutcome.FAILED;
+            String checkNote = "";
             for (int attempt = 0; attempt <= Math.max(0, maxRetriesPerStep); attempt++) {
                 result = stepRunner.apply(stepPrompt(goal, steps, i, results.toString(), attempt, lastFailure));
-                outcome = classify(result);
+                String checkCmd = parseCheck(result);
+                CheckResult cr = (checkCmd != null && verifier != null) ? verifier.apply(checkCmd) : null;
+                outcome = verdict(result, cr);
+                checkNote = cr == null ? "" : "\n[check " + (cr.passed() ? "passed" : "FAILED")
+                        + ": " + checkCmd + (cr.detail() == null || cr.detail().isBlank() ? "" : " -> " + cr.detail()) + "]";
                 if (outcome == StepOutcome.DONE) break;
-                lastFailure = result;
+                lastFailure = result + checkNote;
             }
 
             results.append("Step ").append(i + 1).append(" — ").append(steps.get(i))
                     .append(outcome == StepOutcome.DONE ? " [done]:\n" : " [failed]:\n")
-                    .append(result == null ? "" : result.strip()).append("\n\n");
+                    .append(result == null ? "" : result.strip()).append(checkNote).append("\n\n");
 
             if (outcome == StepOutcome.DONE) {
                 items = withStatus(items, i, "completed");
@@ -235,6 +275,8 @@ public final class Planner {
         }
         sb.append("\n\nEnd your report with a line \"STEP_STATUS: done\" if the step succeeded, or "
                 + "\"STEP_STATUS: failed <brief reason>\" if it could not be completed.");
+        sb.append("\nIf the step's success can be checked by a shell command, also add a line "
+                + "\"CHECK: <command>\" (exit code 0 = success); the harness will run it to verify.");
         return sb.toString();
     }
 

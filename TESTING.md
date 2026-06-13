@@ -1065,3 +1065,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   -d '{"question":"<multi-step goal>","mode":"auto","plan":true}'`.
 - **Observe:** interleaved `event: plan` frames whose data is `{"steps":[{"text","status"},...]}`,
   alongside the usual `log`/`token`/`answer` events.
+
+---
+
+# Plan-driven execution: step verification
+
+## 115. Check parsing + verdict (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `StepCheckTest` passes -- `parseCheck` extracts a `CHECK: <command>` line (and `CHECK =`)
+  and is null when absent; `verdict` makes a check result authoritative (a passing check overrides a
+  `STEP_STATUS: failed`, a failing check overrides a `STEP_STATUS: done`); with no check it falls back
+  to `classify`. A failed check retries even when the model claims success, and a persistently failing
+  check leaves the step `failed`.
+
+## 116. Verified steps end to end (manual)
+
+- **Setup:** `agent.plan.verify=true` (default); a workspace where commands are allowed
+  (`sandbox.command-mode` not `off`).
+- **Run (plan mode):** a goal like "create build/out.txt with the date"; the model is prompted to add a
+  `CHECK:` line (e.g. `CHECK: test -f build/out.txt`).
+- **Observe:** the SSE `log` shows `plan: check passed (test -f build/out.txt)`; if the step didn't
+  really create the file, the check FAILS, the step retries/re-plans, and the todo shows `[!]`. Set
+  `agent.plan.verify=false` to ignore checks (self-report only).
+
+## 117. Checks respect the sandbox (manual)
+
+- **Setup:** `sandbox.command-mode=allowlist` with a small allowlist (or `off`).
+- **Observe:** a `CHECK:` command outside the policy is reported as `check FAILED (... denied: ...)`
+  and the step is treated as failed -- checks never bypass `run_command` screening.
