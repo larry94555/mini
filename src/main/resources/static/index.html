@@ -94,6 +94,7 @@
         <button class="primary" id="send">Send</button>
         <button class="danger" id="interrupt" title="Stop this session's run">Stop</button>
         <button id="steer" title="Inject guidance into the running turn">Steer</button>
+        <button id="resumePlan" title="Resume this session's saved plan from the first unfinished step">Resume plan</button>
       </div>
     </div>
     <details style="margin-top:8px">
@@ -195,11 +196,11 @@ $("#apiKey").addEventListener("change", e => {
 });
 
 // --- streaming chat via fetch (so we can send POST + the API key header) ---
-async function send(){
+async function send(resume){
   const text = $("#input").value.trim();
-  if (!text || state.streaming) return;
+  if ((!text && !resume) || state.streaming) return;
   $("#input").value = "";
-  addMsg("you", "user").textContent = text;
+  addMsg("you", "user").textContent = resume ? "(resume plan)" : text;
   const turn = addTurn();
   state.streaming = true; setStatus("running", "var(--warn)");
   const apoll = setInterval(pollApprovals, 1500);
@@ -207,7 +208,7 @@ async function send(){
   try {
     const resp = await fetch("/chat/stream", {
       method:"POST", headers: headers(true),
-      body: JSON.stringify({ sessionId: state.session, message: text, mode: $("#mode").value, plan: $("#planMode").checked })
+      body: JSON.stringify({ sessionId: state.session, message: text, mode: $("#mode").value, plan: $("#planMode").checked || !!resume, resume: !!resume })
     });
     if (!resp.ok){ turn.body.innerHTML = '<span class="err">HTTP '+resp.status+' '+(await resp.text())+'</span>'; throw 0; }
     const reader = resp.body.getReader();
@@ -282,6 +283,7 @@ $("#input").addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); send(); }
 });
 $("#interrupt").onclick = () => post("/interrupt", {sessionId: state.session}).then(()=>appendLog("[interrupt requested]"));
+$("#resumePlan").onclick = () => send(true);
 $("#steer").onclick = () => {
   const m = prompt("Steer the running turn with:"); if (m) post("/steer", {sessionId: state.session, message: m});
 };

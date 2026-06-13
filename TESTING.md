@@ -1094,3 +1094,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Setup:** `sandbox.command-mode=allowlist` with a small allowlist (or `off`).
 - **Observe:** a `CHECK:` command outside the policy is reported as `check FAILED (... denied: ...)`
   and the step is treated as failed -- checks never bypass `run_command` screening.
+
+---
+
+# Plan persistence & resume
+
+## 118. Round-trip + resume logic (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlanPersistenceTest` passes -- `planPayload` <-> `itemsFromPayload` round-trips
+  (text+status), missing-status defaults to `pending` and entries without text are skipped;
+  `executeFrom` resumes from the first not-completed step (completed head untouched, the rest run), and
+  resuming an already-complete plan runs nothing.
+
+## 119. Inspect + resume a plan (manual)
+
+- **Run (plan mode):** start a multi-step goal with `"plan":true`, then `Stop` it partway (or restart
+  the server). Check `GET /plan?sessionId=<id>` -- it shows the goal and each step's status.
+- **Resume:** click **Resume plan** in the UI (or `POST /chat/stream {"sessionId":"<id>","plan":true,
+  "resume":true}`).
+- **Observe:** the live checklist reappears with completed steps already `[x]` and the run continues
+  from the first unfinished step; audit records the action as `chat/stream(resume)`.
+
+## 120. Resume guards (manual)
+
+- **Run:** resume a session with no saved plan -> "No saved plan to resume for this session."; resume a
+  fully-completed plan -> "The saved plan is already complete." Resume is ownership-scoped (403 for
+  another user's session).

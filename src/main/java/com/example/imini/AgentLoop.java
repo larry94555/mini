@@ -2,6 +2,8 @@ package com.example.imini;
 
 import com.example.imini.PermissionService.Mode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -47,10 +49,12 @@ public class AgentLoop {
     private final SlashCommands slash;
     private final TodoStore todos;
     private final CheckRunner checks;
+    private final PlanStore plans;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
-                     ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks) {
+                     ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
+                     PlanStore plans) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -58,6 +62,7 @@ public class AgentLoop {
         this.slash = slash;
         this.todos = todos;
         this.checks = checks;
+        this.plans = plans;
     }
 
     private String systemPrompt() {
@@ -109,34 +114,77 @@ public class AgentLoop {
         sink.log("plan: " + steps.size() + " step(s)");
 
         String results = Planner.executeWithRecovery(g, steps,
-                stepPrompt -> {
-                    try {
-                        return engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
-                    } catch (Exception e) {
-                        return "ERROR: " + e.getMessage();
-                    }
-                },
-                replanPrompt -> {
-                    try {
-                        sink.log("plan: revising remaining steps after a failure");
-                        String revised = engine.run(systemPrompt() + Planner.PLAN_SYSTEM_PROMPT, replanPrompt,
-                                registry.tools(), Mode.PLAN, "plan", sessionId, RunSink.NOOP);
-                        return Planner.parsePlan(revised);
-                    } catch (Exception e) {
-                        return java.util.List.of();
-                    }
-                },
-                items -> { todos.set(sessionId, items); emitPlan(sink, items); },
-                planStepRetries, planMaxReplans,
-                planVerify ? (cmd -> {
-                    Planner.CheckResult r = checks.run(cmd);
-                    sink.log("plan: check " + (r.passed() ? "passed" : "FAILED") + " (" + cmd + ")");
-                    return r;
-                }) : null);
+                planStepRunner(sessionId, mode, sink), planReplanner(sessionId, sink),
+                planTodos(sessionId, g, sink), planStepRetries, planMaxReplans, planVerifier(sink));
 
         sink.log("plan: synthesizing final answer");
         return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink);
+    }
+
+    /** Resume a previously saved plan from its first not-completed step. */
+    public String resumePlan(String sessionId, Mode mode, RunSink sink) throws Exception {
+        PlanStore.Saved saved = plans.load(sessionId);
+        if (saved == null || saved.items().isEmpty()) {
+            return "No saved plan to resume for this session.";
+        }
+        if (Planner.nextPending(saved.items()) < 0) {
+            return "The saved plan is already complete.";
+        }
+        final String g = saved.goal();
+        long remaining = saved.items().stream().filter(it -> !"completed".equals(it.status())).count();
+        sink.log("plan: resuming (" + remaining + " of " + saved.items().size() + " step(s) remaining)");
+
+        String results = Planner.executeFrom(g, saved.items(),
+                planStepRunner(sessionId, mode, sink), planReplanner(sessionId, sink),
+                planTodos(sessionId, g, sink), planStepRetries, planMaxReplans, planVerifier(sink));
+
+        sink.log("plan: synthesizing final answer");
+        return engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+                registry.tools(), mode, "main", sessionId, sink);
+    }
+
+    // ---- plan-run building blocks (shared by runPlan + resumePlan) ----------
+
+    private Function<String, String> planStepRunner(String sessionId, Mode mode, RunSink sink) {
+        return stepPrompt -> {
+            try {
+                return engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        };
+    }
+
+    private Function<String, List<String>> planReplanner(String sessionId, RunSink sink) {
+        return replanPrompt -> {
+            try {
+                sink.log("plan: revising remaining steps after a failure");
+                String revised = engine.run(systemPrompt() + Planner.PLAN_SYSTEM_PROMPT, replanPrompt,
+                        registry.tools(), Mode.PLAN, "plan", sessionId, RunSink.NOOP);
+                return Planner.parsePlan(revised);
+            } catch (Exception e) {
+                return java.util.List.of();
+            }
+        };
+    }
+
+    private Function<String, Planner.CheckResult> planVerifier(RunSink sink) {
+        if (!planVerify) return null;
+        return cmd -> {
+            Planner.CheckResult r = checks.run(cmd);
+            sink.log("plan: check " + (r.passed() ? "passed" : "FAILED") + " (" + cmd + ")");
+            return r;
+        };
+    }
+
+    /** Persist + stream + store the checklist on every change, so a plan can be inspected and resumed. */
+    private Consumer<List<TodoStore.Item>> planTodos(String sessionId, String goal, RunSink sink) {
+        return items -> {
+            todos.set(sessionId, items);
+            emitPlan(sink, items);
+            plans.save(sessionId, goal, items);
+        };
     }
 
     /** Stream the current plan/checklist as a structured SSE "plan" event (no-op on non-SSE sinks). */

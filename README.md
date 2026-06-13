@@ -51,7 +51,7 @@ No cloud API key is required.
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
-| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, and step verification, coding profile guidance |
+| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification, and persist/resume, coding profile guidance |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
@@ -67,6 +67,7 @@ No cloud API key is required.
 | `LlamaClient.java` | Model calls, streaming calls, summary calls, token counting |
 | `AgentLoop.java` | Prepares prompts, sessions, project context, slash commands, tool registry; `runPlan` orchestrator |
 | `Planner.java` | Plan parsing + step sequencing for plan-then-execute (pure, testable) |
+| `PlanStore.java` | Persists the per-session plan (goal + checklist) for inspect/resume |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
 | `Tool.java` | Tool definition: name, description, schema, mutating flag, untrusted flag, executor |
@@ -147,11 +148,12 @@ http://localhost:8081
 | Method and path | Purpose |
 |---|---|
 | `POST /ask` | One-shot prompt, blocking response (add `"plan":true` to plan-then-execute) |
-| `POST /chat` | Multi-turn session prompt, blocking (add `"plan":true` to plan-then-execute) |
+| `POST /chat` | Multi-turn session prompt, blocking (`"plan":true` to plan; `"resume":true` to resume) |
 | `POST /ask/stream` | One-shot prompt over SSE |
 | `POST /chat/stream` | Session prompt over SSE |
 | `GET /sessions` | List sessions |
 | `GET /session?id=` | Read one session |
+| `GET /plan?sessionId=` | Read the saved plan for a session (goal + steps + statuses) |
 | `GET /todos?sessionId=` | Read session todos |
 | `GET /runs` | Show concurrency status |
 | `POST /interrupt` | Stop one session's active run |
@@ -215,6 +217,18 @@ loop. Checks run through the same `Sandbox` command screening as `run_command`, 
 with a `agent.plan.check-timeout-seconds` timeout (default 20). Turn it off with
 `agent.plan.verify=false`. Good checks are cheap and decisive, e.g. `CHECK: test -f build/out.jar`,
 `CHECK: grep -q "/version" src/Main.java`, or `CHECK: mvn -q -DskipTests compile`.
+
+**Persistence & resume.** The plan (goal + every step's status) is saved to a `plans` table on each
+change, so it survives a restart and can be inspected at `GET /plan?sessionId=` (ownership-scoped). If a
+run is interrupted (a `Stop`, a crash, a closed tab), resume it: send `"resume": true` (with
+`"plan": true`) on any run endpoint, or click **Resume plan** in the web UI. Resume reloads the saved
+checklist and continues from the FIRST not-completed step -- completed steps are left as-is, while
+`failed`/`in_progress`/`pending` ones are (re)attempted. Resuming an already-complete plan is a no-op.
+
+> Honest scope: one saved plan per session (a new plan-run overwrites it). Resume re-runs from the
+> first unfinished step; it does not replay the outputs of already-completed steps into the new run's
+> context (the model still sees the full plan and which step is current). Persistence is the checklist,
+> not a full execution snapshot.
 
 > Honest scope: steps run sequentially (no parallelism). Failure detection is best-effort -- the
 > `STEP_STATUS` line the model is asked to emit, falling back to the `ERROR`-prefix convention -- so a

@@ -120,6 +120,19 @@ public final class Planner {
         return out;
     }
 
+    /** Inverse of {@link #planPayload}: rebuild checklist items from persisted {text,status} maps. */
+    public static List<TodoStore.Item> itemsFromPayload(List<Map<String, String>> payload) {
+        List<TodoStore.Item> items = new ArrayList<>();
+        if (payload == null) return items;
+        for (Map<String, String> m : payload) {
+            String text = m.get("text");
+            if (text == null) continue;
+            String status = m.get("status");
+            items.add(new TodoStore.Item(text, status == null ? "pending" : status));
+        }
+        return items;
+    }
+
     /** Index of the first not-completed item, or -1 if all are completed. */
     public static int nextPending(List<TodoStore.Item> items) {
         for (int i = 0; i < items.size(); i++) {
@@ -181,13 +194,31 @@ public final class Planner {
                                              Consumer<List<TodoStore.Item>> onTodos,
                                              int maxRetriesPerStep, int maxReplans,
                                              Function<String, CheckResult> verifier) {
-        List<String> steps = new ArrayList<>(initialSteps);
-        List<TodoStore.Item> items = toItems(steps);
+        return executeFrom(goal, toItems(initialSteps), stepRunner, replanner, onTodos,
+                maxRetriesPerStep, maxReplans, verifier);
+    }
+
+    /**
+     * Resume-aware core: run from a saved checklist, STARTING at the first not-completed step, so a
+     * persisted plan can continue after an interruption while completed steps are left untouched.
+     * The fresh-run path seeds this with an all-pending list. Pure and dependency-free.
+     */
+    public static String executeFrom(String goal, List<TodoStore.Item> seedItems,
+                                     Function<String, String> stepRunner,
+                                     Function<String, List<String>> replanner,
+                                     Consumer<List<TodoStore.Item>> onTodos,
+                                     int maxRetriesPerStep, int maxReplans,
+                                     Function<String, CheckResult> verifier) {
+        List<TodoStore.Item> items = new ArrayList<>(seedItems);
+        List<String> steps = new ArrayList<>();
+        for (TodoStore.Item it : items) steps.add(it.content());
         onTodos.accept(items);
         StringBuilder results = new StringBuilder();
         int replans = 0;
 
-        for (int i = 0; i < steps.size(); i++) {
+        int start = nextPending(items);
+        if (start < 0) start = steps.size();
+        for (int i = start; i < steps.size(); i++) {
             items = withStatus(items, i, "in_progress");
             onTodos.accept(items);
 
