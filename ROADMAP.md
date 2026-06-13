@@ -204,6 +204,12 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 - Add optional enterprise hardening modules.
 - Consider paid support or consulting only after the learning path is polished.
 
+## Recently completed
+
+- Plan history: completed plans are archived per session (goal + final checklist + per-step tool
+  transcript + coding report), listed at `GET /plans` and fetched at `GET /plan?n=<seq>`
+  (`PlanHistory`, pure `summarize` unit-tested; `agent.plan.history-max`).
+
 ## Current recommended priority
 
 The plan-mode arc is now complete end to end: structured execution, retry, re-planning, step
@@ -212,9 +218,9 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Plan history (multiple plans + transcripts + reports per session) so a session keeps an
->    inspectable record of past goals and what was done, not just the latest plan.
-> 2. Validate/enforce the coding-report schema (e.g. require verification for risky changes) instead of
+> 1. Validate/enforce the coding-report schema (e.g. require verification for risky changes) instead of
 >    only rendering whatever the model provides.
+> 2. Session sharing / ownership transfer so a plan (with its transcript, report, and history) can be
+>    handed to or reviewed by another user.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

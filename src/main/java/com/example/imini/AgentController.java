@@ -57,11 +57,12 @@ public class AgentController {
     private final AuditLog audit;
     private final PlanStore plans;
     private final RunRecorder recorder;
+    private final PlanHistory history;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
-                           AuditLog audit, PlanStore plans, RunRecorder recorder) {
+                           AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -74,6 +75,7 @@ public class AgentController {
         this.audit = audit;
         this.plans = plans;
         this.recorder = recorder;
+        this.history = history;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -228,9 +230,22 @@ public class AgentController {
         return Map.of("result", "steering queued for session " + sessionId + ": " + message);
     }
 
-    @GetMapping("/plan")
-    public Map<String, Object> plan(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+    @GetMapping("/plans")
+    public Map<String, Object> plans(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
         requireAccess(sessionId);
+        return Map.of("sessionId", sessionId, "plans", history.list(sessionId));
+    }
+
+    @GetMapping("/plan")
+    public Map<String, Object> plan(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+                                    @RequestParam(name = "n", required = false) Integer n) {
+        requireAccess(sessionId);
+        if (n != null) {
+            Map<String, Object> archived = history.get(sessionId, n);
+            return archived == null
+                    ? Map.of("sessionId", sessionId, "seq", n, "goal", "", "steps", List.of())
+                    : archived;
+        }
         PlanStore.Saved saved = plans.load(sessionId);
         java.util.Map<Integer, List<String>> tx = recorder.transcript(sessionId);
         if (saved == null) return Map.of("sessionId", sessionId, "goal", "", "steps", List.of());

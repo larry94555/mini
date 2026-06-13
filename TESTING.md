@@ -1262,3 +1262,22 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the SSE `log` shows `step edits: files changed this step: … | diff so far: …` after a
   mutating step; later steps' prompts include an `[edits this step]` note in "Progress so far", and the
   final synthesis sees the accumulated edit notes. Set `agent.plan.step-diff=false` to omit them.
+
+---
+
+# Plan history
+
+## 136. Status roll-up (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlanHistoryTest` passes -- `PlanHistory.summarize` reports counts like
+  `4 steps: 2 done, 1 failed, 1 pending`, omits the failed/pending clauses when zero, and counts
+  `in_progress`/null as pending.
+
+## 137. Accumulating history end to end (manual)
+
+- **Run (plan mode):** complete two or three different goals in the same session.
+- **Observe:** `GET /plans?sessionId=<id>` lists them newest-first with `seq`, `goal`, `stepCount`, and
+  a `summary`; `GET /plan?sessionId=<id>&n=<seq>` returns that archived plan with steps, per-step tools,
+  and the coding report; `GET /plan` (no `n`) still shows the current live plan. History is
+  ownership-scoped and capped at `agent.plan.history-max` (default 20).

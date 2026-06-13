@@ -51,7 +51,7 @@ No cloud API key is required.
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
-| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), and persist/resume, coding profile guidance |
+| Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), persist/resume, and per-session history, coding profile guidance |
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
@@ -76,6 +76,7 @@ No cloud API key is required.
 | `EditSummary.java` | Pure parsing/formatting of git output into an edit-trust block |
 | `CodingReport.java` | Pure parse/merge/render of the structured final-answer coding report |
 | `PlanStore.java` | Persists the per-session plan (goal + checklist) for inspect/resume |
+| `PlanHistory.java` | Archives completed plans (steps + transcript + report) as a per-session history |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
 | `Tool.java` | Tool definition: name, description, schema, mutating flag, untrusted flag, executor |
@@ -161,7 +162,9 @@ http://localhost:8081
 | `POST /chat/stream` | Session prompt over SSE |
 | `GET /sessions` | List sessions |
 | `GET /session?id=` | Read one session |
-| `GET /plan?sessionId=` | Read the saved plan: goal + steps + statuses + per-step tool transcript |
+| `GET /plans?sessionId=` | List the session's archived plan history (newest first) |
+| `GET /plan?sessionId=` | Read the current saved plan: goal + steps + statuses + per-step tool transcript |
+| `GET /plan?sessionId=&n=` | Read archived plan `n` from history: goal + steps + tools + coding report |
 | `GET /todos?sessionId=` | Read session todos |
 | `GET /runs` | Show concurrency status |
 | `POST /interrupt` | Stop one session's active run |
@@ -248,6 +251,20 @@ running context. Later steps and the final synthesis see it, so the model can re
 mid-plan (e.g. notice it edited the wrong file) instead of only learning what changed at the end. It is
 derived from the tool recorder's tracked paths, so it is independent of the audit toggle. Turn it off
 with `agent.plan.step-diff=false`.
+
+**Plan history.** Each time a plan run finishes, a snapshot is archived per session -- the goal, the
+final checklist (steps + statuses), the per-step tool transcript, and the coding report. So a session
+builds up an inspectable record of past goals and what was done, not just the latest plan:
+
+```
+curl "localhost:8080/plans?sessionId=proj"        # list: [{seq, goal, stepCount, summary, createdAt}]
+curl "localhost:8080/plan?sessionId=proj&n=2"     # fetch archived plan #2 (steps+tools+report)
+```
+
+`GET /plans` lists the history newest-first (each with a `summary` like `5 steps: 4 done, 1 failed`);
+`GET /plan?n=<seq>` returns that archived plan in full, while `GET /plan` (no `n`) still returns the
+current live plan. The last `agent.plan.history-max` plans are kept per session (default 20; 0 =
+unlimited). All are ownership-scoped.
 
 **Persistence & resume.** The plan (goal + every step's status) is saved to a `plans` table on each
 change, so it survives a restart and can be inspected at `GET /plan?sessionId=` (ownership-scoped). If a
