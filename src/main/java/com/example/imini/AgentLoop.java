@@ -52,11 +52,12 @@ public class AgentLoop {
     private final CheckRunner checks;
     private final PlanStore plans;
     private final CheckSuggester suggester;
+    private final RunRecorder recorder;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
-                     PlanStore plans, CheckSuggester suggester) {
+                     PlanStore plans, CheckSuggester suggester, RunRecorder recorder) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -66,6 +67,7 @@ public class AgentLoop {
         this.checks = checks;
         this.plans = plans;
         this.suggester = suggester;
+        this.recorder = recorder;
     }
 
     private String systemPrompt() {
@@ -104,6 +106,7 @@ public class AgentLoop {
     public String runPlan(String sessionId, String goal, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(goal)) return slash.help();
         final String g = slash.expand(goal);
+        recorder.beginRun(sessionId); // fresh transcript for this plan
 
         sink.log("plan: drafting steps");
         // planning is read-only (PLAN mode) and should not call tools; we just want the step list
@@ -199,6 +202,7 @@ public class AgentLoop {
             todos.set(sessionId, items);
             emitPlan(sink, items);
             plans.save(sessionId, goal, items);
+            recorder.syncStep(sessionId, RunRecorder.activeStep(items));
         };
     }
 
