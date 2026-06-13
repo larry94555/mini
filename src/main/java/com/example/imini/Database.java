@@ -49,7 +49,10 @@ public class Database {
                     + "updated_at INTEGER NOT NULL)",
             "CREATE TABLE plan_steps (session_id TEXT NOT NULL, step_index INTEGER NOT NULL, "
                     + "tools TEXT NOT NULL, updated_at INTEGER NOT NULL, "
-                    + "PRIMARY KEY(session_id, step_index))");
+                    + "PRIMARY KEY(session_id, step_index))",
+            "CREATE TABLE plan_history (session_id TEXT NOT NULL, seq INTEGER NOT NULL, goal TEXT, "
+                    + "steps TEXT NOT NULL, report TEXT, step_count INTEGER NOT NULL, summary TEXT, "
+                    + "created_at INTEGER NOT NULL, PRIMARY KEY(session_id, seq))");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

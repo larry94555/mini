@@ -57,11 +57,13 @@ public class AgentLoop {
     private final CheckSuggester suggester;
     private final RunRecorder recorder;
     private final GitInspector git;
+    private final PlanHistory history;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
-                     PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git) {
+                     PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
+                     PlanHistory history) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -73,6 +75,7 @@ public class AgentLoop {
         this.suggester = suggester;
         this.recorder = recorder;
         this.git = git;
+        this.history = history;
     }
 
     private String systemPrompt() {
@@ -132,7 +135,7 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return withEditTrust(sessionId, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+        return finishPlan(sessionId, g, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
@@ -156,7 +159,7 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return withEditTrust(sessionId, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+        return finishPlan(sessionId, g, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
@@ -228,26 +231,48 @@ public class AgentLoop {
     /** Stream the current plan/checklist as a structured SSE "plan" event (no-op on non-SSE sinks). */
     /** Append a git-verified summary of edits to the final answer (and stream it for SSE clients). */
     private String withEditTrust(String sessionId, String answer, Mode mode, RunSink sink) {
-        if (!verifyEdits && !codingReport) return answer;
+        return appendBlock(answer, editTrustBlock(sessionId, answer, mode, sink), sink);
+    }
+
+    /** Finish a plan run: compute the edit/coding-report block, archive the plan to history, append it. */
+    private String finishPlan(String sessionId, String goal, String answer, Mode mode, RunSink sink) {
+        String block = editTrustBlock(sessionId, answer, mode, sink);
+        try {
+            PlanStore.Saved saved = plans.load(sessionId);
+            if (saved != null) {
+                history.archive(sessionId, goal, saved.items(), recorder.transcript(sessionId), block);
+            }
+        } catch (Exception ignore) {
+            // archiving is best-effort
+        }
+        return appendBlock(answer, block, sink);
+    }
+
+    /** Build the edit-trust / coding-report block for an answer (or "" when nothing changed). */
+    private String editTrustBlock(String sessionId, String answer, Mode mode, RunSink sink) {
+        if (!verifyEdits && !codingReport) return "";
         try {
             String status = git.status();
             String stat = git.diffStat();
             String statLine = EditSummary.parseStat(stat);
             List<String> changedFiles = mergedChangedFiles(status, recorder.changedPaths(sessionId));
-            boolean hasEdits = !changedFiles.isEmpty() || !statLine.isBlank();
-            if (!hasEdits) return answer; // not a coding task / nothing changed
+            if (changedFiles.isEmpty() && statLine.isBlank()) return ""; // nothing changed
 
             String block = codingReport
                     ? buildCodingReport(sessionId, answer, mode, changedFiles, statLine)
                     : EditSummary.format(status, stat, recorder.changedPaths(sessionId));
-            if (block.isBlank()) return answer;
-
+            if (block.isBlank()) return "";
             sink.log("edits: " + EditSummary.oneLine(status, stat));
-            sink.token("\n\n" + block);   // streams into the body for SSE runs (no-op on console sinks)
-            return answer + "\n\n" + block;
+            return block;
         } catch (Exception e) {
-            return answer; // best-effort; never break the answer
+            return "";
         }
+    }
+
+    private String appendBlock(String answer, String block, RunSink sink) {
+        if (block == null || block.isBlank()) return answer;
+        sink.token("\n\n" + block);   // streams into the body for SSE runs (no-op on console sinks)
+        return answer + "\n\n" + block;
     }
 
     /** Union of git-reported changed files and the paths this run's tools touched (git first). */
