@@ -56,7 +56,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI, remote approvals |
-| Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership, audit log, `/metrics`, structured logging, Docker, CI |
+| Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
 
@@ -69,6 +69,8 @@ No cloud API key is required.
 | `Planner.java` | Plan parsing + step sequencing for plan-then-execute (pure, testable) |
 | `CheckLibrary.java` | Suggests a verification command from project type + step text (pure) |
 | `CheckSuggester.java` | Detects the build system and suggests a step check |
+| `ToolCall.java` | Pure summary/outcome formatting for a recorded tool call |
+| `RunRecorder.java` | Records mutating tool calls to the audit log + per-step transcript |
 | `PlanStore.java` | Persists the per-session plan (goal + checklist) for inspect/resume |
 | `AgentEngine.java` | Main think -> act -> observe loop |
 | `ToolRegistry.java` | Builds the available tool set |
@@ -155,7 +157,7 @@ http://localhost:8081
 | `POST /chat/stream` | Session prompt over SSE |
 | `GET /sessions` | List sessions |
 | `GET /session?id=` | Read one session |
-| `GET /plan?sessionId=` | Read the saved plan for a session (goal + steps + statuses) |
+| `GET /plan?sessionId=` | Read the saved plan: goal + steps + statuses + per-step tool transcript |
 | `GET /todos?sessionId=` | Read session todos |
 | `GET /runs` | Show concurrency status |
 | `POST /interrupt` | Stop one session's active run |
@@ -309,7 +311,8 @@ Important limitations:
 
 Every privileged action is recorded to an append-only `audit` table (with an in-memory fallback): the
 acting `user`, the `action` (`ask`, `chat`, `chat/stream`, `interrupt`, `steer`, `rewind`, `approve`,
-`index`), the `target` (e.g. `session:proj` or `approval:<id>`), an ISO timestamp, and the `outcome`.
+`index`, and per-tool `tool:<name>`), the `target` (e.g. `session:proj`, `session:proj step:2`, or
+`approval:<id>`), an ISO timestamp, and the `outcome`.
 
 Read it (admin only) at `GET /audit`, newest first, with optional filters:
 
@@ -318,6 +321,23 @@ curl "localhost:8080/audit?limit=50"               -H "X-API-Key: <admin>"
 curl "localhost:8080/audit?user=bob"               -H "X-API-Key: <admin>"
 curl "localhost:8080/audit?target=session:proj"    -H "X-API-Key: <admin>"
 ```
+
+### Tool-call detail & per-step transcript
+
+Beyond request-level entries, every **mutating** tool call (`write_file`, `edit_file`, `apply_patch`,
+`run_command`, `todo_write`) is recorded as a `tool:<name>` audit entry attributed to the session and,
+during a plan, the step (`target` = `session:proj step:2`). Read-only calls (reads, greps, listings)
+are not recorded, to keep the trail signal-rich.
+
+The same calls are gathered into a **per-step transcript**: `GET /plan?sessionId=` returns each step
+with a `tools` array of one-line entries like `write_file src/App.java [ok]` or
+`run_command $ mvn -q test [error]`, so a finished or resumed plan shows *what was actually done* at
+each step (persisted in the `plan_steps` table). Step boundaries are taken from the live checklist (the
+one step that is `in_progress`). Turn the whole feature off with `agent.audit.tool-calls=false`.
+
+> Honest scope: only mutating tools are recorded, attributed by session owner (not necessarily the live
+> caller on a worker thread); the transcript is one line per call (tool + short arg + ok/error), not
+> full inputs/outputs; and it is best-effort, not tamper-proof.
 
 Identity comes from the API key (see RBAC: legacy `auth.keys` are admins; `auth.principals` of the form
 `user:key:role` assign roles). When `auth.enabled=false` actions are attributed to the anonymous admin.

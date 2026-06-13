@@ -47,6 +47,7 @@ public class AgentEngine {
     private final InterruptService interrupt;
     private final HookService hooks;
     private final Metrics metrics;
+    private final RunRecorder recorder;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
@@ -66,13 +67,14 @@ public class AgentEngine {
 
     public AgentEngine(LlamaClient llama, ContextManager context,
                        PermissionService permissions, InterruptService interrupt, HookService hooks,
-                       Metrics metrics) {
+                       Metrics metrics, RunRecorder recorder) {
         this.llama = llama;
         this.context = context;
         this.permissions = permissions;
         this.interrupt = interrupt;
         this.hooks = hooks;
         this.metrics = metrics;
+        this.recorder = recorder;
     }
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
@@ -281,6 +283,7 @@ public class AgentEngine {
             if (postOut != null && !postOut.isBlank()) {
                 result = result + "\n[post-hook]\n" + postOut;
             }
+            recorder.record(sessionId, name, tool.mutating, args, result);
             return result;
         } finally {
             SessionContext.set(prev);

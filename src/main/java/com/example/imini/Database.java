@@ -46,7 +46,10 @@ public class Database {
             "CREATE TABLE audit (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, user TEXT, action TEXT, "
                     + "target TEXT, outcome TEXT)",
             "CREATE TABLE plans (session_id TEXT PRIMARY KEY, goal TEXT, steps TEXT NOT NULL, "
-                    + "updated_at INTEGER NOT NULL)");
+                    + "updated_at INTEGER NOT NULL)",
+            "CREATE TABLE plan_steps (session_id TEXT NOT NULL, step_index INTEGER NOT NULL, "
+                    + "tools TEXT NOT NULL, updated_at INTEGER NOT NULL, "
+                    + "PRIMARY KEY(session_id, step_index))");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

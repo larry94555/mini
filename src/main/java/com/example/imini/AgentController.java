@@ -56,11 +56,12 @@ public class AgentController {
     private final Approvals approvals;
     private final AuditLog audit;
     private final PlanStore plans;
+    private final RunRecorder recorder;
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
-                           AuditLog audit, PlanStore plans) {
+                           AuditLog audit, PlanStore plans, RunRecorder recorder) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -72,6 +73,7 @@ public class AgentController {
         this.approvals = approvals;
         this.audit = audit;
         this.plans = plans;
+        this.recorder = recorder;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -230,9 +232,17 @@ public class AgentController {
     public Map<String, Object> plan(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
         requireAccess(sessionId);
         PlanStore.Saved saved = plans.load(sessionId);
+        java.util.Map<Integer, List<String>> tx = recorder.transcript(sessionId);
         if (saved == null) return Map.of("sessionId", sessionId, "goal", "", "steps", List.of());
+        List<Map<String, String>> base = Planner.planPayload(saved.items());
+        List<Map<String, Object>> steps = new java.util.ArrayList<>();
+        for (int i = 0; i < base.size(); i++) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>(base.get(i));
+            m.put("tools", tx.getOrDefault(i, List.of()));
+            steps.add(m);
+        }
         return Map.of("sessionId", sessionId, "goal", saved.goal() == null ? "" : saved.goal(),
-                "steps", Planner.planPayload(saved.items()));
+                "steps", steps);
     }
 
     @GetMapping("/todos")

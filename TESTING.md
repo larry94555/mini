@@ -1149,3 +1149,29 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** in a repo with `pom.xml` the suggester picks Maven; `build.gradle` -> Gradle;
   `package.json` -> Node; `pyproject.toml`/`requirements.txt`/`setup.py` -> Python; otherwise file
   existence checks only.
+
+---
+
+# Tool-call-level audit & per-step transcript
+
+## 124. Tool-call formatting (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `ToolCallTest` passes -- `summarize` gives a short per-tool summary (path for
+  write/edit, `$ <cmd>` for run_command, `patch`/path for apply_patch), `outcome` maps the result
+  prefix to `ok`/`error`, `line()` renders `tool summary [outcome]`, and `RunRecorder.activeStep` finds
+  the single `in_progress` step (or -1).
+
+## 125. Tool calls in the audit + transcript end to end (manual)
+
+- **Run (plan mode):** a goal whose steps write files / run commands, with `"plan":true`.
+- **Observe:** `GET /audit` (admin) shows `tool:write_file`, `tool:run_command`, ... entries with
+  `target` like `session:<id> step:2`; `GET /plan?sessionId=<id>` returns each step with a `tools`
+  array (`write_file src/App.java [ok]`, `run_command $ mvn -q test [error]`). Read-only tools do not
+  appear. Set `agent.audit.tool-calls=false` to disable.
+
+## 126. Transcript survives + resumes (manual)
+
+- **Run:** start a plan, let a step or two complete, then `Stop`/restart and `GET /plan` -- completed
+  steps still show their recorded tool calls (persisted in `plan_steps`). Resuming continues recording
+  for the remaining steps without clearing the earlier transcript.
