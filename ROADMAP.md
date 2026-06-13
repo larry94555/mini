@@ -94,12 +94,18 @@ Goal: file changes should be easy to review and hard to misrepresent.
   synthesis step is prompted to note changed files, verification, and risks. Pure parsing is unit
   tested (`EditSummaryTest`). Toggle with `agent.verify-edits`.
 
+### Done since
+
+- Structured coding report: runs that change files end with a rendered report (changed files, commands
+  run, verification, tests not run, risks). Factual fields come from git + the tool recorder; soft
+  fields from a small JSON model call (`CodingReport`, unit-tested). Toggle with `agent.coding-report`.
+
 ### Next
 
 - Feed the diff summary into the *intermediate* step context too (not only the final answer), so the
   model can react to unexpected diffs mid-plan.
-- Require a structured final-answer schema for coding tasks (changed files, commands run, verification,
-  tests not run, known risks) rather than a free-text note.
+- Validate/enforce the report schema (e.g. require non-empty verification for risky changes) rather
+  than only rendering what is provided.
 
 ### Later
 
@@ -199,9 +205,9 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Plan history (multiple plans + transcripts per session) so a session keeps an inspectable record
->    of past goals and what was done, not just the latest plan.
-> 2. A structured final-answer schema for coding tasks (changed files, commands run, verification,
->    tests not run, known risks), building on the new edit-trust summary.
+> 1. Plan history (multiple plans + transcripts + reports per session) so a session keeps an
+>    inspectable record of past goals and what was done, not just the latest plan.
+> 2. Feed the edit/diff summary into intermediate step context (not only the final answer) so the model
+>    can react to unexpected diffs mid-plan.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

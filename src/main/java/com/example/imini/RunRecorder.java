@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -38,6 +39,7 @@ public class RunRecorder {
     private final Map<String, Active> active = new ConcurrentHashMap<>();
     private final Map<String, Map<Integer, List<String>>> mem = new ConcurrentHashMap<>(); // fallback
     private final Map<String, Set<String>> changed = new ConcurrentHashMap<>(); // edit-trust: paths touched
+    private final Map<String, List<String>> commands = new ConcurrentHashMap<>(); // edit-trust: commands run
 
     public RunRecorder(AuditLog audit, SessionStore sessions, Database db) {
         this.audit = audit;
@@ -54,9 +56,17 @@ public class RunRecorder {
         return sessionId == null ? Set.of() : Set.copyOf(changed.getOrDefault(sessionId, Set.of()));
     }
 
+    /** Commands run since the last {@link #beginRun}/{@link #beginEdits} for this session. */
+    public List<String> commandsRun(String sessionId) {
+        return sessionId == null ? List.of() : List.copyOf(commands.getOrDefault(sessionId, List.of()));
+    }
+
     /** Reset only the edit-trust path tracking for a session (used by non-plan runs). */
     public void beginEdits(String sessionId) {
-        if (sessionId != null) changed.remove(sessionId);
+        if (sessionId != null) {
+            changed.remove(sessionId);
+            commands.remove(sessionId);
+        }
     }
 
     /** Index of the single {@code in_progress} step, or -1. Pure. */
@@ -74,6 +84,7 @@ public class RunRecorder {
         active.remove(sessionId);
         mem.remove(sessionId);
         changed.remove(sessionId);
+        commands.remove(sessionId);
         try {
             if (db.available()) db.update("DELETE FROM plan_steps WHERE session_id=?", sessionId);
         } catch (Exception e) {
@@ -97,6 +108,10 @@ public class RunRecorder {
         if (!mutating || sessionId == null) return;
         if (isPathMutator(tool) && args != null && args.get("path") != null) {
             changed.computeIfAbsent(sessionId, k -> new CopyOnWriteArraySet<>()).add(String.valueOf(args.get("path")));
+        }
+        if ("run_command".equals(tool) && args != null && args.get("command") != null) {
+            List<String> list = commands.computeIfAbsent(sessionId, k -> new CopyOnWriteArrayList<>());
+            if (list.size() < 50) list.add(String.valueOf(args.get("command")));
         }
         if (!enabled) return;
         String summary = ToolCall.summarize(tool, args);
