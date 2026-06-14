@@ -17,12 +17,14 @@ public class ToolRegistry {
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
-                        McpManager mcp, RetrievalService retrieval) {
+                        McpManager mcp, RetrievalService retrieval, SkillService skills) {
         for (Tool t : builtins.all()) register(t);
         for (Tool t : codebase.all()) register(t);   // glob, grep, repo_tree, read_many, git_status, git_diff
         register(delegateTool(subAgent));
         register(retrieval.searchTool());          // search_memory (RAG over the workspace)
         register(retrieval.indexTool());            // index_workspace
+        register(skills.loadSkillTool());          // load_skill (progressive disclosure)
+        register(skills.saveSkillTool());          // save_skill (capture knowledge)
         for (Tool t : mcp.tools()) register(t);   // external MCP-server tools (off unless mcp.json exists)
     }
 

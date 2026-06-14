@@ -206,6 +206,10 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Skills (Phase 1 + 2): reusable `SKILL.md` instruction bundles discovered from `skills/`, a short
+  index injected into the system prompt, `load_skill` (progressive disclosure) + `save_skill` (capture
+  knowledge) tools, optional `skills.auto-load` for weaker models (`SkillLibrary` pure + unit-tested,
+  `SkillService`). Read-only instructions only -- no executable bundles or remote repos yet.
 - Plan history: completed plans are archived per session (goal + final checklist + per-step tool
   transcript + coding report), listed at `GET /plans` and fetched at `GET /plan?n=<seq>`
   (`PlanHistory`, pure `summarize` unit-tested; `agent.plan.history-max`).
@@ -222,7 +226,8 @@ The next highest-leverage engineering changes are:
 
 > 1. Session sharing / ownership transfer so a plan (with its transcript, report, and history) can be
 >    handed to or reviewed by another user.
-> 2. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step caused which
->    change, replacing the cumulative working-tree stat.
+> 2. Skills Phase 3: remote skill repositories (read-only `git` clone/pull of a skills folder into a
+>    cache, allowlisted sources) and a skill registry (searchable index + provenance), keeping skills
+>    read-only; executable skill bundles remain deferred behind the sandbox command policy.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

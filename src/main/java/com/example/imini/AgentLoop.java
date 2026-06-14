@@ -59,12 +59,13 @@ public class AgentLoop {
     private final RunRecorder recorder;
     private final GitInspector git;
     private final PlanHistory history;
+    private final SkillService skills;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
-                     PlanHistory history) {
+                     PlanHistory history, SkillService skills) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -77,10 +78,18 @@ public class AgentLoop {
         this.recorder = recorder;
         this.git = git;
         this.history = history;
+        this.skills = skills;
     }
 
     private String systemPrompt() {
-        return BASE_SYSTEM_PROMPT + AgentProfile.guidance(profile) + project.addendum();
+        return BASE_SYSTEM_PROMPT + AgentProfile.guidance(profile) + project.addendum()
+                + skills.indexAddendum();
+    }
+
+    /** Like {@link #systemPrompt()} but also auto-loads the best-matching skill body for a query when
+     *  skills.auto-load is on (a hedge for weaker models that may not call load_skill themselves). */
+    private String systemPrompt(String query) {
+        return systemPrompt() + skills.autoLoadAddendum(query);
     }
 
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
@@ -88,7 +97,7 @@ public class AgentLoop {
         if (slash.isHelp(userQuestion)) return slash.help();
         String question = slash.expand(userQuestion);
         recorder.beginEdits(sessionId);
-        return withEditTrust(sessionId, engine.run(systemPrompt(), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
+        return withEditTrust(sessionId, engine.run(systemPrompt(question), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
