@@ -46,6 +46,7 @@ public class AgentLoop {
     @Value("${agent.coding-report:true}") private boolean codingReport;
     @Value("${agent.coding-report.enforce:true}") private boolean codingReportEnforce;
     @Value("${agent.plan.step-diff:true}") private boolean planStepDiff;
+    @Value("${agent.plan.step-diff.snapshot:true}") private boolean planStepSnapshot;
 
     private final AgentEngine engine;
     private final ToolRegistry registry;
@@ -177,13 +178,28 @@ public class AgentLoop {
 
     private Function<String, String> planStepRunner(String sessionId, Mode mode, RunSink sink) {
         return stepPrompt -> {
-            java.util.Set<String> before = planStepDiff ? recorder.changedPaths(sessionId) : java.util.Set.of();
+            java.util.Set<String> beforePaths = planStepDiff ? recorder.changedPaths(sessionId) : java.util.Set.of();
+            String beforeTree = (planStepDiff && planStepSnapshot) ? git.snapshotTree() : "";
             try {
                 String out = engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
                 if (planStepDiff) {
-                    java.util.List<String> delta = new java.util.ArrayList<>(recorder.changedPaths(sessionId));
-                    delta.removeAll(before);
-                    String note = EditSummary.stepNote(delta, EditSummary.parseStat(git.diffStat()));
+                    java.util.List<String> delta;
+                    String stat;
+                    String label;
+                    String afterTree = planStepSnapshot ? git.snapshotTree() : "";
+                    if (!beforeTree.isBlank() && !afterTree.isBlank()) {
+                        // exact per-step delta: diff the working-tree snapshots taken around this step
+                        delta = EditSummary.parseNames(git.diffNamesBetween(beforeTree, afterTree));
+                        stat = EditSummary.parseStat(git.diffStatBetween(beforeTree, afterTree));
+                        label = "diff this step";
+                    } else {
+                        // fallback: newly-touched paths since the step began + cumulative working-tree stat
+                        delta = new java.util.ArrayList<>(recorder.changedPaths(sessionId));
+                        delta.removeAll(beforePaths);
+                        stat = EditSummary.parseStat(git.diffStat());
+                        label = "diff so far";
+                    }
+                    String note = EditSummary.stepNote(delta, stat, label);
                     if (!note.isBlank()) {
                         sink.log("step edits: " + note.replace("\n", " | "));
                         out = out + "\n\n[edits this step]\n" + note; // fed into later steps + synthesis

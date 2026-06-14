@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure parsing/formatting of git output into an edit-trust block. */
@@ -62,5 +63,20 @@ class EditSummaryTest {
         assertEquals("files changed this step: only.java", EditSummary.stepNote(List.of("only.java"), ""));
         assertEquals("", EditSummary.stepNote(List.of(), "x"));
         assertEquals("", EditSummary.stepNote(null, "x"));
+    }
+
+    @Test
+    void stepNoteHonorsACustomDiffLabel() {
+        String note = EditSummary.stepNote(List.of("b.txt"), "1 file changed", "diff this step");
+        assertTrue(note.contains("diff this step: 1 file changed"));
+        assertFalse(note.contains("diff so far"));
+    }
+
+    @Test
+    void parseNamesSplitsAndTrimsDroppingBlanks() {
+        assertEquals(List.of("src/A.java", "src/B.java", "src/C.java"),
+                EditSummary.parseNames("src/A.java\nsrc/B.java\n\n  src/C.java  \n"));
+        assertTrue(EditSummary.parseNames("").isEmpty());
+        assertTrue(EditSummary.parseNames(null).isEmpty());
     }
 }

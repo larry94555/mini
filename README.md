@@ -254,11 +254,18 @@ and can be turned off with `agent.plan.suggest-checks=false`. Suggested checks s
 > project's build is slow or noisy.
 
 **Intermediate diff feedback.** After each step that changes files, the executor appends a short
-`[edits this step]` note -- the files that step touched plus the current `git diff --stat` -- to the
-running context. Later steps and the final synthesis see it, so the model can react to unexpected diffs
-mid-plan (e.g. notice it edited the wrong file) instead of only learning what changed at the end. It is
-derived from the tool recorder's tracked paths, so it is independent of the audit toggle. Turn it off
-with `agent.plan.step-diff=false`.
+`[edits this step]` note -- the files that step touched plus a `git diff --stat` -- to the running
+context. Later steps and the final synthesis see it, so the model can react to unexpected diffs mid-plan
+(e.g. notice it edited the wrong file) instead of only learning what changed at the end.
+
+By default (`agent.plan.step-diff.snapshot=true`) the note reports each step's **exact delta**: the
+executor snapshots the working tree before and after the step -- staging into a throwaway git index
+(`GIT_INDEX_FILE`) so your real index and working tree are untouched -- and diffs the two snapshots.
+This attributes a file *re-edited* in a later step to that step, and reports a per-step (`diff this
+step:`) rather than cumulative stat. Set `agent.plan.step-diff.snapshot=false` to fall back to the
+lighter "newly-touched paths + cumulative `diff so far:`" derived from the tool recorder (no snapshot);
+it also degrades to this automatically outside a git workspace. Turn the whole note off with
+`agent.plan.step-diff=false`.
 
 **Plan history.** Each time a plan run finishes, a snapshot is archived per session -- the goal, the
 final checklist (steps + statuses), the per-step tool transcript, and the coding report. So a session

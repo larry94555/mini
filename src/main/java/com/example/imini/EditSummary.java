@@ -45,10 +45,29 @@ public final class EditSummary {
 
     /** Context note fed into later plan steps: which files this step changed + the diff so far. Pure. */
     public static String stepNote(Collection<String> paths, String diffStat) {
+        return stepNote(paths, diffStat, "diff so far");
+    }
+
+    /** Like {@link #stepNote(Collection, String)} but with a custom diff label (e.g. "diff this step"). */
+    public static String stepNote(Collection<String> paths, String diffStat, String diffLabel) {
         if (paths == null || paths.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("files changed this step: ").append(String.join(", ", paths));
-        if (diffStat != null && !diffStat.isBlank()) sb.append("\ndiff so far: ").append(diffStat);
+        if (diffStat != null && !diffStat.isBlank()) {
+            sb.append("\n").append(diffLabel == null || diffLabel.isBlank() ? "diff" : diffLabel)
+              .append(": ").append(diffStat);
+        }
         return sb.toString();
+    }
+
+    /** Parse {@code git diff --name-only} output into a list of paths (trimmed, blanks dropped). Pure. */
+    public static java.util.List<String> parseNames(String nameOnlyOutput) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (nameOnlyOutput == null) return out;
+        for (String line : nameOnlyOutput.split("\n")) {
+            String t = line.strip();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
     }
 
     /** A one-line summary for logs. */
