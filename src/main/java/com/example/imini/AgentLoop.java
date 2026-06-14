@@ -44,6 +44,7 @@ public class AgentLoop {
     @Value("${agent.plan.suggest-checks:true}") private boolean planSuggestChecks;
     @Value("${agent.verify-edits:true}") private boolean verifyEdits;
     @Value("${agent.coding-report:true}") private boolean codingReport;
+    @Value("${agent.coding-report.enforce:true}") private boolean codingReportEnforce;
     @Value("${agent.plan.step-diff:true}") private boolean planStepDiff;
 
     private final AgentEngine engine;
@@ -258,11 +259,21 @@ public class AgentLoop {
             List<String> changedFiles = mergedChangedFiles(status, recorder.changedPaths(sessionId));
             if (changedFiles.isEmpty() && statLine.isBlank()) return ""; // nothing changed
 
-            String block = codingReport
-                    ? buildCodingReport(sessionId, answer, mode, changedFiles, statLine)
-                    : EditSummary.format(status, stat, recorder.changedPaths(sessionId));
+            String block;
+            List<String> gaps = List.of();
+            if (codingReport) {
+                CodingReport report = buildCodingReport(sessionId, answer, mode, changedFiles, statLine);
+                block = report.render();
+                if (codingReportEnforce) {
+                    gaps = report.validate();
+                    if (!gaps.isEmpty()) block = block + "\n- [!] Report gaps: " + String.join("; ", gaps);
+                }
+            } else {
+                block = EditSummary.format(status, stat, recorder.changedPaths(sessionId));
+            }
             if (block.isBlank()) return "";
             sink.log("edits: " + EditSummary.oneLine(status, stat));
+            if (!gaps.isEmpty()) sink.log("coding report: " + gaps.size() + " gap(s) - " + String.join("; ", gaps));
             return block;
         } catch (Exception e) {
             return "";
@@ -284,8 +295,8 @@ public class AgentLoop {
     }
 
     /** Build the structured coding report: facts from git/recorder + soft fields from a JSON model call. */
-    private String buildCodingReport(String sessionId, String answer, Mode mode,
-                                     List<String> changedFiles, String statLine) {
+    private CodingReport buildCodingReport(String sessionId, String answer, Mode mode,
+                                           List<String> changedFiles, String statLine) {
         List<String> commands = recorder.commandsRun(sessionId);
         CodingReport report = CodingReport.withFacts(null, changedFiles, commands, statLine);
         try {
@@ -295,7 +306,7 @@ public class AgentLoop {
         } catch (Exception ignore) {
             // keep the facts-only report
         }
-        return report.render();
+        return report;
     }
 
     private void emitPlan(RunSink sink, String sessionId, List<TodoStore.Item> items) {

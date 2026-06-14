@@ -68,4 +68,35 @@ class CodingReportTest {
         assertTrue(out.contains("Summary: (not reported)"));
         assertTrue(out.contains("git diff --stat: 1 file changed"));
     }
+
+    @Test
+    void validateFlagsMissingVerificationRisksAndSummary() {
+        CodingReport facts = CodingReport.withFacts(null, List.of("src/App.java"), List.of(), "1 file changed");
+        List<String> gaps = facts.validate();
+        assertEquals(3, gaps.size());
+        assertTrue(gaps.get(0).contains("verification not reported"));
+        assertTrue(gaps.contains("risks not reported"));
+        assertTrue(gaps.contains("summary not reported"));
+    }
+
+    @Test
+    void validateTreatsNoneVerificationAsMissing() {
+        CodingReport r = new CodingReport("did it", List.of("a.java"), List.of(), null, "none", "x",
+                List.of("a risk"));
+        assertEquals(List.of("verification not reported for 1 changed file(s)"), r.validate());
+    }
+
+    @Test
+    void validateCompleteReportHasNoGaps() {
+        CodingReport r = new CodingReport("added endpoint", List.of("a.java"), List.of("mvn test"),
+                "1 file changed", "compiled and ran it", "e2e", List.of("no auth"));
+        assertTrue(r.validate().isEmpty());
+    }
+
+    @Test
+    void validateNoChangesHasNoVerificationOrRiskGaps() {
+        CodingReport r = new CodingReport("answered a question", List.of(), List.of(), null, null, null,
+                List.of());
+        assertTrue(r.validate().isEmpty());
+    }
 }

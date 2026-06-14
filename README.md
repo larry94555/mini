@@ -322,6 +322,19 @@ recorder, so the model cannot misstate them. The **summary**, **verification**, 
 **risks** come from a small dedicated JSON model call after the answer (kept out of the streamed body),
 and degrade to `(not reported)` if that call fails. This works for `/ask`, `/chat`, and plan runs.
 
+**Schema enforcement.** With `agent.coding-report.enforce=true` (default) the report is checked for
+gaps a complete coding answer should not have -- no verification for changed files, no risks reported,
+or no summary -- and any gaps are flagged inline and logged:
+
+```
+- [!] Report gaps: verification not reported for 2 changed file(s); risks not reported
+```
+
+The flag is appended to the report (so it travels into the answer and into plan history) and a
+`coding report: N gap(s) - …` line is logged. A verification value of `none`/`n/a`/`nothing` counts as
+missing. It is a visible nudge, not a hard gate -- the answer is never blocked. Disable the check with
+`agent.coding-report.enforce=false`.
+
 Turn the report off with `agent.coding-report=false` (falls back to the plain edit-trust block), or
 disable edit verification entirely with `agent.verify-edits=false`.
 

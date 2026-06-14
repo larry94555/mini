@@ -58,6 +58,28 @@ public record CodingReport(String summary, List<String> changedFiles, List<Strin
                 p.verification(), p.testsNotRun(), p.risks());
     }
 
+    /** Schema gaps: things a complete coding report should state but doesn't. Empty == complete. Pure. */
+    public List<String> validate() {
+        List<String> w = new ArrayList<>();
+        boolean changed = changedFiles != null && !changedFiles.isEmpty();
+        if (changed && isBlankOrNone(verification)) {
+            w.add("verification not reported for " + changedFiles.size() + " changed file(s)");
+        }
+        if (changed && (risks == null || risks.isEmpty())) {
+            w.add("risks not reported");
+        }
+        if (summary == null || summary.isBlank()) {
+            w.add("summary not reported");
+        }
+        return w;
+    }
+
+    private static boolean isBlankOrNone(String s) {
+        if (s == null || s.isBlank()) return true;
+        String t = s.trim().toLowerCase(java.util.Locale.ROOT);
+        return t.equals("none") || t.equals("n/a") || t.equals("na") || t.equals("nothing") || t.equals("-");
+    }
+
     /** Render the report as the block appended to a coding answer. */
     public String render() {
         StringBuilder sb = new StringBuilder("---\nCoding report:\n");

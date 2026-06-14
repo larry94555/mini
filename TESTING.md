@@ -1281,3 +1281,24 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   a `summary`; `GET /plan?sessionId=<id>&n=<seq>` returns that archived plan with steps, per-step tools,
   and the coding report; `GET /plan` (no `n`) still shows the current live plan. History is
   ownership-scoped and capped at `agent.plan.history-max` (default 20).
+
+---
+
+# Coding-report schema enforcement
+
+## 138. Report validation (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `CodingReportTest` passes the validate cases -- a facts-only report (changed files, no
+  soft fields) flags missing verification, risks, and summary; a `none`/`n/a` verification counts as
+  missing; a complete report has no gaps; and a run that changed nothing reports no
+  verification/risk gaps.
+
+## 139. Gaps flagged on an incomplete coding answer (manual)
+
+- **Setup:** a git workspace, `agent.coding-report=true` and `agent.coding-report.enforce=true`
+  (defaults).
+- **Run:** a coding goal where the model omits verification/risks in its report.
+- **Observe:** the appended `Coding report:` block ends with a `- [!] Report gaps: …` line, the log
+  shows `coding report: N gap(s) - …`, and the flag is preserved in `GET /plan?n=<seq>` history. Set
+  `agent.coding-report.enforce=false` to skip the check (report still renders).
