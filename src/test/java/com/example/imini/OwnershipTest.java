@@ -39,4 +39,19 @@ class OwnershipTest {
     void anonymousIsAdminSoAuthDisabledSeesAll() {
         assertTrue(Ownership.canAccess(Principal.ANON, "bob"));
     }
+
+    @Test
+    void sharedReaderCanReadButOthersCannot() {
+        java.util.Set<String> readers = java.util.Set.of("cara");
+        assertTrue(Ownership.canRead(cara, "bob", readers), "cara was granted read access");
+        assertFalse(Ownership.canRead(cara, "bob", java.util.Set.of()), "no share -> denied");
+        assertTrue(Ownership.canRead(bob, "bob", java.util.Set.of()), "owner always reads");
+        assertTrue(Ownership.canRead(admin, "bob", java.util.Set.of()), "admin always reads");
+    }
+
+    @Test
+    void canReadToleratesNullReaders() {
+        assertFalse(Ownership.canRead(cara, "bob", null));
+        assertTrue(Ownership.canRead(cara, null, null), "unowned stays open");
+    }
 }

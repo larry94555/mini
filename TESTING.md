@@ -1330,3 +1330,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** a `skills/<name>/SKILL.md` is written with front-matter, the library reloads, and the new
   skill appears in the index and is loadable via `load_skill`. Names are sanitized to
   letters/digits/dashes (no path traversal).
+
+---
+
+# Session sharing and ownership transfer
+
+## 143. Read-access policy (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `OwnershipTest` passes the sharing cases -- `Ownership.canRead` lets the owner, an admin,
+  and an explicitly shared user read; denies a non-shared member; treats an unowned session as open; and
+  tolerates a null reader set.
+
+## 144. Share / transfer round-trip (manual, auth enabled)
+
+- **Setup:** run with `auth.enabled=true` and two API keys (users `bob` and `cara`); `bob` creates a
+  session and runs a plan in it.
+- **Observe:**
+  - `cara` calling `GET /plan?sessionId=<id>` gets 403.
+  - `bob` calls `POST /share {sessionId,"user":"cara"}`; now `cara`'s `GET /plan`, `/plans`, `/todos`,
+    `/session`, `/checkpoints` succeed and the session appears in `cara`'s `GET /sessions`.
+  - `cara` still cannot `POST /chat`, `/share`, or `/transfer` (owner/admin only) -> 403.
+  - `bob` calls `POST /unshare`; `cara` is denied again.
+  - `bob` calls `POST /transfer {sessionId,"to":"dave"}`; `dave` is now owner, `bob` remains a reader,
+    and both `share` and `transfer` appear in `GET /audit`.

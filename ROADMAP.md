@@ -206,6 +206,9 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Session sharing / ownership transfer: an owner can grant read access (`POST /share`/`/unshare`),
+  inspect access (`GET /shares`), and transfer ownership (`POST /transfer`, prior owner kept as reader);
+  read endpoints resolve via `Ownership.canRead` (unit-tested), management stays owner/admin-only.
 - Skills (Phase 1 + 2): reusable `SKILL.md` instruction bundles discovered from `skills/`, a short
   index injected into the system prompt, `load_skill` (progressive disclosure) + `save_skill` (capture
   knowledge) tools, optional `skills.auto-load` for weaker models (`SkillLibrary` pure + unit-tested,
@@ -224,10 +227,11 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Session sharing / ownership transfer so a plan (with its transcript, report, and history) can be
->    handed to or reviewed by another user.
-> 2. Skills Phase 3: remote skill repositories (read-only `git` clone/pull of a skills folder into a
+> 1. Skills Phase 3: remote skill repositories (read-only `git` clone/pull of a skills folder into a
 >    cache, allowlisted sources) and a skill registry (searchable index + provenance), keeping skills
 >    read-only; executable skill bundles remain deferred behind the sandbox command policy.
+> 2. Surface plan history + coding reports in the web UI (a panel over `GET /plans` with click-through
+>    to each archived plan's steps, tools, and report).
+> 3. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
