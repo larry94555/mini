@@ -109,8 +109,8 @@ Goal: file changes should be easy to review and hard to misrepresent.
 
 ### Next
 
-- Validate/enforce the report schema (e.g. require non-empty verification for risky changes) rather
-  than only rendering what is provided.
+- (done) Validate/enforce the report schema -- gaps (missing verification/risks/summary for changed
+  files) are flagged inline + logged via `CodingReport.validate`; see `agent.coding-report.enforce`.
 - Per-step diff *deltas* (snapshot/restore) rather than the cumulative working-tree stat, for precise
   attribution of which step caused which change.
 
@@ -209,6 +209,8 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 - Plan history: completed plans are archived per session (goal + final checklist + per-step tool
   transcript + coding report), listed at `GET /plans` and fetched at `GET /plan?n=<seq>`
   (`PlanHistory`, pure `summarize` unit-tested; `agent.plan.history-max`).
+- Coding-report schema enforcement: incomplete reports (no verification/risks/summary for changed
+  files) are flagged inline + logged (`CodingReport.validate`, unit-tested; `agent.coding-report.enforce`).
 
 ## Current recommended priority
 
@@ -218,9 +220,9 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Validate/enforce the coding-report schema (e.g. require verification for risky changes) instead of
->    only rendering whatever the model provides.
-> 2. Session sharing / ownership transfer so a plan (with its transcript, report, and history) can be
+> 1. Session sharing / ownership transfer so a plan (with its transcript, report, and history) can be
 >    handed to or reviewed by another user.
+> 2. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step caused which
+>    change, replacing the cumulative working-tree stat.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
