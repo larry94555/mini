@@ -132,6 +132,15 @@
       </div>
     </div>
     <div class="card">
+      <h3>Session bundle</h3>
+      <div class="row">
+        <button id="exportBundle" title="Download this session as a JSON bundle">Export</button>
+        <button id="importBundle" title="Import a bundle into a new session">Import</button>
+        <input id="importFile" type="file" accept="application/json,.json" style="display:none"/>
+      </div>
+      <div id="bundleMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
+    </div>
+    <div class="card">
       <h3>Memory search</h3>
       <div class="row">
         <input id="memq" placeholder="search the indexed project" style="flex:1"/>
@@ -199,7 +208,7 @@ function appendLog(line){
 function planStepsHtml(steps){
   const icon = s => s==="completed"?"[x]" : s==="in_progress"?"[~]" : s==="failed"?"[!]" : "[ ]";
   const color = s => s==="completed"?"#3a9" : s==="failed"?"#c33" : s==="in_progress"?"#c80" : "#888";
-  const toolColor = t => /\[error\]\s*$/.test(t) ? "#c33" : "#7a8";
+  const toolColor = t => /^\[edits\]/.test(t) ? "#69c" : (/\[error\]\s*$/.test(t) ? "#c33" : "#7a8");
   let html = "";
   for (const st of (steps||[])){
     html += '<div style="font-family:monospace;font-size:12px;line-height:1.5;color:'+color(st.status)+'">'
@@ -428,6 +437,39 @@ async function doTransfer(){
 $("#refreshShares").onclick = refreshSharing;
 $("#shareGo").onclick = doShare;
 $("#transferGo").onclick = doTransfer;
+async function exportBundle(){
+  try {
+    const r = await fetch("/session/export?sessionId="+encodeURIComponent(state.session), { headers: headers() });
+    if (!r.ok){ $("#bundleMsg").textContent = "export failed ("+r.status+")"; return; }
+    const text = await r.text();
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = state.session + ".json"; a.click();
+    URL.revokeObjectURL(url);
+    $("#bundleMsg").textContent = "exported " + state.session + ".json";
+  } catch (e){ $("#bundleMsg").textContent = "export error"; }
+}
+async function importBundle(file){
+  try {
+    const text = await file.text();
+    const r = await fetch("/session/import", { method: "POST", headers: headers(true), body: text });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || j.error){ $("#bundleMsg").textContent = "import failed: " + ((j && j.error) || r.status); return; }
+    $("#bundleMsg").textContent = "imported " + j.messages + " msg / " + j.plans + " plan(s) -> " + j.sessionId;
+    await refreshSessions();
+    state.session = j.sessionId; localStorage.setItem("imini.session", state.session);
+    const sel = $("#sessionSelect"); if (sel) sel.value = state.session;
+    $("#messages").innerHTML = ""; $("#log").textContent = "";
+    const msgs = await getJson("/session?id=" + encodeURIComponent(state.session));
+    (msgs||[]).forEach(m => {
+      if (m.role==="user" && m.content) addMsg("you","user").textContent = m.content;
+      else if (m.role==="assistant" && m.content) addMsg("imini").textContent = m.content;
+    });
+    refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing();
+  } catch (e){ $("#bundleMsg").textContent = "import error"; }
+}
+$("#exportBundle").onclick = exportBundle;
+$("#importBundle").onclick = () => $("#importFile").click();
+$("#importFile").onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) importBundle(f); e.target.value = ""; };
 async function refreshMetrics(){
   const j = await getJson("/metrics");
   if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }

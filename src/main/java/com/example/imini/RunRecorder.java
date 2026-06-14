@@ -34,7 +34,7 @@ public class RunRecorder {
     @Value("${agent.audit.tool-calls:true}")
     private boolean enabled;
 
-    private record Active(int stepIndex, List<ToolCall> calls) {}
+    private record Active(int stepIndex, List<ToolCall> calls, List<String> notes) {}
 
     private final Map<String, Active> active = new ConcurrentHashMap<>();
     private final Map<String, Map<Integer, List<String>>> mem = new ConcurrentHashMap<>(); // fallback
@@ -99,8 +99,15 @@ public class RunRecorder {
         int cur = (a == null) ? -1 : a.stepIndex();
         if (stepIndex == cur) return;
         if (a != null) flush(sessionId, a);
-        if (stepIndex >= 0) active.put(sessionId, new Active(stepIndex, new ArrayList<>()));
+        if (stepIndex >= 0) active.put(sessionId, new Active(stepIndex, new ArrayList<>(), new ArrayList<>()));
         else active.remove(sessionId);
+    }
+
+    /** Append a free-form line (e.g. a per-step edit delta) to the active step's transcript. */
+    public void note(String sessionId, String text) {
+        if (!enabled || sessionId == null || text == null || text.isBlank()) return;
+        Active a = active.get(sessionId);
+        if (a != null) a.notes().add(text.strip());
     }
 
     /** Record one tool invocation. Only mutating tools are kept (reads would be noise). */
@@ -149,12 +156,12 @@ public class RunRecorder {
             log.debug("[recorder] transcript load failed: " + e.getMessage());
         }
         Active a = active.get(sessionId);
-        if (a != null) out.put(a.stepIndex(), lines(a.calls()));
+        if (a != null) out.put(a.stepIndex(), linesOf(a));
         return out;
     }
 
     private void flush(String sessionId, Active a) {
-        List<String> lines = lines(a.calls());
+        List<String> lines = linesOf(a);
         try {
             if (db.available()) {
                 String json = mapper.writeValueAsString(lines);
@@ -168,6 +175,13 @@ public class RunRecorder {
         } catch (Exception e) {
             log.debug("[recorder] flush failed: " + e.getMessage());
         }
+    }
+
+    /** Tool-call lines for a step plus any free-form notes appended via {@link #note}. */
+    private static List<String> linesOf(Active a) {
+        List<String> out = new ArrayList<>(lines(a.calls()));
+        out.addAll(a.notes());
+        return out;
     }
 
     private static List<String> lines(List<ToolCall> calls) {

@@ -202,6 +202,7 @@ public class AgentLoop {
                     String note = EditSummary.stepNote(delta, stat, label);
                     if (!note.isBlank()) {
                         sink.log("step edits: " + note.replace("\n", " | "));
+                        recorder.note(sessionId, "[edits] " + note.replace("\n", " | ")); // shows in the plan/history UI
                         out = out + "\n\n[edits this step]\n" + note; // fed into later steps + synthesis
                     }
                 }
