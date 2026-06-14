@@ -55,7 +55,7 @@ No cloud API key is required.
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
-| Skills | reusable `SKILL.md` instruction bundles: auto-indexed, `load_skill` on demand, `save_skill` to capture, read-only remote repos via `refresh_skills` |
+| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, and a provenance registry (`search_skills`/`install_skill`, hash-verified) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI (live plan, plan-history + coding-report viewer), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
@@ -90,8 +90,9 @@ No cloud API key is required.
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
 | `RetrievalService.java` | Workspace indexing and memory search |
-| `SkillLibrary.java` | Pure parse/index/select/format for skills (reuses the lexical scorer) |
-| `SkillService.java` | Loads skills from the local dir + allowlisted remote repos; index; `load_skill`/`save_skill`/`refresh_skills` |
+| `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
+| `SkillManifest.java` | Pure skill-registry manifest: parse, lexical search, SHA-256 verify |
+| `SkillService.java` | Loads local + remote skills; index; `load_skill`/`save_skill`/`refresh_skills`/`search_skills`/`install_skill` |
 | `ProjectContext.java` | Loads `IMINI.md`, `CLAUDE.md`, or `AGENTS.md` into the system prompt |
 | `TodoStore.java` | Per-session task checklists |
 | `InterruptService.java` | Per-session interrupt and steering |
@@ -447,17 +448,38 @@ folder/flat layout. **Local skills override remote ones of the same name**, and 
 over later ones (`SkillLibrary.merge`). The configured list is the *allowlist* -- only those URLs are
 ever fetched, and the model cannot inject a URL (the `refresh_skills` tool takes no arguments).
 
+Pin a repo to a branch or tag with `url#ref` (e.g. `https://github.com/org/skills.git#v1.2`) so you
+load a known revision rather than whatever `HEAD` happens to be.
+
+**Skill registry (provenance).** A registry is a manifest of *available* skills with provenance, so a
+skill can be searched for and verified before it is installed. Point `skills.registry` at a manifest
+JSON (path under the workspace root); each entry carries a content hash:
+
+```json
+[
+  {"name":"commit-message","description":"Write a conventional commit from a diff.",
+   "source":"commit-message/SKILL.md","version":"1.0","sha256":"<sha256 of the SKILL.md>"}
+]
+```
+
+The agent calls **`search_skills`** (`{query}`) to rank the manifest (same lexical scorer; shows
+`[installed]`), then **`install_skill`** (`{name}`) which reads the entry's `source` (a path *relative
+to the manifest's directory*, so a cloned remote repo can ship its own `registry.json`), **verifies the
+SHA-256**, and -- only on a match -- writes the skill locally with its provenance (`source`, `version`,
+`sha256`) recorded in the front-matter. A hash mismatch refuses the install; an entry with no `sha256`
+installs with a warning.
+
 Config: `skills.enabled` (default true), `skills.dir` (default `skills`), `skills.auto-load` (default
 false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skills.cache-dir` (default
-`skill-cache`), `skills.repo-timeout-seconds` (default 60), `skills.repos-on-start` (default true).
+`skill-cache`), `skills.repo-timeout-seconds` (default 60), `skills.repos-on-start` (default true),
+`skills.registry` (default empty).
 
 > Honest scope: skills are READ-ONLY instructions, not executable bundles -- if a skill suggests
 > running a script, that still goes through `run_command` and the sandbox command policy (no auto-exec),
-> and this holds equally for remote skills. Discovery is lexical (keyword overlap with name +
-> description), not semantic; `save_skill` sanitizes the name to letters/digits/dashes to prevent path
-> traversal. Remote repos are fetched only from the configured allowlist over a bounded `git` clone/pull
-> with no commit pinning or signature verification yet -- treat sources as trusted (see the roadmap for
-> a skill registry with provenance).
+> and this holds equally for remote and installed skills. Discovery is lexical (keyword overlap), not
+> semantic; names are sanitized to prevent path traversal and registry sources may not escape the
+> manifest directory. `install_skill` verifies a SHA-256 (integrity) but there is no cryptographic
+> signing / trust root yet, and repo pinning supports branches/tags (shallow); treat sources as trusted.
 
 ## Session sharing and ownership
 

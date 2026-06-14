@@ -1393,3 +1393,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   failures in red) and the coding-report block beneath it. The list updates when a run finishes and when
   you switch sessions; the *refresh* link reloads it. A session shared with you shows its history too;
   the card is empty (`(none)`) for sessions with no completed plans.
+
+---
+
+# Skill registry (provenance) + repo pinning
+
+## 149. Manifest hashing / verify / search / spec parsing (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SkillManifestTest` passes -- `sha256` matches a known vector; `matches` accepts correct
+  content, rejects tampered content, and treats an entry with no `sha256` as unpinned (accepted);
+  `search` ranks by lexical overlap and drops non-matches; `parse` reads both a top-level array and a
+  `{"skills":[...]}` object, skipping entries without a name. `SkillLibraryTest.splitRepoSpec` separates
+  `url#ref` for pinning.
+
+## 150. Search + verified install (manual)
+
+- **Setup:** a registry dir with `registry.json` (entries carrying real `sha256` of each `SKILL.md`)
+  and the skill files; set `skills.registry=<path>/registry.json`.
+- **Observe:** `search_skills {"query":"commit"}` lists matching entries (with `[installed]` once
+  present); `install_skill {"name":"commit-message"}` reads the source, verifies the hash, and writes
+  `skills/commit-message/SKILL.md` with `source`/`version`/`sha256` front-matter; it then loads via
+  `load_skill`. Corrupt the source so the hash differs -> install is refused with a mismatch message.
+  An entry with no `sha256` installs with an "unpinned" warning. A `url#ref` repo in `skills.repos`
+  checks out that branch/tag on clone/refresh.

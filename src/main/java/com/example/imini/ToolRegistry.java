@@ -26,6 +26,8 @@ public class ToolRegistry {
         register(skills.loadSkillTool());          // load_skill (progressive disclosure)
         register(skills.saveSkillTool());          // save_skill (capture knowledge)
         register(skills.refreshSkillsTool());      // refresh_skills (pull remote repos)
+        register(skills.searchSkillsTool());       // search_skills (registry, with provenance)
+        register(skills.installSkillTool());       // install_skill (hash-verified)
         for (Tool t : mcp.tools()) register(t);   // external MCP-server tools (off unless mcp.json exists)
     }
 
