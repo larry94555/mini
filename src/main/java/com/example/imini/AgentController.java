@@ -404,6 +404,77 @@ public class AgentController {
                 "readers", new java.util.ArrayList<>(sessions.readers(sessionId)));
     }
 
+    // ---- session export / import ------------------------------------------
+
+    /** Export a session as a portable bundle (conversation + plan history + todos). */
+    @GetMapping("/session/export")
+    public Map<String, Object> exportSession(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireRead(sessionId);
+        List<Map<String, Object>> plans = new java.util.ArrayList<>();
+        for (Map<String, Object> sum : history.list(sessionId)) {
+            Object seq = sum.get("seq");
+            if (seq instanceof Number n) {
+                Map<String, Object> full = history.get(sessionId, n.intValue());
+                if (full != null) plans.add(full);
+            }
+        }
+        return SessionBundle.build(sessionId, sessions.owner(sessionId), System.currentTimeMillis(),
+                sessions.get(sessionId), plans, todos.get(sessionId));
+    }
+
+    /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
+    @PostMapping("/session/import")
+    public Map<String, Object> importSession(@RequestBody Map<String, Object> bundle) {
+        List<String> problems = SessionBundle.validate(bundle);
+        if (!problems.isEmpty()) return Map.of("error", "invalid bundle", "problems", problems);
+
+        String newId = "imp-" + UUID.randomUUID().toString().substring(0, 8);
+        sessions.claim(newId, currentUser());
+
+        List<Map<String, Object>> messages = SessionBundle.messages(bundle);
+        sessions.save(newId, messages);
+        todos.set(newId, SessionBundle.todos(bundle));
+
+        // restore plan history oldest-first so seq numbering is preserved
+        List<Map<String, Object>> plans = new java.util.ArrayList<>(SessionBundle.plans(bundle));
+        java.util.Collections.reverse(plans);
+        int restored = 0;
+        for (Map<String, Object> plan : plans) {
+            try {
+                String goal = String.valueOf(plan.getOrDefault("goal", ""));
+                String report = String.valueOf(plan.getOrDefault("report", ""));
+                Object stepsObj = plan.get("steps");
+                List<TodoStore.Item> items = new java.util.ArrayList<>();
+                Map<Integer, List<String>> transcript = new java.util.LinkedHashMap<>();
+                if (stepsObj instanceof List<?> steps) {
+                    int i = 0;
+                    for (Object so : steps) {
+                        if (so instanceof Map<?, ?> sm) {
+                            Object txt = sm.get("text"), stt = sm.get("status");
+                            items.add(new TodoStore.Item(txt == null ? "" : String.valueOf(txt),
+                                    stt == null ? "pending" : String.valueOf(stt)));
+                            Object tools = sm.get("tools");
+                            if (tools instanceof List<?> tl) {
+                                List<String> ts = new java.util.ArrayList<>();
+                                for (Object t : tl) ts.add(String.valueOf(t));
+                                transcript.put(i, ts);
+                            }
+                        }
+                        i++;
+                    }
+                }
+                if (!items.isEmpty()) { history.archive(newId, goal, items, transcript, report); restored++; }
+            } catch (Exception ignore) {
+                // skip a malformed plan; import the rest
+            }
+        }
+        audit.record(currentUser(), "import", "session:" + newId,
+                "messages=" + messages.size() + " plans=" + restored);
+        return Map.of("sessionId", newId, "messages", messages.size(), "plans", restored,
+                "todos", SessionBundle.todos(bundle).size());
+    }
+
     // ---- retrieval / memory ------------------------------------------------
 
     @PostMapping("/index")

@@ -206,6 +206,13 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Session export / import: a whole session (conversation + plan history with steps/tools/reports +
+  todos) exports as a portable `imini-session/1` JSON bundle (`GET /session/export`) and imports into a
+  new owned session (`POST /session/import`), with a *Session bundle* card in the UI (`SessionBundle`
+  pure build/validate, unit-tested).
+- Per-step deltas in the web UI: each step's `[edits this step]` delta now also shows as a blue
+  `[edits]` line under the step in the live plan panel and the plan-history viewer (`RunRecorder.note`
+  feeds the per-step transcript).
 - Per-step diff deltas (snapshot/restore): each plan step's `[edits this step]` note now reports the
   step's EXACT delta by snapshotting the working tree before/after into a throwaway git index and
   diffing the snapshots (attributes re-edits correctly; per-step not cumulative). Falls back to the
@@ -248,9 +255,9 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
 >    verification; and per-skill enable/disable.
-> 2. Export / import a session bundle (conversation + plans + transcripts + reports + history) for
->    archival or handing to another instance, building on the now-shareable record.
-> 3. Show the per-step `[edits this step]` deltas in the web UI plan/history view (currently visible
->    only in the run log and the synthesis context).
+> 2. Import options: merge a bundle into an existing session, or import to a chosen session id, rather
+>    than always creating a new one; and a bundle version/migration path.
+> 3. Bundle integrity: an optional content hash (and later signature) on the export so an import can be
+>    verified -- reusing the skill-registry hashing.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

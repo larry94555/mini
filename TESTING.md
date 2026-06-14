@@ -1463,3 +1463,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   is unaffected by the snapshots (they use a throwaway index). Set `agent.plan.step-diff.snapshot=false`
   to see the lighter recorder-based fallback (`diff so far:`); outside a git repo it falls back
   automatically.
+
+---
+
+# Session export/import + per-step deltas in the UI
+
+## 155. Bundle build / validate / extract (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionBundleTest` passes -- `build` produces an `imini-session/1` map with all sections;
+  `validate` flags an empty bundle and a missing version and accepts a built one; todos round-trip
+  through `todoPayload`/`todos`; the message/plan/todo extractors tolerate missing sections.
+
+## 156. Export then import a session (manual)
+
+- **Run (plan mode):** complete a goal or two in a session, then
+  `GET /session/export?sessionId=<id>` (or the UI *Export* button) to download the bundle; `POST
+  /session/import` it (or the UI *Import* button).
+- **Observe:** a new `imp-...` session is created and owned by you; its conversation, todos, and plan
+  history (with each plan's steps, per-step tools, and coding report) match the source; the new id and
+  counts are returned. The UI switches to the new session. An invalid/missing-version bundle returns an
+  `error` with `problems` and imports nothing.
+
+## 157. Per-step edit deltas shown in the UI (manual, git workspace)
+
+- **Run (plan mode):** a multi-step goal that edits files (`agent.plan.step-diff=true`).
+- **Observe:** under each step in the live plan panel (and later in the plan-history viewer) a blue
+  `[edits] files changed this step: ...` line appears beside that step's tool calls. (Requires
+  `agent.audit.tool-calls=true`, which also drives the per-step transcript.)

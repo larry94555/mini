@@ -57,7 +57,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, and a provenance registry (`search_skills`/`install_skill`, hash-verified) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan, plan-history + coding-report viewer, session sharing), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, export/import), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -87,6 +87,7 @@ No cloud API key is required.
 | `Sandbox.java` | Command screening, read confinement, optional container execution wrapper |
 | `CheckpointStore.java` | Snapshot-before-edit and rewind |
 | `SessionStore.java` | Session history persistence |
+| `SessionBundle.java` | Pure build/validate/extract of a portable session export bundle |
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
 | `RetrievalService.java` | Workspace indexing and memory search |
@@ -171,6 +172,8 @@ http://localhost:8081
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
 | `POST /transfer` | `{sessionId,to}` transfer ownership; prior owner keeps read (owner/admin) |
 | `GET /plans?sessionId=` | List the session's archived plan history (newest first) |
+| `GET /session/export?sessionId=` | Download a portable bundle (conversation + plan history + todos) |
+| `POST /session/import` | Import a bundle JSON into a NEW session owned by you; returns its id |
 | `GET /plan?sessionId=` | Read the current saved plan: goal + steps + statuses + per-step tool transcript |
 | `GET /plan?sessionId=&n=` | Read archived plan `n` from history: goal + steps + tools + coding report |
 | `GET /todos?sessionId=` | Read session todos |
@@ -265,7 +268,8 @@ This attributes a file *re-edited* in a later step to that step, and reports a p
 step:`) rather than cumulative stat. Set `agent.plan.step-diff.snapshot=false` to fall back to the
 lighter "newly-touched paths + cumulative `diff so far:`" derived from the tool recorder (no snapshot);
 it also degrades to this automatically outside a git workspace. Turn the whole note off with
-`agent.plan.step-diff=false`.
+`agent.plan.step-diff=false`. In the **web UI** the note appears as a blue `[edits]` line under the
+step in both the live plan panel and the plan-history viewer (alongside that step's tool calls).
 
 **Plan history.** Each time a plan run finishes, a snapshot is archived per session -- the goal, the
 final checklist (steps + statuses), the per-step tool transcript, and the coding report. So a session
@@ -487,6 +491,26 @@ false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skill
 > semantic; names are sanitized to prevent path traversal and registry sources may not escape the
 > manifest directory. `install_skill` verifies a SHA-256 (integrity) but there is no cryptographic
 > signing / trust root yet, and repo pinning supports branches/tags (shallow); treat sources as trusted.
+
+## Session export / import
+
+A whole session -- its conversation, plan history (steps + per-step tools + coding reports), and todos --
+can be exported as one portable JSON bundle and imported into a fresh session, on the same instance or
+another one:
+
+```
+curl "localhost:8080/session/export?sessionId=proj" > proj.json   # download a bundle
+curl -XPOST localhost:8080/session/import --data @proj.json        # -> {sessionId, messages, plans, todos}
+```
+
+`GET /session/export` returns a `imini-session/1` bundle (ownership/shared-read scoped). `POST
+/session/import` validates it, creates a **new** session owned by the caller, restores the conversation
+and todos, and re-archives each plan into the new session's history (oldest-first, preserving order);
+it returns the new session id and counts. In the **web UI**, the *Session bundle* card has *Export*
+(downloads `<sessionId>.json`) and *Import* (pick a bundle file; the UI switches to the new session).
+
+> Honest scope: import always creates a new session (it never overwrites an existing one); the bundle is
+> plain JSON with no signing or encryption; very large sessions produce large bundles (no streaming).
 
 ## Session sharing and ownership
 
