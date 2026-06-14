@@ -55,6 +55,7 @@ No cloud API key is required.
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
+| Skills | reusable `SKILL.md` instruction bundles: auto-indexed, `load_skill` on demand, `save_skill` to capture knowledge |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI, remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
@@ -89,6 +90,8 @@ No cloud API key is required.
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
 | `RetrievalService.java` | Workspace indexing and memory search |
+| `SkillLibrary.java` | Pure parse/index/select/format for skills (reuses the lexical scorer) |
+| `SkillService.java` | Loads skills from a directory; injects the index; `load_skill`/`save_skill` tools |
 | `ProjectContext.java` | Loads `IMINI.md`, `CLAUDE.md`, or `AGENTS.md` into the system prompt |
 | `TodoStore.java` | Per-session task checklists |
 | `InterruptService.java` | Per-session interrupt and steering |
@@ -378,6 +381,57 @@ Useful tools:
 `imini` uses SQLite for durable sessions, checkpoints, and retrieval index data. If SQLite cannot be opened, the app falls back to in-memory behavior so the learning flow still works.
 
 Retrieval is lexical by default and works well for code identifiers. Optional embedding-based retrieval can be enabled if you run a model/server that supports embeddings.
+
+## Skills
+
+Skills are reusable instruction bundles -- a `SKILL.md` describing *when* to use it and *how* to do a
+recurring task -- that the agent can pull into context on demand. They generalize the `commands/`
+slash-command templates, and discovery reuses the same lexical scorer as retrieval.
+
+**Where they live.** Drop skills under `skills/` in the workspace root (configurable via `skills.dir`):
+
+```
+skills/
+  commit-message/SKILL.md     # folder form (name defaults to the folder)
+  readme.md                   # flat form (name defaults to the file stem)
+```
+
+**Format.** Optional `---` front-matter for the name and a one-line description, then the body:
+
+```markdown
+---
+name: commit-message
+description: Write a conventional-commits message from a diff or change summary.
+---
+When asked to write a commit message:
+1. Use `<type>(<scope>): <subject>` ...
+```
+
+**How the agent uses them.** A short index of every skill's name + description is injected into the
+system prompt automatically:
+
+```
+--- Available skills (call load_skill with the name to load full instructions) ---
+- commit-message: Write a conventional-commits message from a diff or change summary.
+```
+
+The model then calls the **`load_skill`** tool (`{"name":"commit-message"}`) to pull the full body when
+a task matches -- progressive disclosure, so a large skill library costs only its index until used. The
+**`save_skill`** tool (`{name, description, body}`) captures new knowledge as `skills/<name>/SKILL.md`
+and reloads, so the agent (or you) can grow the library during a session.
+
+**Auto-load (optional).** Weaker local models sometimes won't call `load_skill` on their own. Set
+`skills.auto-load=true` to also inject the single best-matching skill's body for `/ask` queries (picked
+by lexical overlap with names + descriptions). Off by default. `skills.max-body` caps an injected body.
+
+Config: `skills.enabled` (default true), `skills.dir` (default `skills`), `skills.auto-load` (default
+false), `skills.max-body` (default 4000).
+
+> Honest scope: skills are READ-ONLY instructions, not executable bundles -- if a skill suggests
+> running a script, that still goes through `run_command` and the sandbox command policy (no auto-exec).
+> Discovery is lexical (keyword overlap with name + description), not semantic; `save_skill` sanitizes
+> the name to letters/digits/dashes to prevent path traversal. Remote skill repositories are not yet
+> supported (see the roadmap).
 
 ## Safety notes
 

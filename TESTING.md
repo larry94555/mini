@@ -1302,3 +1302,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the appended `Coding report:` block ends with a `- [!] Report gaps: …` line, the log
   shows `coding report: N gap(s) - …`, and the flag is preserved in `GET /plan?n=<seq>` history. Set
   `agent.coding-report.enforce=false` to skip the check (report still renders).
+
+---
+
+# Skills
+
+## 140. Skill parse / index / select / format (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SkillLibraryTest` passes -- `parse` reads `---` front-matter (name/description) and the
+  body, and falls back to the provided name when there is no front-matter; `index` lists names +
+  descriptions (with `(no description)` when blank); `select` ranks by lexical overlap and returns empty
+  on no match; `format` wraps the body and caps it.
+
+## 141. load_skill / index injection (manual)
+
+- **Setup:** a `skills/commit-message/SKILL.md` (shipped as an example), `skills.enabled=true`.
+- **Run:** ask the agent to write a commit message; observe the system prompt carries the
+  `--- Available skills ... ---` index, and the model calls `load_skill` with `{"name":"commit-message"}`
+  to pull the instructions. With `skills.auto-load=true`, an `/ask` whose wording matches a skill gets
+  that skill's body injected without a tool call.
+
+## 142. save_skill round-trip (manual)
+
+- **Run:** call `save_skill` with `{name, description, body}` (e.g. via a task that asks the agent to
+  remember a procedure).
+- **Observe:** a `skills/<name>/SKILL.md` is written with front-matter, the library reloads, and the new
+  skill appears in the index and is loadable via `load_skill`. Names are sanitized to
+  letters/digits/dashes (no path traversal).
