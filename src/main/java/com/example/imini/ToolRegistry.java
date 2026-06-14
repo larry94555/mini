@@ -25,6 +25,7 @@ public class ToolRegistry {
         register(retrieval.indexTool());            // index_workspace
         register(skills.loadSkillTool());          // load_skill (progressive disclosure)
         register(skills.saveSkillTool());          // save_skill (capture knowledge)
+        register(skills.refreshSkillsTool());      // refresh_skills (pull remote repos)
         for (Tool t : mcp.tools()) register(t);   // external MCP-server tools (off unless mcp.json exists)
     }
 

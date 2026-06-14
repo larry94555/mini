@@ -76,4 +76,33 @@ public final class SkillLibrary {
         if (maxBody > 0 && body.length() > maxBody) body = body.substring(0, maxBody) + "\n...(truncated)";
         return "--- Skill: " + s.name() + " ---\n" + body;
     }
+
+    /**
+     * Merge skill sources in PRECEDENCE order (highest precedence first, e.g. local before remote),
+     * de-duplicating by name (case-insensitive) so a local skill overrides a remote one of the same
+     * name. Order within the result follows first-seen. Pure.
+     */
+    public static List<Skill> merge(List<List<Skill>> sourcesHighestFirst) {
+        java.util.Map<String, Skill> byName = new java.util.LinkedHashMap<>();
+        for (List<Skill> src : sourcesHighestFirst) {
+            if (src == null) continue;
+            for (Skill s : src) {
+                byName.putIfAbsent(s.name().toLowerCase(Locale.ROOT), s); // first (higher precedence) wins
+            }
+        }
+        return new ArrayList<>(byName.values());
+    }
+
+    /** Derive a safe cache-directory name from a git URL (e.g. .../foo/bar.git -&gt; "bar"). Pure. */
+    public static String repoSlug(String url) {
+        if (url == null || url.isBlank()) return "repo";
+        String u = url.trim();
+        if (u.endsWith(".git")) u = u.substring(0, u.length() - 4);
+        while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
+        int cut = Math.max(u.lastIndexOf('/'), u.lastIndexOf(':'));
+        String last = cut >= 0 ? u.substring(cut + 1) : u;
+        String slug = last.replaceAll("[^A-Za-z0-9_-]", "-");
+        if (slug.isBlank()) slug = "repo";
+        return slug.length() > 64 ? slug.substring(0, 64) : slug;
+    }
 }

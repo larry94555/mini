@@ -29,6 +29,10 @@ public class SkillService {
     @Value("${skills.dir:skills}") private String skillsDir;
     @Value("${skills.auto-load:false}") private boolean autoLoad;
     @Value("${skills.max-body:4000}") private int maxBody;
+    @Value("${skills.repos:}") private String reposConfig;
+    @Value("${skills.cache-dir:skill-cache}") private String cacheDirName;
+    @Value("${skills.repo-timeout-seconds:60}") private int repoTimeoutSeconds;
+    @Value("${skills.repos-on-start:true}") private boolean reposOnStart;
 
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
 
@@ -38,31 +42,62 @@ public class SkillService {
 
     @PostConstruct
     public void init() {
-        reload();
+        if (reposOnStart && !repoList().isEmpty()) {
+            refresh(); // clone/pull configured repos, then reload
+        } else {
+            reload();
+        }
     }
 
     private Path dir() {
         return sandbox.root().resolve(skillsDir);
     }
 
+    private Path cacheDir() {
+        return sandbox.root().resolve(cacheDirName);
+    }
+
+    /** Allowlisted remote skill repos (the config IS the allowlist; nothing else is ever cloned). */
+    private List<String> repoList() {
+        List<String> out = new ArrayList<>();
+        if (reposConfig == null) return out;
+        for (String u : reposConfig.split(",")) {
+            String t = u.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
+
     public synchronized void reload() {
         skills.clear();
         if (!enabled) return;
-        Path base = dir();
-        if (!Files.isDirectory(base)) return;
+        List<List<SkillLibrary.Skill>> sources = new ArrayList<>();
+        sources.add(scanDir(dir())); // local skills take precedence over remote
+        for (String url : repoList()) {
+            Path repo = cacheDir().resolve(SkillLibrary.repoSlug(url));
+            if (!Files.isDirectory(repo)) continue;
+            Path skillsSub = repo.resolve("skills");
+            sources.add(scanDir(Files.isDirectory(skillsSub) ? skillsSub : repo));
+        }
+        skills.addAll(SkillLibrary.merge(sources)); // local-overrides-remote, earlier-repo-wins
+        log.info("[skills] loaded " + skills.size() + " skill(s) (local + " + repoList().size() + " repo(s))");
+    }
+
+    /** Scan one directory for skills: {@code <name>/SKILL.md} folders or flat {@code <name>.md} files. */
+    private List<SkillLibrary.Skill> scanDir(Path base) {
+        List<SkillLibrary.Skill> out = new ArrayList<>();
+        if (base == null || !Files.isDirectory(base)) return out;
         try (Stream<Path> top = Files.list(base)) {
-            List<Path> entries = top.sorted().toList();
-            for (Path p : entries) {
+            for (Path p : top.sorted().toList()) {
                 try {
                     if (Files.isDirectory(p)) {
                         Path md = p.resolve("SKILL.md");
                         if (Files.exists(md)) {
-                            skills.add(SkillLibrary.parse(Files.readString(md), p.getFileName().toString()));
+                            out.add(SkillLibrary.parse(Files.readString(md), p.getFileName().toString()));
                         }
                     } else if (p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md")) {
                         String fn = p.getFileName().toString();
-                        String stem = fn.substring(0, fn.length() - 3);
-                        skills.add(SkillLibrary.parse(Files.readString(p), stem));
+                        out.add(SkillLibrary.parse(Files.readString(p), fn.substring(0, fn.length() - 3)));
                     }
                 } catch (Exception e) {
                     log.warn("[skills] could not read " + p + ": " + e.getMessage());
@@ -71,7 +106,57 @@ public class SkillService {
         } catch (Exception e) {
             log.warn("[skills] could not list " + base + ": " + e.getMessage());
         }
-        log.info("[skills] loaded " + skills.size() + " skill(s) from " + base);
+        return out;
+    }
+
+    /** Clone/pull every configured (allowlisted) remote skill repo into the cache, then reload. */
+    public synchronized String refresh() {
+        if (!enabled) return "skills are disabled";
+        List<String> repos = repoList();
+        if (repos.isEmpty()) {
+            reload();
+            return "no remote skill repos configured; " + skills.size() + " local skill(s)";
+        }
+        int ok = 0;
+        for (String url : repos) {
+            try {
+                pull(url);
+                ok++;
+            } catch (Exception e) {
+                log.warn("[skills] could not fetch " + url + ": " + e.getMessage());
+            }
+        }
+        reload();
+        return "refreshed " + ok + "/" + repos.size() + " repo(s); " + skills.size() + " skill(s) available";
+    }
+
+    /** Read-only clone (or fast-forward pull) of an allowlisted repo into the cache. No code is run. */
+    private void pull(String url) throws Exception {
+        Path repo = cacheDir().resolve(SkillLibrary.repoSlug(url));
+        Files.createDirectories(cacheDir());
+        List<String> cmd = new ArrayList<>();
+        if (Files.isDirectory(repo.resolve(".git"))) {
+            cmd.add("git"); cmd.add("-C"); cmd.add(repo.toString());
+            cmd.add("pull"); cmd.add("--ff-only");
+        } else {
+            cmd.add("git"); cmd.add("clone"); cmd.add("--depth"); cmd.add("1");
+            cmd.add(url); cmd.add(repo.toString());
+        }
+        gitRun(cmd);
+    }
+
+    private void gitRun(List<String> cmd) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.directory(sandbox.root().toFile());
+        pb.redirectErrorStream(true);
+        Process proc = pb.start();
+        proc.getInputStream().readAllBytes(); // drain so the process can finish
+        boolean done = proc.waitFor(repoTimeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+        if (!done) {
+            proc.destroyForcibly();
+            throw new RuntimeException("git timed out after " + repoTimeoutSeconds + "s");
+        }
+        if (proc.exitValue() != 0) throw new RuntimeException("git exit " + proc.exitValue());
     }
 
     public synchronized List<SkillLibrary.Skill> all() {
@@ -131,6 +216,13 @@ public class SkillService {
             if (!enabled) return "skills are disabled";
             return save(str(args.get("name")), str(args.get("description")), str(args.get("body")));
         });
+    }
+
+    public Tool refreshSkillsTool() {
+        return new Tool("refresh_skills",
+                "Re-fetch the configured (allowlisted) remote skill repositories and reload all skills. "
+                        + "Read-only: it clones/pulls instruction files only and runs no skill code.",
+                schema(new LinkedHashMap<>(), List.of()), false, args -> refresh());
     }
 
     synchronized String save(String rawName, String description, String body) {

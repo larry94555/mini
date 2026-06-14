@@ -56,4 +56,29 @@ class SkillLibraryTest {
         assertTrue(capped.contains("01234"));
         assertTrue(capped.contains("(truncated)"));
     }
+
+    @Test
+    void mergeLetsLocalOverrideRemoteAndEarlierRepoWin() {
+        List<Skill> local = List.of(new Skill("commit-message", "local", ""), new Skill("readme", "r", ""));
+        List<Skill> repoA = List.of(new Skill("commit-message", "remote", ""), new Skill("deploy", "A", ""));
+        List<Skill> repoB = List.of(new Skill("deploy", "B", ""), new Skill("lint", "L", ""));
+        List<Skill> merged = SkillLibrary.merge(List.of(local, repoA, repoB));
+        assertEquals(List.of("commit-message", "readme", "deploy", "lint"),
+                merged.stream().map(Skill::name).toList());
+        assertEquals("local", byName(merged, "commit-message").description());  // local wins
+        assertEquals("A", byName(merged, "deploy").description());              // earlier repo wins
+    }
+
+    @Test
+    void repoSlugDerivesSafeNamesFromUrls() {
+        assertEquals("bar", SkillLibrary.repoSlug("https://github.com/foo/bar.git"));
+        assertEquals("baz", SkillLibrary.repoSlug("git@github.com:foo/baz.git"));
+        assertEquals("skills-repo", SkillLibrary.repoSlug("https://example.com/team/skills-repo/"));
+        assertEquals("repo", SkillLibrary.repoSlug(""));
+        assertEquals("repo", SkillLibrary.repoSlug(null));
+    }
+
+    private static Skill byName(List<Skill> skills, String name) {
+        return skills.stream().filter(s -> s.name().equals(name)).findFirst().orElseThrow();
+    }
 }
