@@ -43,6 +43,8 @@ public class Database {
             "ALTER TABLE checkpoints ADD COLUMN group_id TEXT",
             "ALTER TABLE mem_chunks ADD COLUMN mtime INTEGER",
             "CREATE TABLE session_owners (session_id TEXT PRIMARY KEY, owner TEXT NOT NULL)",
+            "CREATE TABLE session_shares (session_id TEXT NOT NULL, grantee TEXT NOT NULL, "
+                    + "created_at INTEGER NOT NULL, PRIMARY KEY(session_id, grantee))",
             "CREATE TABLE audit (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, user TEXT, action TEXT, "
                     + "target TEXT, outcome TEXT)",
             "CREATE TABLE plans (session_id TEXT PRIMARY KEY, goal TEXT, steps TEXT NOT NULL, "

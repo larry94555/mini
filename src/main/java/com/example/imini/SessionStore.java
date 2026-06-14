@@ -23,6 +23,7 @@ public class SessionStore {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, List<Map<String, Object>>> cache = new ConcurrentHashMap<>();
     private final Map<String, String> owners = new ConcurrentHashMap<>(); // session_id -> owner
+    private final Map<String, java.util.Set<String>> shares = new ConcurrentHashMap<>(); // session_id -> readers
 
     public SessionStore(Database db) {
         this.db = db;
@@ -86,6 +87,66 @@ public class SessionStore {
             if (!r.isEmpty()) { owners.put(id, r.get(0)); return r.get(0); }
         }
         return null;
+    }
+
+    /** Users a session has been explicitly shared with (read access), merged from cache and DB. */
+    public synchronized java.util.Set<String> readers(String id) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>(shares.getOrDefault(id, java.util.Set.of()));
+        if (db.available()) {
+            out.addAll(db.query("SELECT grantee FROM session_shares WHERE session_id=?",
+                    rs -> rs.getString(1), id));
+        }
+        return out;
+    }
+
+    /** Grant read access to a session. */
+    public synchronized void share(String id, String grantee) {
+        if (id == null || id.isBlank() || grantee == null || grantee.isBlank()) return;
+        shares.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(grantee);
+        if (db.available()) {
+            try {
+                db.update("INSERT INTO session_shares(session_id, grantee, created_at) VALUES(?,?,?) "
+                        + "ON CONFLICT(session_id, grantee) DO NOTHING", id, grantee, System.currentTimeMillis());
+            } catch (Exception e) {
+                log.warn("[session] could not share '" + id + "': " + e.getMessage());
+            }
+        }
+    }
+
+    /** Revoke a previously granted read access. */
+    public synchronized void unshare(String id, String grantee) {
+        java.util.Set<String> set = shares.get(id);
+        if (set != null) set.remove(grantee);
+        if (db.available()) {
+            try {
+                db.update("DELETE FROM session_shares WHERE session_id=? AND grantee=?", id, grantee);
+            } catch (Exception e) {
+                log.warn("[session] could not unshare '" + id + "': " + e.getMessage());
+            }
+        }
+    }
+
+    /** Set (overwrite) the owner of a session. Unlike {@link #claim}, this replaces an existing owner. */
+    public synchronized void setOwner(String id, String user) {
+        if (id == null || id.isBlank() || user == null || user.isBlank()) return;
+        owners.put(id, user);
+        if (db.available()) {
+            try {
+                db.update("INSERT INTO session_owners(session_id, owner) VALUES(?,?) "
+                        + "ON CONFLICT(session_id) DO UPDATE SET owner=excluded.owner", id, user);
+            } catch (Exception e) {
+                log.warn("[session] could not set owner for '" + id + "': " + e.getMessage());
+            }
+        }
+    }
+
+    /** Transfer ownership to {@code newOwner}; the previous owner keeps read access. Returns the old owner. */
+    public synchronized String transfer(String id, String newOwner) {
+        String previous = owner(id);
+        setOwner(id, newOwner);
+        if (previous != null && !previous.equals(newOwner)) share(id, previous);
+        unshare(id, newOwner); // the new owner need not also appear as a reader
+        return previous;
     }
 
     public synchronized List<String> list() {

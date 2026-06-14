@@ -14,4 +14,14 @@ public final class Ownership {
         if (owner == null) return true;
         return caller != null && owner.equals(caller.user());
     }
+
+    /**
+     * READ access: anyone who {@link #canAccess} (admin/owner/unowned) plus users the session has been
+     * explicitly shared with. Used for read-only endpoints; management/mutation still require
+     * {@link #canAccess}.
+     */
+    public static boolean canRead(Principal caller, String owner, java.util.Set<String> readers) {
+        if (canAccess(caller, owner)) return true;
+        return caller != null && readers != null && readers.contains(caller.user());
+    }
 }

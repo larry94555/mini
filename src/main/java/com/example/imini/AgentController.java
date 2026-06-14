@@ -232,14 +232,14 @@ public class AgentController {
 
     @GetMapping("/plans")
     public Map<String, Object> plans(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
-        requireAccess(sessionId);
+        requireRead(sessionId);
         return Map.of("sessionId", sessionId, "plans", history.list(sessionId));
     }
 
     @GetMapping("/plan")
     public Map<String, Object> plan(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
                                     @RequestParam(name = "n", required = false) Integer n) {
-        requireAccess(sessionId);
+        requireRead(sessionId);
         if (n != null) {
             Map<String, Object> archived = history.get(sessionId, n);
             return archived == null
@@ -262,7 +262,7 @@ public class AgentController {
 
     @GetMapping("/todos")
     public Map<String, Object> todos(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
-        requireAccess(sessionId);
+        requireRead(sessionId);
         return Map.of("sessionId", sessionId, "todos", todos.get(sessionId), "rendered", todos.render(sessionId));
     }
 
@@ -272,14 +272,14 @@ public class AgentController {
     public List<String> sessions() {
         Principal caller = RequestContext.current();
         return sessions.list().stream()
-                .filter(id -> Ownership.canAccess(caller, sessions.owner(id)))
+                .filter(id -> Ownership.canRead(caller, sessions.owner(id), sessions.readers(id)))
                 .toList();
     }
 
     /** A single session's stored messages (for the UI to render prior history on switch). */
     @GetMapping("/session")
     public List<Map<String, Object>> session(@RequestParam(name = "id") String id) {
-        requireAccess(id);
+        requireRead(id);
         List<Map<String, Object>> h = sessions.get(id);
         return h == null ? List.of() : h;
     }
@@ -320,7 +320,8 @@ public class AgentController {
             @RequestParam(name = "sessionId", defaultValue = "") String sessionId) {
         Principal caller = RequestContext.current();
         return approvals.list(sessionId.isBlank() ? null : sessionId).stream()
-                .filter(a -> Ownership.canAccess(caller, sessions.owner(String.valueOf(a.get("sessionId")))))
+                .filter(a -> { String sid = String.valueOf(a.get("sessionId"));
+                        return Ownership.canRead(caller, sessions.owner(sid), sessions.readers(sid)); })
                 .toList();
     }
 
@@ -348,8 +349,59 @@ public class AgentController {
 
     @GetMapping("/checkpoints")
     public List<String> checkpoints(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
-        requireAccess(sessionId);
+        requireRead(sessionId);
         return checkpoints.list(sessionId);
+    }
+
+    // ---- sharing / ownership ----------------------------------------------
+
+    /** Who can see a session: its owner and the users it is shared with. */
+    @GetMapping("/shares")
+    public Map<String, Object> shares(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireRead(sessionId);
+        String owner = sessions.owner(sessionId);
+        return Map.of("sessionId", sessionId, "owner", owner == null ? "" : owner,
+                "readers", new java.util.ArrayList<>(sessions.readers(sessionId)));
+    }
+
+    /** Grant another user read access to a session (owner/admin only). */
+    @PostMapping("/share")
+    public Map<String, Object> share(@RequestBody Map<String, String> body) {
+        String sessionId = body.getOrDefault("sessionId", "");
+        String user = body.getOrDefault("user", "");
+        if (sessionId.isBlank() || user.isBlank()) return Map.of("error", "provide sessionId and user");
+        requireAccess(sessionId);
+        sessions.claim(sessionId, currentUser());
+        sessions.share(sessionId, user);
+        audit.record(currentUser(), "share", "session:" + sessionId, "granted read to " + user);
+        return Map.of("sessionId", sessionId, "readers", new java.util.ArrayList<>(sessions.readers(sessionId)));
+    }
+
+    /** Revoke a user's read access (owner/admin only). */
+    @PostMapping("/unshare")
+    public Map<String, Object> unshare(@RequestBody Map<String, String> body) {
+        String sessionId = body.getOrDefault("sessionId", "");
+        String user = body.getOrDefault("user", "");
+        if (sessionId.isBlank() || user.isBlank()) return Map.of("error", "provide sessionId and user");
+        requireAccess(sessionId);
+        sessions.unshare(sessionId, user);
+        audit.record(currentUser(), "unshare", "session:" + sessionId, "revoked read from " + user);
+        return Map.of("sessionId", sessionId, "readers", new java.util.ArrayList<>(sessions.readers(sessionId)));
+    }
+
+    /** Transfer ownership of a session to another user; the previous owner keeps read access. */
+    @PostMapping("/transfer")
+    public Map<String, Object> transfer(@RequestBody Map<String, String> body) {
+        String sessionId = body.getOrDefault("sessionId", "");
+        String to = body.getOrDefault("to", "");
+        if (sessionId.isBlank() || to.isBlank()) return Map.of("error", "provide sessionId and to");
+        requireAccess(sessionId);
+        sessions.claim(sessionId, currentUser());
+        String previous = sessions.transfer(sessionId, to);
+        audit.record(currentUser(), "transfer", "session:" + sessionId,
+                "owner -> " + to + (previous != null ? " (was " + previous + ")" : ""));
+        return Map.of("sessionId", sessionId, "owner", to, "previousOwner", previous == null ? "" : previous,
+                "readers", new java.util.ArrayList<>(sessions.readers(sessionId)));
     }
 
     // ---- retrieval / memory ------------------------------------------------
@@ -382,6 +434,15 @@ public class AgentController {
         if (!Ownership.canAccess(RequestContext.current(), sessions.owner(sessionId))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "session '" + sessionId + "' belongs to another user");
+        }
+    }
+
+    /** 403 unless the caller can READ this session (owner/admin/unowned, or shared with them). */
+    private void requireRead(String sessionId) {
+        if (!Ownership.canRead(RequestContext.current(), sessions.owner(sessionId),
+                sessions.readers(sessionId))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "session '" + sessionId + "' is not shared with you");
         }
     }
 

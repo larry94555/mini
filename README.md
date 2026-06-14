@@ -58,7 +58,7 @@ No cloud API key is required.
 | Skills | reusable `SKILL.md` instruction bundles: auto-indexed, `load_skill` on demand, `save_skill` to capture knowledge |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI, remote approvals |
-| Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
+| Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
 
@@ -106,7 +106,7 @@ No cloud API key is required.
 | `Sse.java` | SSE event framing/parsing helpers |
 | `AuthFilter.java` | API-key auth, request attribution, and RBAC gating |
 | `Rbac.java` / `Principal.java` / `RequestContext.java` | role policy and per-request caller identity |
-| `Ownership.java` | per-resource access policy (owner / admin / unowned) |
+| `Ownership.java` | per-resource access policy (owner / admin / unowned) + `canRead` for shared sessions |
 | `AuditLog.java` | append-only audit trail of privileged actions |
 | `RateLimiter.java` | Fixed-window per-key rate limiter |
 | `Metrics.java` | In-process metrics snapshot and run logs |
@@ -165,6 +165,10 @@ http://localhost:8081
 | `POST /chat/stream` | Session prompt over SSE |
 | `GET /sessions` | List sessions |
 | `GET /session?id=` | Read one session |
+| `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
+| `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
+| `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
+| `POST /transfer` | `{sessionId,to}` transfer ownership; prior owner keeps read (owner/admin) |
 | `GET /plans?sessionId=` | List the session's archived plan history (newest first) |
 | `GET /plan?sessionId=` | Read the current saved plan: goal + steps + statuses + per-step tool transcript |
 | `GET /plan?sessionId=&n=` | Read archived plan `n` from history: goal + steps + tools + coding report |
@@ -432,6 +436,32 @@ false), `skills.max-body` (default 4000).
 > Discovery is lexical (keyword overlap with name + description), not semantic; `save_skill` sanitizes
 > the name to letters/digits/dashes to prevent path traversal. Remote skill repositories are not yet
 > supported (see the roadmap).
+
+## Session sharing and ownership
+
+A session and everything keyed to it -- its conversation, plans, per-step transcript, coding reports,
+and plan history -- is owned by the user who first used it (admins and unowned/legacy sessions stay
+open). Two operations let that record be handed off or reviewed by a teammate:
+
+```
+curl -XPOST localhost:8080/share    -d '{"sessionId":"proj","user":"cara"}'   # grant cara read access
+curl  localhost:8080/shares?sessionId=proj                                     # -> {owner, readers:[...]}
+curl -XPOST localhost:8080/unshare  -d '{"sessionId":"proj","user":"cara"}'   # revoke
+curl -XPOST localhost:8080/transfer -d '{"sessionId":"proj","to":"dave"}'     # hand ownership to dave
+```
+
+**Sharing** grants *read* access: a reader can view the session and its plans, history, todos, and
+checkpoints (the read endpoints), and the session shows up in their `GET /sessions` list. Readers
+cannot run, mutate, share, or transfer -- those stay owner/admin-only. **Transfer** moves ownership to
+another user and keeps the previous owner on as a reader, so a hand-off never locks the original owner
+out. Both actions are recorded in the audit log.
+
+Access is resolved by `Ownership.canRead` (owner/admin/unowned, or an explicit reader) for read
+endpoints and `Ownership.canAccess` (owner/admin/unowned) for everything that changes state.
+
+> Honest scope: sharing is a single read tier (no per-resource or write-sharing granularity); grants are
+> by user name with no expiry or invitation flow; this is app-level access control, not OAuth/OIDC or
+> fine-grained ACLs.
 
 ## Safety notes
 
