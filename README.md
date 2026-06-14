@@ -57,7 +57,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, and a provenance registry (`search_skills`/`install_skill`, hash-verified) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan, plan-history + coding-report viewer), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan, plan-history + coding-report viewer, session sharing), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -502,6 +502,12 @@ out. Both actions are recorded in the audit log.
 
 Access is resolved by `Ownership.canRead` (owner/admin/unowned, or an explicit reader) for read
 endpoints and `Ownership.canAccess` (owner/admin/unowned) for everything that changes state.
+
+In the **web UI**, the *Sharing* card shows the current session's owner and readers; it offers a *Share*
+box to grant read access, a *revoke* link next to each reader, and a *Transfer* box to hand ownership to
+another user (with a confirm). The grant/transfer controls only appear when you can manage the session
+(owner, admin, or unowned); a reader sees the roster but not the controls. It refreshes on session
+switch and after each action.
 
 > Honest scope: sharing is a single read tier (no per-resource or write-sharing granularity); grants are
 > by user name with no expiry or invitation flow; this is app-level access control, not OAuth/OIDC or

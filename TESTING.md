@@ -1417,3 +1417,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `load_skill`. Corrupt the source so the hash differs -> install is refused with a mismatch message.
   An entry with no `sha256` installs with an "unpinned" warning. A `url#ref` repo in `skills.repos`
   checks out that branch/tag on clone/refresh.
+
+---
+
+# Web UI: session sharing surface
+
+## 151. index.html still parses (deterministic)
+
+- **Check:** the inline `<script>` compiles (UI smoke test) and `<div>` tags balance, so the added
+  *Sharing* card and its functions (`refreshSharing`, `doShare`, `doUnshare`, `doTransfer`) do not break
+  the page.
+
+## 152. Share / revoke / transfer from the browser (manual, auth enabled)
+
+- **Setup:** run with `auth.enabled=true` and keys for `bob` (owner) and `cara`; open the UI as `bob`.
+- **Observe:**
+  - The *Sharing* card shows `owner: bob` and `no readers`; the Share/Transfer controls are visible
+    (bob can manage).
+  - Type `cara` -> *Share*; `cara` appears under readers with a *revoke* link, and `cara`'s UI can now
+    read the session (it shows in her session list and history).
+  - *revoke* next to `cara` removes her access.
+  - Type `dave` -> *Transfer* (confirm); the card shows `owner: dave` and `bob` remains a reader;
+    the controls hide for `bob` on refresh (now only a reader). Opening the UI as `cara` (a plain
+    reader) shows the roster but no controls.

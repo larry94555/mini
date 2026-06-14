@@ -118,6 +118,20 @@
       <div id="planHistoryDetail" style="margin-top:8px;display:none"></div>
     </div>
     <div class="card">
+      <h3>Sharing <a class="linklike" id="refreshShares" title="Reload who can see this session">refresh</a></h3>
+      <div id="shareInfo" class="muted">(loading)</div>
+      <div id="shareControls" style="margin-top:8px;display:none">
+        <div class="row">
+          <input id="shareUser" placeholder="username to grant read" style="flex:1"/>
+          <button id="shareGo" title="Grant read access">Share</button>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <input id="transferUser" placeholder="new owner" style="flex:1"/>
+          <button id="transferGo" title="Transfer ownership (you keep read access)">Transfer</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
       <h3>Memory search</h3>
       <div class="row">
         <input id="memq" placeholder="search the indexed project" style="flex:1"/>
@@ -139,6 +153,7 @@ const state = {
   session: localStorage.getItem("imini.session") || newId(),
   key: localStorage.getItem("imini.key") || "",
   streaming: false,
+  me: { user: "", admin: false },
 };
 $("#apiKey").value = state.key;
 
@@ -335,7 +350,7 @@ $("#sessionSelect").onchange = async (e) => {
     else if (m.role==="assistant" && m.content) addMsg("imini").textContent = m.content;
   });
   refreshTodos(); refreshCheckpoints();
-  $("#planHistoryDetail").style.display = "none"; refreshPlanHistory();
+  $("#planHistoryDetail").style.display = "none"; refreshPlanHistory(); refreshSharing();
 };
 async function refreshTodos(){
   const j = await getJson("/todos?sessionId="+encodeURIComponent(state.session));
@@ -372,6 +387,47 @@ async function showHistoricalPlan(seq){
   d.innerHTML = html; d.style.display = "";
 }
 $("#refreshHistory").onclick = refreshPlanHistory;
+async function refreshSharing(){
+  const j = await getJson("/shares?sessionId="+encodeURIComponent(state.session));
+  const info = $("#shareInfo"), controls = $("#shareControls");
+  if (!info) return;
+  if (!j){ info.textContent = "(unavailable)"; if (controls) controls.style.display = "none"; return; }
+  const owner = j.owner || "(unowned)";
+  const readers = Array.isArray(j.readers) ? j.readers : [];
+  let html = '<div>owner: <span class="mono">'+escapeHtml(owner)+'</span></div>';
+  if (readers.length){
+    html += '<div style="margin-top:4px">readers:</div>'
+      + readers.map(u => '<div class="mono" style="font-size:12px">\u00b7 '+escapeHtml(u)
+        + ' <a class="linklike revoke" data-user="'+escapeHtml(u)+'">revoke</a></div>').join("");
+  } else {
+    html += '<div class="muted" style="font-size:12px;margin-top:4px">no readers</div>';
+  }
+  info.innerHTML = html;
+  info.querySelectorAll(".revoke").forEach(a => a.onclick = () => doUnshare(a.getAttribute("data-user")));
+  const canManage = state.me.admin || !j.owner || j.owner === state.me.user;
+  if (controls) controls.style.display = canManage ? "" : "none";
+}
+async function doShare(){
+  const u = $("#shareUser").value.trim(); if (!u) return;
+  const r = await post("/share", {sessionId: state.session, user: u});
+  $("#shareUser").value = ""; appendLog("[share] " + (r.ok ? "granted "+u : "failed ("+r.status+")"));
+  refreshSharing();
+}
+async function doUnshare(u){
+  const r = await post("/unshare", {sessionId: state.session, user: u});
+  appendLog("[unshare] " + (r.ok ? "revoked "+u : "failed ("+r.status+")"));
+  refreshSharing();
+}
+async function doTransfer(){
+  const u = $("#transferUser").value.trim(); if (!u) return;
+  if (!confirm("Transfer ownership of this session to '"+u+"'? You will keep read access.")) return;
+  const r = await post("/transfer", {sessionId: state.session, to: u});
+  $("#transferUser").value = ""; appendLog("[transfer] " + (r.ok ? "owner -> "+u : "failed ("+r.status+")"));
+  refreshSharing(); refreshSessions();
+}
+$("#refreshShares").onclick = refreshSharing;
+$("#shareGo").onclick = doShare;
+$("#transferGo").onclick = doTransfer;
 async function refreshMetrics(){
   const j = await getJson("/metrics");
   if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }
@@ -384,7 +440,9 @@ async function refreshIdentity(){
   try {
     const j = await getJson("/me");
     const admin = !!j && j.role === "admin";
+    state.me = { user: (j && j.user) || "", admin };
     $("#whoami").textContent = j ? (j.user + " · " + j.role) : "";
+    refreshSharing();
     const card = $("#metricsCard");
     if (card) card.style.display = admin ? "" : "none";
     if (admin && !metricsTimer){ refreshMetrics(); metricsTimer = setInterval(refreshMetrics, 5000); }
@@ -393,7 +451,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>
