@@ -1374,3 +1374,22 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   appear in the prompt index alongside local ones; a local skill of the same name shadows the remote
   one. Calling the `refresh_skills` tool re-pulls and reloads, reporting `refreshed N/M repo(s)`. With
   `skills.repos` empty, behavior is identical to Phase 1/2. No skill code is executed.
+
+---
+
+# Web UI: plan-history + coding-report viewer
+
+## 147. index.html still parses (deterministic)
+
+- **Check:** the inline `<script>` compiles (the project's UI smoke test) and `<div>` tags balance, so
+  the added *Plan history* card and its functions (`refreshPlanHistory`, `showHistoricalPlan`,
+  `planStepsHtml`) do not break the page.
+
+## 148. History card end to end (manual, browser)
+
+- **Setup:** open `http://localhost:8080`, run two plan-mode goals in a session.
+- **Observe:** the *Plan history* card lists both (newest first) with `#seq`, goal, and a summary like
+  `5 steps: 4 done, 1 failed`. Clicking an entry expands its step checklist (with per-step tool calls,
+  failures in red) and the coding-report block beneath it. The list updates when a run finishes and when
+  you switch sessions; the *refresh* link reloads it. A session shared with you shows its history too;
+  the card is empty (`(none)`) for sessions with no completed plans.

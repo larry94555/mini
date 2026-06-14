@@ -57,7 +57,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` instruction bundles: auto-indexed, `load_skill` on demand, `save_skill` to capture, read-only remote repos via `refresh_skills` |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI, remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan, plan-history + coding-report viewer), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -272,6 +272,12 @@ curl "localhost:8080/plan?sessionId=proj&n=2"     # fetch archived plan #2 (step
 `GET /plan?n=<seq>` returns that archived plan in full, while `GET /plan` (no `n`) still returns the
 current live plan. The last `agent.plan.history-max` plans are kept per session (default 20; 0 =
 unlimited). All are ownership-scoped.
+
+In the **web UI**, the *Plan history* card lists the current session's past plans; click one to expand
+its step checklist (with per-step tool calls) and its coding report inline. The list refreshes when a
+run finishes and when you switch sessions (via the session selector), and there is a *refresh* link.
+Because it uses the same ownership/shared-read scope as the endpoints, a session shared with you shows
+its history here too.
 
 **Persistence & resume.** The plan (goal + every step's status) is saved to a `plans` table on each
 change, so it survives a restart and can be inspected at `GET /plan?sessionId=` (ownership-scoped). If a
