@@ -206,6 +206,11 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Per-step diff deltas (snapshot/restore): each plan step's `[edits this step]` note now reports the
+  step's EXACT delta by snapshotting the working tree before/after into a throwaway git index and
+  diffing the snapshots (attributes re-edits correctly; per-step not cumulative). Falls back to the
+  recorder-delta + cumulative stat when snapshots are unavailable (`agent.plan.step-diff.snapshot`;
+  `GitInspector.snapshotTree`/`diff*Between`, `EditSummary.parseNames` unit-tested).
 - Web UI sharing surface: a *Sharing* card shows the session owner + readers and offers share / revoke /
   transfer over the existing endpoints (controls gated to owner/admin/unowned client-side); refreshes on
   session switch and after each action.
@@ -241,11 +246,11 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what,
->    replacing the cumulative working-tree stat.
-> 2. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
+> 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
 >    verification; and per-skill enable/disable.
-> 3. Export / import a session bundle (conversation + plans + transcripts + reports + history) for
+> 2. Export / import a session bundle (conversation + plans + transcripts + reports + history) for
 >    archival or handing to another instance, building on the now-shareable record.
+> 3. Show the per-step `[edits this step]` deltas in the web UI plan/history view (currently visible
+>    only in the run log and the synthesis context).
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

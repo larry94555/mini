@@ -1440,3 +1440,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   - Type `dave` -> *Transfer* (confirm); the card shows `owner: dave` and `bob` remains a reader;
     the controls hide for `bob` on refresh (now only a reader). Opening the UI as `cara` (a plain
     reader) shows the roster but no controls.
+
+---
+
+# Per-step diff deltas (snapshot/restore)
+
+## 153. parseNames + labelled step note (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `EditSummaryTest` passes the new cases -- `parseNames` splits `git diff --name-only`
+  output, trimming and dropping blank lines; `stepNote(..., "diff this step")` uses the custom label and
+  omits "diff so far".
+
+## 154. Exact per-step delta in a plan (manual, git workspace)
+
+- **Setup:** a git workspace, plan mode, `agent.plan.step-diff=true` and
+  `agent.plan.step-diff.snapshot=true` (defaults). A multi-step goal where an early step creates/edits a
+  file and a LATER step edits that same file again.
+- **Observe:** each step's `[edits this step]` note (in the SSE `log` and folded into later steps'
+  context) lists only the files that step changed -- including the re-edited file attributed to the
+  later step -- with a per-step `diff this step:` stat, not a growing cumulative one. Your `git status`
+  is unaffected by the snapshots (they use a throwaway index). Set `agent.plan.step-diff.snapshot=false`
+  to see the lighter recorder-based fallback (`diff so far:`); outside a git repo it falls back
+  automatically.
