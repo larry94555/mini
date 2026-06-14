@@ -206,6 +206,9 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Web UI sharing surface: a *Sharing* card shows the session owner + readers and offers share / revoke /
+  transfer over the existing endpoints (controls gated to owner/admin/unowned client-side); refreshes on
+  session switch and after each action.
 - Skill registry with provenance: a manifest of available skills (`{name, description, source, version,
   sha256}`) drives `search_skills` (lexical) and `install_skill`, which fetches a skill from its source,
   VERIFIES the SHA-256, and saves it locally with provenance front-matter; remote repos can be pinned
@@ -238,11 +241,11 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. A sharing surface in the web UI (grant/transfer/visualize who can see a session), so the
->    session-sharing endpoints are usable without curl -- a companion to the history viewer.
-> 2. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what,
+> 1. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what,
 >    replacing the cumulative working-tree stat.
-> 3. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
+> 2. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
 >    verification; and per-skill enable/disable.
+> 3. Export / import a session bundle (conversation + plans + transcripts + reports + history) for
+>    archival or handing to another instance, building on the now-shareable record.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
