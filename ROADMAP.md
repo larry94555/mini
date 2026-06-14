@@ -206,6 +206,9 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Web UI plan-history + report viewer: a *Plan history* card lists a session's past plans and expands
+  any one to its step checklist (with per-step tools) and coding report, reusing the streaming plan
+  renderer; refreshes on run completion and session switch; ownership/shared-read scoped.
 - Skills Phase 3 (remote repositories, read-only): an allowlist of git URLs (`skills.repos`) is
   cloned/pulled read-only into a cache and merged with local skills (local overrides remote,
   earlier-repo-wins via `SkillLibrary.merge`, unit-tested); `refresh_skills` re-pulls. Instructions
@@ -231,13 +234,13 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Surface plan history + coding reports in the web UI (a panel over `GET /plans` with click-through
->    to each archived plan's steps, tools, and report) -- the durable, now-shareable record is only
->    reachable via curl today.
-> 2. Skill registry (Phase 3+): a searchable index of available skills with provenance -- a manifest of
+> 1. Skill registry (Phase 3+): a searchable index of available skills with provenance -- a manifest of
 >    `{name, description, source, version, hash}`, a `search_skills` tool over it, and hash-verified
 >    install -- plus commit pinning for the remote repos just added. Executable skill bundles remain
 >    deferred behind the sandbox command policy.
-> 3. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what.
+> 2. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what,
+>    replacing the cumulative working-tree stat.
+> 3. A sharing surface in the web UI (grant/transfer/visualize who can see a session), so the
+>    just-added session-sharing endpoints are usable without curl.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

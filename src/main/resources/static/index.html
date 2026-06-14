@@ -113,6 +113,11 @@
       <div id="checkpoints" class="muted">(none)</div>
     </div>
     <div class="card">
+      <h3>Plan history <a class="linklike" id="refreshHistory" title="Reload this session's past plans">refresh</a></h3>
+      <div id="planHistory" class="muted">(none)</div>
+      <div id="planHistoryDetail" style="margin-top:8px;display:none"></div>
+    </div>
+    <div class="card">
       <h3>Memory search</h3>
       <div class="row">
         <input id="memq" placeholder="search the indexed project" style="flex:1"/>
@@ -176,13 +181,12 @@ function appendLog(line){
   const el = $("#log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
 }
 // live plan checklist, updated on every "plan" SSE event
-function renderPlan(turn, obj){
-  if (!turn || !turn.plan || !obj || !Array.isArray(obj.steps)) return;
+function planStepsHtml(steps){
   const icon = s => s==="completed"?"[x]" : s==="in_progress"?"[~]" : s==="failed"?"[!]" : "[ ]";
   const color = s => s==="completed"?"#3a9" : s==="failed"?"#c33" : s==="in_progress"?"#c80" : "#888";
   const toolColor = t => /\[error\]\s*$/.test(t) ? "#c33" : "#7a8";
-  let html = '<div class="muted" style="font-size:11px;letter-spacing:.04em;margin:0 0 2px">PLAN</div>';
-  for (const st of obj.steps){
+  let html = "";
+  for (const st of (steps||[])){
     html += '<div style="font-family:monospace;font-size:12px;line-height:1.5;color:'+color(st.status)+'">'
           + icon(st.status) + ' ' + escapeHtml(String(st.text||"")) + '</div>';
     const tools = Array.isArray(st.tools) ? st.tools : [];
@@ -191,7 +195,12 @@ function renderPlan(turn, obj){
             + toolColor(t) + '">· ' + escapeHtml(String(t)) + '</div>';
     }
   }
-  turn.plan.innerHTML = html;
+  return html;
+}
+function renderPlan(turn, obj){
+  if (!turn || !turn.plan || !obj || !Array.isArray(obj.steps)) return;
+  turn.plan.innerHTML = '<div class="muted" style="font-size:11px;letter-spacing:.04em;margin:0 0 2px">PLAN</div>'
+                      + planStepsHtml(obj.steps);
   turn.plan.style.display = "";
   $("#messages").scrollTop = $("#messages").scrollHeight;
 }
@@ -234,7 +243,7 @@ async function send(resume){
   finally {
     clearInterval(apoll); hideApproval();
     state.streaming = false; setStatus("idle");
-    refreshTodos(); refreshCheckpoints(); refreshSessions();
+    refreshTodos(); refreshCheckpoints(); refreshSessions(); refreshPlanHistory();
   }
 }
 function parseSse(frame){
@@ -326,6 +335,7 @@ $("#sessionSelect").onchange = async (e) => {
     else if (m.role==="assistant" && m.content) addMsg("imini").textContent = m.content;
   });
   refreshTodos(); refreshCheckpoints();
+  $("#planHistoryDetail").style.display = "none"; refreshPlanHistory();
 };
 async function refreshTodos(){
   const j = await getJson("/todos?sessionId="+encodeURIComponent(state.session));
@@ -336,6 +346,32 @@ async function refreshCheckpoints(){
   $("#checkpoints").innerHTML = (Array.isArray(list)&&list.length)
     ? "<ul>"+list.map(x=>"<li class='mono'>"+escapeHtml(x)+"</li>").join("")+"</ul>" : "(none)";
 }
+async function refreshPlanHistory(){
+  const j = await getJson("/plans?sessionId="+encodeURIComponent(state.session));
+  const plans = (j && Array.isArray(j.plans)) ? j.plans : [];
+  const el = $("#planHistory");
+  if (!plans.length){ el.innerHTML = "(none)"; return; }
+  el.innerHTML = plans.map(p =>
+    '<div class="linklike histItem" data-seq="'+p.seq+'" style="font-size:12px;line-height:1.45;margin-bottom:4px">'
+    + '#'+p.seq+' \u00b7 '+escapeHtml(String(p.goal||"(no goal)")).slice(0,64)
+    + '<div class="muted" style="font-size:11px">'+escapeHtml(String(p.summary||""))+'</div></div>'
+  ).join("");
+  el.querySelectorAll(".histItem").forEach(it =>
+    it.onclick = () => showHistoricalPlan(it.getAttribute("data-seq")));
+}
+async function showHistoricalPlan(seq){
+  const d = $("#planHistoryDetail");
+  const j = await getJson("/plan?sessionId="+encodeURIComponent(state.session)+"&n="+encodeURIComponent(seq));
+  if (!j){ d.style.display = "none"; return; }
+  let html = '<div class="muted" style="font-size:11px;letter-spacing:.04em;margin:0 0 4px">PLAN #'
+           + escapeHtml(String(j.seq)) + (j.goal ? ' \u00b7 ' + escapeHtml(String(j.goal)) : '') + '</div>';
+  html += planStepsHtml(Array.isArray(j.steps) ? j.steps : []);
+  if (j.report){
+    html += '<pre class="log" style="margin-top:8px;white-space:pre-wrap">' + escapeHtml(String(j.report)) + '</pre>';
+  }
+  d.innerHTML = html; d.style.display = "";
+}
+$("#refreshHistory").onclick = refreshPlanHistory;
 async function refreshMetrics(){
   const j = await getJson("/metrics");
   if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }
@@ -357,7 +393,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>
