@@ -206,6 +206,10 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Skills Phase 3 (remote repositories, read-only): an allowlist of git URLs (`skills.repos`) is
+  cloned/pulled read-only into a cache and merged with local skills (local overrides remote,
+  earlier-repo-wins via `SkillLibrary.merge`, unit-tested); `refresh_skills` re-pulls. Instructions
+  only -- no executable bundles. A skill registry with provenance/signing is the remaining piece.
 - Session sharing / ownership transfer: an owner can grant read access (`POST /share`/`/unshare`),
   inspect access (`GET /shares`), and transfer ownership (`POST /transfer`, prior owner kept as reader);
   read endpoints resolve via `Ownership.canRead` (unit-tested), management stays owner/admin-only.
@@ -227,11 +231,13 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Skills Phase 3: remote skill repositories (read-only `git` clone/pull of a skills folder into a
->    cache, allowlisted sources) and a skill registry (searchable index + provenance), keeping skills
->    read-only; executable skill bundles remain deferred behind the sandbox command policy.
-> 2. Surface plan history + coding reports in the web UI (a panel over `GET /plans` with click-through
->    to each archived plan's steps, tools, and report).
+> 1. Surface plan history + coding reports in the web UI (a panel over `GET /plans` with click-through
+>    to each archived plan's steps, tools, and report) -- the durable, now-shareable record is only
+>    reachable via curl today.
+> 2. Skill registry (Phase 3+): a searchable index of available skills with provenance -- a manifest of
+>    `{name, description, source, version, hash}`, a `search_skills` tool over it, and hash-verified
+>    install -- plus commit pinning for the remote repos just added. Executable skill bundles remain
+>    deferred behind the sandbox command policy.
 > 3. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

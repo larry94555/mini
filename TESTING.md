@@ -1354,3 +1354,23 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   - `bob` calls `POST /unshare`; `cara` is denied again.
   - `bob` calls `POST /transfer {sessionId,"to":"dave"}`; `dave` is now owner, `bob` remains a reader,
     and both `share` and `transfer` appear in `GET /audit`.
+
+---
+
+# Skills Phase 3: remote repositories (read-only)
+
+## 145. Merge precedence + repo slug (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SkillLibraryTest` passes the new cases -- `merge` keeps local skills over remote ones of
+  the same name and earlier-listed repos over later ones (first-seen order); `repoSlug` derives a safe
+  cache directory name from https/ssh URLs, strips `.git`/trailing slash, and falls back to `repo`.
+
+## 146. Fetch + merge a remote repo (manual, network)
+
+- **Setup:** set `skills.repos=https://github.com/<you>/<skills-repo>.git` (a repo with a `skills/`
+  folder of `SKILL.md` files); leave `skills.repos-on-start=true`.
+- **Observe:** on startup the repo is cloned read-only into `<root>/skill-cache/<slug>` and its skills
+  appear in the prompt index alongside local ones; a local skill of the same name shadows the remote
+  one. Calling the `refresh_skills` tool re-pulls and reloads, reporting `refreshed N/M repo(s)`. With
+  `skills.repos` empty, behavior is identical to Phase 1/2. No skill code is executed.
