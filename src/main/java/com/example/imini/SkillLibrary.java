@@ -105,4 +105,13 @@ public final class SkillLibrary {
         if (slug.isBlank()) slug = "repo";
         return slug.length() > 64 ? slug.substring(0, 64) : slug;
     }
+
+    /** Split a repo spec {@code url#ref} into {@code [url, ref]} for commit/branch/tag pinning. Pure. */
+    public static String[] splitRepoSpec(String spec) {
+        if (spec == null) return new String[]{"", ""};
+        String s = spec.trim();
+        int h = s.indexOf('#');
+        if (h < 0) return new String[]{s, ""};
+        return new String[]{s.substring(0, h).trim(), s.substring(h + 1).trim()};
+    }
 }

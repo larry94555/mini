@@ -206,6 +206,10 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Skill registry with provenance: a manifest of available skills (`{name, description, source, version,
+  sha256}`) drives `search_skills` (lexical) and `install_skill`, which fetches a skill from its source,
+  VERIFIES the SHA-256, and saves it locally with provenance front-matter; remote repos can be pinned
+  with `url#ref` (`SkillManifest` + `SkillLibrary.splitRepoSpec`, unit-tested; `skills.registry`).
 - Web UI plan-history + report viewer: a *Plan history* card lists a session's past plans and expands
   any one to its step checklist (with per-step tools) and coding report, reusing the streaming plan
   renderer; refreshes on run completion and session switch; ownership/shared-read scoped.
@@ -234,13 +238,11 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Skill registry (Phase 3+): a searchable index of available skills with provenance -- a manifest of
->    `{name, description, source, version, hash}`, a `search_skills` tool over it, and hash-verified
->    install -- plus commit pinning for the remote repos just added. Executable skill bundles remain
->    deferred behind the sandbox command policy.
+> 1. A sharing surface in the web UI (grant/transfer/visualize who can see a session), so the
+>    session-sharing endpoints are usable without curl -- a companion to the history viewer.
 > 2. Per-step diff *deltas* (snapshot/restore) for precise attribution of which step changed what,
 >    replacing the cumulative working-tree stat.
-> 3. A sharing surface in the web UI (grant/transfer/visualize who can see a session), so the
->    just-added session-sharing endpoints are usable without curl.
+> 3. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
+>    verification; and per-skill enable/disable.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

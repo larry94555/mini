@@ -33,6 +33,7 @@ public class SkillService {
     @Value("${skills.cache-dir:skill-cache}") private String cacheDirName;
     @Value("${skills.repo-timeout-seconds:60}") private int repoTimeoutSeconds;
     @Value("${skills.repos-on-start:true}") private boolean reposOnStart;
+    @Value("${skills.registry:}") private String registryPath;
 
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
 
@@ -73,7 +74,8 @@ public class SkillService {
         if (!enabled) return;
         List<List<SkillLibrary.Skill>> sources = new ArrayList<>();
         sources.add(scanDir(dir())); // local skills take precedence over remote
-        for (String url : repoList()) {
+        for (String spec : repoList()) {
+            String url = SkillLibrary.splitRepoSpec(spec)[0];
             Path repo = cacheDir().resolve(SkillLibrary.repoSlug(url));
             if (!Files.isDirectory(repo)) continue;
             Path skillsSub = repo.resolve("skills");
@@ -131,18 +133,24 @@ public class SkillService {
     }
 
     /** Read-only clone (or fast-forward pull) of an allowlisted repo into the cache. No code is run. */
-    private void pull(String url) throws Exception {
+    private void pull(String spec) throws Exception {
+        String[] ur = SkillLibrary.splitRepoSpec(spec);
+        String url = ur[0], ref = ur[1];
         Path repo = cacheDir().resolve(SkillLibrary.repoSlug(url));
         Files.createDirectories(cacheDir());
-        List<String> cmd = new ArrayList<>();
         if (Files.isDirectory(repo.resolve(".git"))) {
-            cmd.add("git"); cmd.add("-C"); cmd.add(repo.toString());
-            cmd.add("pull"); cmd.add("--ff-only");
+            if (!ref.isEmpty()) {
+                gitRun(List.of("git", "-C", repo.toString(), "fetch", "--depth", "1", "origin", ref));
+                gitRun(List.of("git", "-C", repo.toString(), "checkout", "-q", "FETCH_HEAD"));
+            } else {
+                gitRun(List.of("git", "-C", repo.toString(), "pull", "--ff-only"));
+            }
         } else {
-            cmd.add("git"); cmd.add("clone"); cmd.add("--depth"); cmd.add("1");
+            List<String> cmd = new ArrayList<>(List.of("git", "clone", "--depth", "1"));
+            if (!ref.isEmpty()) { cmd.add("--branch"); cmd.add(ref); } // pin to a branch or tag
             cmd.add(url); cmd.add(repo.toString());
+            gitRun(cmd);
         }
-        gitRun(cmd);
     }
 
     private void gitRun(List<String> cmd) throws Exception {
@@ -218,6 +226,89 @@ public class SkillService {
         });
     }
 
+    // ---- registry (provenance: search + verified install) -----------------
+
+    private Path registryFile() {
+        return (registryPath == null || registryPath.isBlank()) ? null : sandbox.root().resolve(registryPath);
+    }
+
+    private synchronized List<SkillManifest.Entry> manifest() {
+        Path f = registryFile();
+        if (f == null || !Files.isRegularFile(f)) return List.of();
+        try {
+            return SkillManifest.parse(Files.readString(f));
+        } catch (Exception e) {
+            log.warn("[skills] could not read registry " + f + ": " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    public Tool searchSkillsTool() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("query", Map.of("type", "string", "description", "What kind of skill to look for."));
+        props.put("k", Map.of("type", "integer", "description", "How many results (optional)."));
+        return new Tool("search_skills",
+                "Search the skill REGISTRY (a manifest of available skills with provenance) for skills "
+                        + "matching a query. Returns name, description, source, version, and whether it is "
+                        + "already installed. Use install_skill to add one.",
+                schema(props, List.of("query")), false, args -> {
+            if (!enabled) return "skills are disabled";
+            List<SkillManifest.Entry> entries = manifest();
+            if (entries.isEmpty()) return "no skill registry configured (set skills.registry) or it is empty";
+            int k = args.get("k") instanceof Number n ? n.intValue() : 5;
+            StringBuilder sb = new StringBuilder("registry matches:\n");
+            for (SkillManifest.Entry e : SkillManifest.search(entries, str(args.get("query")), k)) {
+                sb.append("- ").append(e.name());
+                if (!e.version().isEmpty()) sb.append(" (").append(e.version()).append(")");
+                sb.append(byName(e.name()) != null ? " [installed]" : "")
+                  .append(": ").append(e.description().isEmpty() ? "(no description)" : e.description())
+                  .append("\n");
+            }
+            return sb.toString().strip();
+        });
+    }
+
+    public Tool installSkillTool() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("name", Map.of("type", "string", "description", "Registry skill name to install."));
+        return new Tool("install_skill",
+                "Install a skill from the registry: fetch its instructions from the registry source, "
+                        + "VERIFY the content hash, and save it locally so load_skill can use it. "
+                        + "Read-only: no skill code is executed.",
+                schema(props, List.of("name")), true, args -> {
+            if (!enabled) return "skills are disabled";
+            return install(str(args.get("name")));
+        });
+    }
+
+    synchronized String install(String name) {
+        Path f = registryFile();
+        if (f == null) return "no skill registry configured (set skills.registry)";
+        SkillManifest.Entry entry = null;
+        for (SkillManifest.Entry e : manifest()) {
+            if (e.name().equalsIgnoreCase(name == null ? "" : name.trim())) { entry = e; break; }
+        }
+        if (entry == null) return "skill not found in registry: " + name;
+        if (entry.source().isEmpty()) return "registry entry has no source: " + name;
+        try {
+            Path src = f.getParent().resolve(entry.source()).normalize();
+            if (!src.startsWith(f.getParent())) return "ERROR: registry source escapes the registry directory";
+            if (Files.isDirectory(src)) src = src.resolve("SKILL.md");
+            if (!Files.isRegularFile(src)) return "ERROR: registry source not found: " + entry.source();
+            String body = Files.readString(src);
+            if (!SkillManifest.matches(entry, body)) {
+                return "ERROR: hash mismatch for '" + entry.name() + "' (expected " + entry.sha256()
+                        + ", got " + SkillManifest.sha256(body) + ") -- not installed";
+            }
+            String warn = (entry.sha256() == null || entry.sha256().isBlank()) ? " [warning: unpinned, no sha256]" : "";
+            String saved = save(entry.name(), entry.description(), body, entry.source(), entry.version(),
+                    SkillManifest.sha256(body));
+            return saved + warn;
+        } catch (Exception e) {
+            return "ERROR: could not install '" + name + "': " + e.getMessage();
+        }
+    }
+
     public Tool refreshSkillsTool() {
         return new Tool("refresh_skills",
                 "Re-fetch the configured (allowlisted) remote skill repositories and reload all skills. "
@@ -226,14 +317,30 @@ public class SkillService {
     }
 
     synchronized String save(String rawName, String description, String body) {
+        return save(rawName, description, body, null, null, null);
+    }
+
+    /** Save a skill, optionally recording provenance (source/version/sha256) in the front-matter. */
+    synchronized String save(String rawName, String description, String body,
+                             String source, String version, String sha256) {
         String name = sanitize(rawName);
         if (name.isEmpty()) return "ERROR: invalid skill name";
         if (body == null || body.isBlank()) return "ERROR: empty skill body";
         try {
             Path skillDir = dir().resolve(name);
             Files.createDirectories(skillDir);
-            String content = "---\nname: " + name + "\ndescription: "
-                    + (description == null ? "" : description.strip()) + "\n---\n" + body.strip() + "\n";
+            StringBuilder fm = new StringBuilder("---\nname: ").append(name)
+                    .append("\ndescription: ").append(description == null ? "" : description.strip());
+            if (source != null && !source.isBlank()) fm.append("\nsource: ").append(source.strip());
+            if (version != null && !version.isBlank()) fm.append("\nversion: ").append(version.strip());
+            if (sha256 != null && !sha256.isBlank()) fm.append("\nsha256: ").append(sha256.strip());
+            // strip any front-matter already present in the body so we do not double-wrap it
+            String pure = body.strip();
+            if (pure.startsWith("---")) {
+                int second = pure.indexOf("\n---", 3);
+                if (second > 0) pure = pure.substring(second + 4).strip();
+            }
+            String content = fm.append("\n---\n").append(pure).append("\n").toString();
             Files.writeString(skillDir.resolve("SKILL.md"), content);
             reload();
             return "saved skill '" + name + "' (" + skills.size() + " skill(s) now available)";

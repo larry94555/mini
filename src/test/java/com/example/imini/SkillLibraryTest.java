@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,6 +77,14 @@ class SkillLibraryTest {
         assertEquals("skills-repo", SkillLibrary.repoSlug("https://example.com/team/skills-repo/"));
         assertEquals("repo", SkillLibrary.repoSlug(""));
         assertEquals("repo", SkillLibrary.repoSlug(null));
+    }
+
+    @Test
+    void splitRepoSpecSeparatesUrlFromPinnedRef() {
+        assertArrayEquals(new String[]{"https://x/y.git", "v1.2"},
+                SkillLibrary.splitRepoSpec("https://x/y.git#v1.2"));
+        assertArrayEquals(new String[]{"https://x/y.git", ""}, SkillLibrary.splitRepoSpec("https://x/y.git"));
+        assertArrayEquals(new String[]{"", ""}, SkillLibrary.splitRepoSpec(null));
     }
 
     private static Skill byName(List<Skill> skills, String name) {
