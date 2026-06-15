@@ -59,13 +59,14 @@ public class AgentController {
     private final RunRecorder recorder;
     private final PlanHistory history;
     private final SkillService skills;
+    private final SkillRequests skillRequests;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
-                           SkillService skills) {
+                           SkillService skills, SkillRequests skillRequests) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -80,6 +81,7 @@ public class AgentController {
         this.recorder = recorder;
         this.history = history;
         this.skills = skills;
+        this.skillRequests = skillRequests;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -434,6 +436,54 @@ public class AgentController {
     }
 
     /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
+    /** Project what an import would do (counts before/incoming/after) without applying it. */
+    @PostMapping("/session/import/preview")
+    public Map<String, Object> importPreview(@RequestBody Map<String, Object> bundle,
+            @RequestParam(name = "mode", defaultValue = "new") String mode,
+            @RequestParam(name = "target", required = false) String target) {
+        List<String> problems = SessionBundle.validate(bundle);
+        if (!problems.isEmpty()) return Map.of("error", "invalid bundle", "problems", problems);
+
+        String integrityStatus;
+        String stored = SessionBundle.integrity(bundle);
+        if (stored.isBlank()) {
+            integrityStatus = "none";
+        } else {
+            String recomputed;
+            try {
+                recomputed = SkillManifest.sha256(mapper.writeValueAsString(SessionBundle.contentForHash(bundle)));
+            } catch (Exception e) {
+                recomputed = "";
+            }
+            integrityStatus = stored.equalsIgnoreCase(recomputed) ? "ok" : "mismatch";
+        }
+
+        Map<String, Object> migrated = SessionBundle.migrate(bundle);
+        boolean supported = SessionBundle.supports(String.valueOf(migrated.get("version")));
+        String m = mode == null ? "new" : mode.trim().toLowerCase(java.util.Locale.ROOT);
+
+        int curMsgs = 0, curTodos = 0, curPlans = 0;
+        String dest = "(new session)";
+        if (target != null && !target.isBlank() && !"new".equals(m)) {
+            requireRead(target);
+            dest = target.trim();
+            curMsgs = sessions.get(dest).size();
+            curTodos = todos.get(dest).size();
+            curPlans = history.list(dest).size();
+        }
+        Map<String, Object> preview = SessionBundle.preview(m, curMsgs, curTodos, curPlans,
+                SessionBundle.messages(migrated).size(), SessionBundle.todos(migrated).size(),
+                SessionBundle.plans(migrated).size());
+
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("target", dest);
+        out.put("integrity", integrityStatus);
+        out.put("version", String.valueOf(migrated.get("version")));
+        out.put("supported", supported);
+        out.put("preview", preview);
+        return out;
+    }
+
     @PostMapping("/session/import")
     public Map<String, Object> importSession(@RequestBody Map<String, Object> bundle,
             @RequestParam(name = "mode", defaultValue = "new") String mode,
@@ -563,6 +613,52 @@ public class AgentController {
         String msg = skills.refresh();
         audit.record(currentUser(), "skill-refresh", "skills", msg);
         return Map.of("message", msg, "skills", skills.listForUi());
+    }
+
+    /** A member proposes a skill ({name, description, body}); it is queued for admin review. */
+    @PostMapping("/skills/request")
+    public Map<String, Object> requestSkill(@RequestBody Map<String, Object> body) {
+        String name = String.valueOf(body.getOrDefault("name", "")).trim();
+        String desc = String.valueOf(body.getOrDefault("description", "")).trim();
+        String text = String.valueOf(body.getOrDefault("body", "")).trim();
+        if (name.isEmpty() || text.isEmpty()) {
+            return Map.of("error", "name and body are required");
+        }
+        String id = skillRequests.submit(currentUser(), name, desc, text);
+        audit.record(currentUser(), "skill-request", "skill:" + name, "queued " + id);
+        return Map.of("id", id, "status", "pending");
+    }
+
+    /** Pending skill proposals (admin only). */
+    @GetMapping("/skills/requests")
+    public Map<String, Object> skillRequests(
+            @RequestParam(name = "status", defaultValue = "pending") String status) {
+        requireAdmin();
+        return Map.of("requests", skillRequests.list(status));
+    }
+
+    /** Approve (save the skill) or reject a proposal (admin only). */
+    @PostMapping("/skills/requests/resolve")
+    public Map<String, Object> resolveSkillRequest(@RequestBody Map<String, Object> body) {
+        requireAdmin();
+        String id = String.valueOf(body.getOrDefault("id", ""));
+        boolean approve = Boolean.TRUE.equals(body.get("approve"));
+        Map<String, Object> req = skillRequests.get(id);
+        if (req == null) return Map.of("error", "request not found", "id", id);
+
+        String result;
+        if (approve) {
+            result = skills.saveApproved(String.valueOf(req.get("name")),
+                    String.valueOf(req.get("description")), String.valueOf(req.get("body")));
+            skillRequests.setStatus(id, "approved");
+        } else {
+            skillRequests.setStatus(id, "rejected");
+            result = "rejected";
+        }
+        audit.record(currentUser(), "skill-request-resolve", "skill:" + req.get("name"),
+                (approve ? "approved " : "rejected ") + id);
+        return Map.of("id", id, "status", approve ? "approved" : "rejected", "result", result,
+                "requests", skillRequests.list("pending"));
     }
 
     // ---- retrieval / memory ------------------------------------------------

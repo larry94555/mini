@@ -55,7 +55,9 @@ public class Database {
             "CREATE TABLE plan_history (session_id TEXT NOT NULL, seq INTEGER NOT NULL, goal TEXT, "
                     + "steps TEXT NOT NULL, report TEXT, step_count INTEGER NOT NULL, summary TEXT, "
                     + "created_at INTEGER NOT NULL, PRIMARY KEY(session_id, seq))",
-            "CREATE TABLE skill_state (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL)");
+            "CREATE TABLE skill_state (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL)",
+            "CREATE TABLE skill_requests (id TEXT PRIMARY KEY, requester TEXT, name TEXT, "
+                    + "description TEXT, body TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

@@ -95,6 +95,34 @@ public final class SessionBundle {
         return v == null ? "" : String.valueOf(v);
     }
 
+    /**
+     * Project what an import would do, without applying it (pure). Given the destination's current
+     * counts and the incoming bundle's counts, returns before/incoming/after for each section under the
+     * chosen mode: {@code merge} appends messages (others overwrite), {@code todos} are set in every
+     * mode, and plans are always appended to history. For {@code new}, callers pass current counts of 0.
+     */
+    public static Map<String, Object> preview(String mode, int curMsgs, int curTodos, int curPlans,
+                                               int inMsgs, int inTodos, int inPlans) {
+        String m = mode == null ? "new" : mode.trim().toLowerCase(java.util.Locale.ROOT);
+        int outMsgs = "merge".equals(m) ? curMsgs + inMsgs : inMsgs; // replace/new overwrite
+        int outTodos = inTodos;            // todos.set in all modes
+        int outPlans = curPlans + inPlans; // plans appended
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("mode", m);
+        out.put("messages", section(curMsgs, inMsgs, outMsgs));
+        out.put("todos", section(curTodos, inTodos, outTodos));
+        out.put("plans", section(curPlans, inPlans, outPlans));
+        return out;
+    }
+
+    private static Map<String, Object> section(int before, int incoming, int after) {
+        Map<String, Object> s = new LinkedHashMap<>();
+        s.put("before", before);
+        s.put("incoming", incoming);
+        s.put("after", after);
+        return s;
+    }
+
     public static List<Map<String, Object>> todoPayload(List<TodoStore.Item> todos) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (todos != null) {

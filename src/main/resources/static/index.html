@@ -140,8 +140,10 @@
           <option value="replace">replace current</option>
           <option value="merge">merge into current</option>
         </select>
+        <button id="previewBundle" title="Preview what an import would change">Preview</button>
         <button id="importBundle" title="Import a bundle (integrity-checked)">Import</button>
         <input id="importFile" type="file" accept="application/json,.json" style="display:none"/>
+        <input id="previewFile" type="file" accept="application/json,.json" style="display:none"/>
       </div>
       <div id="bundleMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
     </div>
@@ -157,6 +159,15 @@
     <div class="card" id="skillsCard" style="display:none">
       <h3>Skills <a class="linklike" id="refreshSkillsLink" title="Re-pull remote skill repos and reload">refresh</a></h3>
       <div id="skillsList" class="muted">(none)</div>
+      <div id="skillRequests"></div>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:12px">Propose a skill</summary>
+        <input id="reqName" placeholder="skill name" style="width:100%;margin-top:4px"/>
+        <input id="reqDesc" placeholder="description" style="width:100%;margin-top:4px"/>
+        <textarea id="reqBody" placeholder="SKILL.md body (instructions)" style="width:100%;height:56px;margin-top:4px"></textarea>
+        <button id="reqSubmit" style="margin-top:4px">Submit proposal</button>
+        <div id="reqMsg" class="muted" style="font-size:12px;margin-top:4px"></div>
+      </details>
     </div>
     <div class="card" id="metricsCard">
       <h3>Metrics <span class="muted" id="metricsAge"></span></h3>
@@ -486,6 +497,23 @@ async function importBundle(file){
 $("#exportBundle").onclick = exportBundle;
 $("#importBundle").onclick = () => $("#importFile").click();
 $("#importFile").onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) importBundle(f); e.target.value = ""; };
+async function previewBundle(file){
+  try {
+    const text = await file.text();
+    const mode = ($("#importMode") && $("#importMode").value) || "new";
+    let qs = "?mode=" + encodeURIComponent(mode);
+    if (mode !== "new") qs += "&target=" + encodeURIComponent(state.session);
+    const r = await fetch("/session/import/preview" + qs, { method: "POST", headers: headers(true), body: text });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || j.error){ $("#bundleMsg").textContent = "preview failed: " + ((j && j.error) || r.status); return; }
+    const p = j.preview, fmt = sec => sec.before + " -> " + sec.after + " (+" + sec.incoming + ")";
+    $("#bundleMsg").innerHTML = "preview [" + escapeHtml(p.mode) + " -> " + escapeHtml(String(j.target)) + "] integrity:"
+      + escapeHtml(String(j.integrity)) + (j.supported ? "" : " <b>UNSUPPORTED</b>")
+      + "<br>messages " + fmt(p.messages) + ", todos " + fmt(p.todos) + ", plans " + fmt(p.plans);
+  } catch (e){ $("#bundleMsg").textContent = "preview error"; }
+}
+$("#previewBundle").onclick = () => $("#previewFile").click();
+$("#previewFile").onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) previewBundle(f); e.target.value = ""; };
 async function refreshSkills(){
   const j = await getJson("/skills");
   const el = $("#skillsList");
@@ -500,6 +528,7 @@ async function refreshSkills(){
     + '<input type="checkbox" class="skillToggle" data-name="'+escapeHtml(String(s.name))+'"'
     + (s.enabled ? ' checked' : '') + (admin ? '' : ' disabled') + '/> ' + escapeHtml(String(s.name)) + '</label>').join("");
   if (admin) el.querySelectorAll(".skillToggle").forEach(cb => cb.onchange = () => toggleSkill(cb.getAttribute("data-name"), cb.checked));
+  refreshSkillRequests();
 }
 async function toggleSkill(name, enabled){
   const r = await post("/skills/toggle", { name: name, enabled: enabled });
@@ -512,6 +541,37 @@ $("#refreshSkillsLink").onclick = async () => {
   appendLog("[skills] " + (r.ok ? "refreshed" : "refresh failed ("+r.status+")"));
   refreshSkills();
 };
+async function submitSkillRequest(){
+  const name = $("#reqName").value.trim(), desc = $("#reqDesc").value.trim(), body = $("#reqBody").value.trim();
+  if (!name || !body){ $("#reqMsg").textContent = "name and body are required"; return; }
+  const r = await post("/skills/request", { name: name, description: desc, body: body });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j || j.error){ $("#reqMsg").textContent = "failed: " + ((j && j.error) || r.status); return; }
+  $("#reqMsg").textContent = "submitted (" + j.id + ", pending review)";
+  $("#reqName").value = ""; $("#reqDesc").value = ""; $("#reqBody").value = "";
+  if (state.me.admin) refreshSkillRequests();
+}
+async function refreshSkillRequests(){
+  const el = $("#skillRequests");
+  if (!el) return;
+  if (!state.me.admin){ el.innerHTML = ""; return; } // admin-only review queue
+  const j = await getJson("/skills/requests");
+  const reqs = (j && Array.isArray(j.requests)) ? j.requests : [];
+  if (!reqs.length){ el.innerHTML = '<div class="muted" style="font-size:12px;margin-top:6px">no pending requests</div>'; return; }
+  el.innerHTML = '<div style="font-size:12px;margin-top:6px">pending requests:</div>' + reqs.map(q =>
+    '<div style="font-size:12px;border-top:1px solid var(--border);padding:4px 0">'
+    + escapeHtml(String(q.name)) + ' <span class="muted">by ' + escapeHtml(String(q.requester||"")) + '</span><br>'
+    + '<a class="linklike reqApprove" data-id="'+escapeHtml(String(q.id))+'">approve</a> &middot; '
+    + '<a class="linklike reqReject" data-id="'+escapeHtml(String(q.id))+'">reject</a></div>').join("");
+  el.querySelectorAll(".reqApprove").forEach(a => a.onclick = () => resolveReq(a.getAttribute("data-id"), true));
+  el.querySelectorAll(".reqReject").forEach(a => a.onclick = () => resolveReq(a.getAttribute("data-id"), false));
+}
+async function resolveReq(id, approve){
+  const r = await post("/skills/requests/resolve", { id: id, approve: approve });
+  appendLog("[skills] request " + id + " " + (approve ? "approved" : "rejected"));
+  refreshSkillRequests(); refreshSkills();
+}
+$("#reqSubmit").onclick = submitSkillRequest;
 async function refreshMetrics(){
   const j = await getJson("/metrics");
   if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }

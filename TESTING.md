@@ -1546,3 +1546,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   The member sees the same skills with their enabled state but the checkboxes are disabled and there is
   no *refresh* link; attempting a toggle has no effect (and `POST /skills/toggle` returns 403 for a
   member regardless).
+
+---
+
+# Import preview + member skill proposals
+
+## 164. Preview projection (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionBundleTest` passes the preview cases -- `new` projects after == incoming;
+  `replace` overwrites messages (after == incoming) and appends plans (before+incoming); `merge` appends
+  messages (before+incoming); todos are set in every mode; the mode is echoed.
+
+## 165. Preview before import (manual)
+
+- **Run:** with a bundle file, click *Preview* in the *Session bundle* card (or `POST
+  /session/import/preview?mode=merge&target=<id>`).
+- **Observe:** the card shows `integrity: ok|mismatch|none`, the version + whether supported, and
+  `messages before -> after (+incoming)` for messages/todos/plans -- and nothing is changed (re-running
+  `GET /session/export` on the target is identical). Then *Import* applies exactly those numbers.
+
+## 166. Member proposes a skill; admin resolves (manual)
+
+- **Setup:** keys for a non-admin member and an admin.
+- **Observe:** as the member, open *Propose a skill* in the *Skills* card, fill name/description/body,
+  submit -> `pending`. `POST /skills/request` works for the member; `GET /skills/requests` returns 403
+  for the member but lists the proposal for the admin. As the admin, *approve* -> the skill is saved and
+  now appears (enabled) in the skills list and `load_skill`; *reject* -> it is marked rejected and not
+  saved. Both outcomes are audited.

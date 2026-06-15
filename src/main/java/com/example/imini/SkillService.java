@@ -389,6 +389,11 @@ public class SkillService {
                 schema(new LinkedHashMap<>(), List.of()), false, args -> refresh());
     }
 
+    /** Save a skill approved from a member request; returns a status string. */
+    public synchronized String saveApproved(String rawName, String description, String body) {
+        return save(rawName, description, body);
+    }
+
     synchronized String save(String rawName, String description, String body) {
         return save(rawName, description, body, null, null, null);
     }

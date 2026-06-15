@@ -111,4 +111,23 @@ class SessionBundleTest {
         assertEquals(SessionBundle.VERSION, m.get("version"));
         assertEquals("completed", SessionBundle.todos(m).get(0).status());
     }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void previewProjectsEachModeWithoutApplying() {
+        // new: destination is empty; after == incoming
+        Map<String, Object> nw = SessionBundle.preview("new", 0, 0, 0, 5, 2, 1);
+        assertEquals(5, ((Map<String, Object>) nw.get("messages")).get("after"));
+
+        // replace: messages overwritten; plans appended; todos set
+        Map<String, Object> rp = SessionBundle.preview("replace", 10, 3, 4, 5, 2, 1);
+        assertEquals(5, ((Map<String, Object>) rp.get("messages")).get("after"));
+        assertEquals(5, ((Map<String, Object>) rp.get("plans")).get("after"));   // 4 + 1
+        assertEquals(2, ((Map<String, Object>) rp.get("todos")).get("after"));
+
+        // merge: messages appended
+        Map<String, Object> mg = SessionBundle.preview("merge", 10, 3, 4, 5, 2, 1);
+        assertEquals(15, ((Map<String, Object>) mg.get("messages")).get("after")); // 10 + 5
+        assertEquals("merge", mg.get("mode"));
+    }
 }
