@@ -57,7 +57,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted global + per-session overrides), and member skill proposals (admin-reviewed, with a "my requests" view) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview, skills toggles + proposals), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides, skills toggles + proposals, activity log), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -561,16 +561,27 @@ way. In the **web UI**, the *Session bundle* card has *Export* (downloads `<sess
 **mode** selector, and *Import* (pick a file -- `new` switches to the imported session; `replace`/`merge`
 target the current session).
 
-**Migration.** Import normalizes older or looser bundles into the current shape before restoring (after
-the integrity check, which is always over the bundle as received): a missing or `imini-session/0`
-version is stamped to the current one, a legacy `history` key is read as `messages`, and `todos` given
-as plain strings are wrapped into `{content, status:"pending"}`. A bundle whose (migrated) version is
-still unsupported is rejected.
+**Migration.** The current bundle version is `imini-session/2`. Import normalizes older or looser
+bundles into it before restoring (after the integrity check, which is always over the bundle as
+received): a missing or `imini-session/0` version, or a `imini-session/1` bundle, is upconverted (a v1
+bundle gains an empty `skillOverrides`); a legacy `history` key is read as `messages`; and `todos` given
+as plain strings are wrapped into `{content, status:"pending"}`. Integrity is **version-aware** -- v1
+bundles are hashed without `skillOverrides`, so previously exported v1 bundles still verify. A bundle
+whose (migrated) version is still unsupported is rejected.
+
+**Skill overrides travel with the session.** A bundle carries the session's per-session skill overrides
+(`skillOverrides: [{name, enabled}]`); on import they are re-applied to the destination session, so a
+shared or migrated session keeps its tuned skill set. The import/preview responses include a
+`skillOverrides` count.
 
 **Preview.** `POST /session/import/preview` (or the UI *Preview* button) reports what an import *would*
 do without touching anything: the integrity status (`ok`/`mismatch`/`none`), the (migrated) version and
 whether it is supported, and a before/incoming/after count for messages, todos, and plans under the
 chosen mode -- so you can see that, say, a `merge` would grow messages from 10 to 15 before committing.
+
+**Activity log (admin).** The web UI shows an admin-only *Activity* card backed by `GET /audit`
+(recent governance/tool events: skill toggles, session overrides, proposals/resolutions, imports, and
+more) -- a readable window on the audit trail without curling the endpoint.
 
 > Honest scope: integrity is a content SHA-256 (tamper-evidence), not a signature -- stripping the field
 > bypasses the check, and `strict=false` imports regardless. The bundle is plain JSON (no encryption, no

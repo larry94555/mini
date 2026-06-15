@@ -1603,3 +1603,29 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `withdrawn` and `POST /skills/requests/update {id,...}` edits it; both reject another user's request
   (403) and refuse once a request is no longer pending. After an admin approves/rejects, the status
   updates accordingly.
+
+---
+
+# Skill overrides in bundles + activity view
+
+## 170. Bundle v2 + version-aware hash + migration (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionBundleTest` passes the new cases -- `VERSION` is `imini-session/2`; `supports`
+  accepts v1 and v2 (rejects v9/null); a built (v2) bundle's `contentForHash` includes `skillOverrides`
+  while a v1 bundle's does NOT (so old integrity values verify); a built bundle carries the overrides;
+  and a v1 bundle migrates to v2 with an empty `skillOverrides`.
+
+## 171. Overrides survive export/import (manual)
+
+- **Setup:** a session with a per-session override (case 168), then export it.
+- **Observe:** the exported JSON contains `skillOverrides` and `version: imini-session/2`. Import it
+  (any mode); the response shows a `skillOverrides` count and `GET /skills?sessionId=<newId>` reports
+  the same overrides on the destination session. Importing an older v1 bundle still works (integrity
+  verifies; it upconverts to v2 with no overrides).
+
+## 172. Activity card (manual, admin)
+
+- **Observe:** as an admin, the web UI shows an *Activity* card listing recent `/audit` events
+  (time, user, action, target, outcome) -- e.g. `skill-session-toggle`, `import`, `skill-request`. A
+  *refresh* link reloads it; non-admins do not see the card (and `GET /audit` is admin-gated).

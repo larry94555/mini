@@ -206,6 +206,12 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Skill overrides carried by export/import bundles: the bundle version is now `imini-session/2` and
+  carries `skillOverrides: [{name, enabled}]`; import re-applies them to the destination session.
+  Integrity is version-aware (v1 bundles hash without the field, so old exports still verify) and
+  migration upconverts v1 -> v2 (`SessionBundle` build/contentForHash/migrate/skillOverrides, unit-tested).
+- Consolidated activity view: an admin-only *Activity* card in the web UI renders recent `/audit`
+  entries (skill toggles, session overrides, proposals, imports, etc.) without curling.
 - Per-session skill overrides: a skill can be enabled/disabled for one session on top of the global
   default (`POST /skills/session-toggle` / `session-reset`, `GET /skills?sessionId=`); the effective
   state (override else global, via the pure `SkillService.effectiveEnabled`, unit-tested) drives that
@@ -283,9 +289,9 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
 >    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. Carry per-session skill overrides through session export/import bundles, so a shared/imported
->    session keeps its tuned skill set.
-> 3. A consolidated audit/activity view in the UI (skill toggles, proposals, imports) so admins can see
->    recent governance actions without curling `/audit`.
+> 2. Activity view polish: filter by user/action/target and paginate the audit card; surface it as a
+>    per-session timeline too.
+> 3. Bundle export of session sharing/ownership (and optional restore), so a migrated session can carry
+>    its reader list, not just its content + skill overrides.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
