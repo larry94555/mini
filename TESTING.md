@@ -1720,3 +1720,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   "skipped: import cycle" instead of looping; nesting beyond `memory.import-max-depth` is capped.
 - **Note:** `GET /memory/files` is the memory-file view; `GET /memory?q=` remains the separate
   retrieval search and is unaffected.
+
+---
+
+# /init: draft or update CLAUDE.md from a repo scan
+
+## 183. RepoScan + InitDraft (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RepoScanTest` passes -- `ext` lowercases/strips extensions; `detectBuildSystem` maps
+  root files to Maven/Gradle/npm/Python/unknown; `languages` ranks by file count and ignores non-code
+  extensions; `buildCmd`/`testCmd` match the build system; `InitDraft.render` emits all five scaffold
+  sections, and `missingSections` reports the headings an existing file lacks.
+
+## 184. /init creates CLAUDE.md when absent (manual)
+
+- **Setup:** a workspace with no `CLAUDE.md` (a Maven repo with `pom.xml` + `src/main/java`).
+- **Observe:** typing `/init` in chat writes `CLAUDE.md` (build system + file count reported) and returns
+  the draft; `/memory` then lists it as loaded project memory. The draft has Project overview, Build and
+  test (with `mvn`/`mvn test`), Layout, Conventions, and Notes sections.
+
+## 185. /init never clobbers an existing file (manual)
+
+- **Setup:** a workspace that already has a `CLAUDE.md`.
+- **Observe:** `/init` does **not** overwrite it -- it reports that the file exists, lists any scaffold
+  sections missing from it, and shows the proposed draft. Only `POST /init?write=true&overwrite=true`
+  replaces it; `POST /init` with no params returns a preview (`exists`, `buildSystem`, `languages`,
+  `missingSections`, `draft`) without writing.

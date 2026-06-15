@@ -68,8 +68,9 @@ Implement:
 - ~~simple `@path` imports inside memory files~~ (done),
 - ~~diagnostics showing exactly which memory files loaded and why~~ (done via `/memory`).
 
-The layered memory **loader** and `/memory` **diagnostics** now exist (see Recently completed); the
-remaining Priority 1 work is `/init` to draft/update `CLAUDE.md` from a repo scan.
+Priority 1 is now **complete**: the layered memory loader, `/memory` diagnostics, and `/init`
+(a deterministic repo scan that drafts/creates `CLAUDE.md`) all exist (see Recently completed). The next
+priority is **explicit context references** (Priority 2).
 
 Why this is first:
 
@@ -169,17 +170,19 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The highest-value next feature is **`/init`**, the remaining half of Priority 1.
+The highest-value next feature is now **explicit context references** (Priority 2),
+since Priority 1 (layered memory, `/memory`, and `/init`) is complete.
 
-The layered memory loader and `/memory` diagnostics now exist: `imini` loads
-`.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`, `AGENTS.md`, `.claude/rules/*.md`,
-and `CLAUDE.local.md` (in that order), inlines `@path` imports (depth/size/cycle
-guarded), and shows what loaded via `/memory` and `GET /memory/files`. What is
-left for Priority 1:
+Priority 1 recap: `imini` loads `.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`,
+`AGENTS.md`, `.claude/rules/*.md`, and `CLAUDE.local.md` (in order), inlines
+`@path` imports (depth/size/cycle guarded), shows what loaded via `/memory` and
+`GET /memory/files`, and `/init` scaffolds `CLAUDE.md` from a deterministic repo
+scan. What is next:
 
-- `/init` to inspect the repository and draft or update `CLAUDE.md`.
+- `@file` and `@directory` prompt references (reuse `/init`/memory's
+  workspace-confined path resolution; add size caps + trace output).
 
-After `/init`, implement `@file` / `@directory` references, then improve skill
+After context references, improve skill
 UX with `/skills` and direct `/skill-name` invocation.
 
 Do not prioritize activity-view polish, bundle metadata, monetization
@@ -212,7 +215,7 @@ Current top priorities:
 ## 4. Next 10 recommended PRs
 
 1. ~~Add `/memory` diagnostics.~~ (done -- layered loader + `@path` imports + `/memory` / `GET /memory/files`)
-2. Add `/init` to draft or update `CLAUDE.md` from a repo scan.
+2. ~~Add `/init` to draft or update `CLAUDE.md` from a repo scan.~~ (done -- `RepoScan`/`InitDraft`/`InitService`, `POST /init`)
 3. Add `@file` references.
 4. Add `@directory` references.
 5. Add `/skills` and direct `/skill-name` invocation.
@@ -220,7 +223,7 @@ Current top priorities:
 7. Add `agents/*.md` registry and `/agents`.
 8. Add `delegate_agent(name, task)`.
 9. Add `preview_patch` and browser diff viewer.
-10. Add `@path`-import support to `/init` output and a `memory.max-imports` cap.
+10. Add hunk-level approval to the patch-preview flow.
 
 ## 5. Educational completeness
 
@@ -324,6 +327,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- `/init` (draft/update `CLAUDE.md`): a deterministic repository scan (build-system + language detection
+  + layout) renders a `CLAUDE.md` scaffold and creates it if absent (never overwriting an existing file
+  implicitly); `POST /init?write=&overwrite=` for explicit control (`RepoScan`/`InitDraft` pure +
+  unit-tested, `InitService`). Completes Priority 1.
 - Project memory (layered) + `/memory` diagnostics: loads `.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`,
   `AGENTS.md`, `.claude/rules/*.md`, and `CLAUDE.local.md` (in order) into the system prompt, inlines
   `@path` imports (depth/size/cycle guarded), and shows what loaded via the `/memory` command and

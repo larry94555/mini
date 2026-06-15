@@ -52,6 +52,7 @@ public class AgentLoop {
     private final ToolRegistry registry;
     private final SessionStore sessions;
     private final ProjectContext project;
+    private final InitService init;
     private final SlashCommands slash;
     private final TodoStore todos;
     private final CheckRunner checks;
@@ -64,13 +65,14 @@ public class AgentLoop {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
-                     ProjectContext project, SlashCommands slash, TodoStore todos, CheckRunner checks,
+                     ProjectContext project, InitService init, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
                      PlanHistory history, SkillService skills) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
         this.project = project;
+        this.init = init;
         this.slash = slash;
         this.todos = todos;
         this.checks = checks;
@@ -107,6 +109,7 @@ public class AgentLoop {
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userQuestion)) return slash.help();
         if (project.isMemoryCommand(userQuestion)) return project.report();
+        if (init.isInitCommand(userQuestion)) return init.runInit();
         String question = slash.expand(userQuestion);
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
@@ -116,6 +119,7 @@ public class AgentLoop {
     public String chat(String sessionId, String userMessage, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userMessage)) return slash.help();
         if (project.isMemoryCommand(userMessage)) return project.report();
+        if (init.isInitCommand(userMessage)) return init.runInit();
         String expanded = slash.expand(userMessage);
 
         List<Map<String, Object>> history = sessions.get(sessionId);

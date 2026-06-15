@@ -62,13 +62,14 @@ public class AgentController {
     private final SkillService skills;
     private final SkillRequests skillRequests;
     private final ProjectContext project;
+    private final InitService init;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
-                           SkillService skills, SkillRequests skillRequests, ProjectContext project) {
+                           SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -85,6 +86,7 @@ public class AgentController {
         this.skills = skills;
         this.skillRequests = skillRequests;
         this.project = project;
+        this.init = init;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -829,6 +831,17 @@ public class AgentController {
             if (!s.reason().startsWith("skipped")) totalBytes += s.bytes();
         }
         return Map.of("files", files, "count", files.size(), "totalBytes", totalBytes, "report", project.report());
+    }
+
+    /** Scan the repo and draft CLAUDE.md. write=true creates it (or replaces, with overwrite=true). */
+    @PostMapping("/init")
+    public Map<String, Object> init(@RequestParam(name = "write", defaultValue = "false") boolean write,
+                                    @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite) {
+        Map<String, Object> r = init.initInfo(write, overwrite);
+        if (Boolean.TRUE.equals(r.get("wrote"))) {
+            audit.record(currentUser(), "init", "CLAUDE.md", String.valueOf(r.get("message")));
+        }
+        return r;
     }
 
     // ---- helpers -----------------------------------------------------------
