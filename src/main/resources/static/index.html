@@ -135,7 +135,12 @@
       <h3>Session bundle</h3>
       <div class="row">
         <button id="exportBundle" title="Download this session as a JSON bundle">Export</button>
-        <button id="importBundle" title="Import a bundle into a new session">Import</button>
+        <select id="importMode" title="How to import: new session, replace current, or merge into current">
+          <option value="new">new session</option>
+          <option value="replace">replace current</option>
+          <option value="merge">merge into current</option>
+        </select>
+        <button id="importBundle" title="Import a bundle (integrity-checked)">Import</button>
         <input id="importFile" type="file" accept="application/json,.json" style="display:none"/>
       </div>
       <div id="bundleMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
@@ -148,6 +153,10 @@
         <button id="reindex" title="Rebuild the index">Index</button>
       </div>
       <pre class="log" id="memout" style="margin-top:8px"></pre>
+    </div>
+    <div class="card" id="skillsCard" style="display:none">
+      <h3>Skills <a class="linklike" id="refreshSkillsLink" title="Re-pull remote skill repos and reload">refresh</a></h3>
+      <div id="skillsList" class="muted">(none)</div>
     </div>
     <div class="card" id="metricsCard">
       <h3>Metrics <span class="muted" id="metricsAge"></span></h3>
@@ -451,10 +460,17 @@ async function exportBundle(){
 async function importBundle(file){
   try {
     const text = await file.text();
-    const r = await fetch("/session/import", { method: "POST", headers: headers(true), body: text });
+    const mode = ($("#importMode") && $("#importMode").value) || "new";
+    let qs = "?mode=" + encodeURIComponent(mode);
+    if (mode !== "new") qs += "&target=" + encodeURIComponent(state.session);
+    const r = await fetch("/session/import" + qs, { method: "POST", headers: headers(true), body: text });
     const j = await r.json().catch(() => null);
-    if (!r.ok || !j || j.error){ $("#bundleMsg").textContent = "import failed: " + ((j && j.error) || r.status); return; }
-    $("#bundleMsg").textContent = "imported " + j.messages + " msg / " + j.plans + " plan(s) -> " + j.sessionId;
+    if (!r.ok || !j || j.error){
+      $("#bundleMsg").textContent = "import failed: " + ((j && (j.error + (j.problems ? " " + j.problems.join("; ") : ""))) || r.status);
+      return;
+    }
+    $("#bundleMsg").textContent = "imported " + j.messages + " msg / " + j.plans + " plan(s) -> "
+      + j.sessionId + (j.warning ? " (" + j.warning + ")" : "");
     await refreshSessions();
     state.session = j.sessionId; localStorage.setItem("imini.session", state.session);
     const sel = $("#sessionSelect"); if (sel) sel.value = state.session;
@@ -470,6 +486,29 @@ async function importBundle(file){
 $("#exportBundle").onclick = exportBundle;
 $("#importBundle").onclick = () => $("#importFile").click();
 $("#importFile").onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) importBundle(f); e.target.value = ""; };
+async function refreshSkills(){
+  const j = await getJson("/skills");
+  const el = $("#skillsList");
+  if (!el) return;
+  const list = (j && Array.isArray(j.skills)) ? j.skills : [];
+  if (!list.length){ el.innerHTML = "(no skills loaded)"; return; }
+  el.innerHTML = list.map(s =>
+    '<label style="display:block;font-size:12px;line-height:1.6" title="'+escapeHtml(String(s.description||""))+'">'
+    + '<input type="checkbox" class="skillToggle" data-name="'+escapeHtml(String(s.name))+'"'
+    + (s.enabled ? ' checked' : '') + '/> ' + escapeHtml(String(s.name)) + '</label>').join("");
+  el.querySelectorAll(".skillToggle").forEach(cb => cb.onchange = () => toggleSkill(cb.getAttribute("data-name"), cb.checked));
+}
+async function toggleSkill(name, enabled){
+  const r = await post("/skills/toggle", { name: name, enabled: enabled });
+  if (!r.ok){ appendLog("[skills] toggle failed ("+r.status+")"); }
+  refreshSkills();
+}
+$("#refreshSkillsLink").onclick = async () => {
+  $("#skillsList").textContent = "refreshing...";
+  const r = await post("/skills/refresh", {});
+  appendLog("[skills] " + (r.ok ? "refreshed" : "refresh failed ("+r.status+")"));
+  refreshSkills();
+};
 async function refreshMetrics(){
   const j = await getJson("/metrics");
   if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }
@@ -487,6 +526,9 @@ async function refreshIdentity(){
     refreshSharing();
     const card = $("#metricsCard");
     if (card) card.style.display = admin ? "" : "none";
+    const sc = $("#skillsCard");
+    if (sc) sc.style.display = admin ? "" : "none";
+    if (admin) refreshSkills();
     if (admin && !metricsTimer){ refreshMetrics(); metricsTimer = setInterval(refreshMetrics, 5000); }
     if (!admin && metricsTimer){ clearInterval(metricsTimer); metricsTimer = null; }
   } catch (e) { /* leave UI as-is on error */ }

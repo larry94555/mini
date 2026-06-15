@@ -206,6 +206,14 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Bundle integrity + import options: exports carry an `integrity` SHA-256 over their content; import
+  recomputes/compares it (strict by default) and supports `mode=new|replace|merge` into a chosen
+  `target` session, with a version-support gate (`SessionBundle.supports`/`contentForHash`/`integrity`,
+  unit-tested).
+- Per-skill enable/disable + Skills card: `GET /skills` lists loaded skills with an `enabled` flag;
+  admins toggle via `POST /skills/toggle` and re-pull via `POST /skills/refresh`; disabled skills drop
+  out of the index/auto-load/load_skill. The web UI has an admin-only *Skills* card. `skills.disabled`
+  seeds the off set.
 - Session export / import: a whole session (conversation + plan history with steps/tools/reports +
   todos) exports as a portable `imini-session/1` JSON bundle (`GET /session/export`) and imports into a
   new owned session (`POST /session/import`), with a *Session bundle* card in the UI (`SessionBundle`
@@ -253,11 +261,11 @@ audit with a per-step transcript that is now surfaced in the web UI.
 
 The next highest-leverage engineering changes are:
 
-> 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's hash
->    verification; and per-skill enable/disable.
-> 2. Import options: merge a bundle into an existing session, or import to a chosen session id, rather
->    than always creating a new one; and a bundle version/migration path.
-> 3. Bundle integrity: an optional content hash (and later signature) on the export so an import can be
->    verified -- reusing the skill-registry hashing.
+> 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
+>    bundle's hash verification -- the natural next layer now that both hash for integrity.
+> 2. A bundle version/migration path (read older `imini-session/N` bundles into the current shape), now
+>    that imports gate on `SessionBundle.supports`.
+> 3. Per-skill enable/disable persistence (survive restart) + a non-admin read-only skills list in the
+>    UI so members can see what's available.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

@@ -34,8 +34,10 @@ public class SkillService {
     @Value("${skills.repo-timeout-seconds:60}") private int repoTimeoutSeconds;
     @Value("${skills.repos-on-start:true}") private boolean reposOnStart;
     @Value("${skills.registry:}") private String registryPath;
+    @Value("${skills.disabled:}") private String disabledConfig;
 
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
+    private final java.util.Set<String> disabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public SkillService(Sandbox sandbox) {
         this.sandbox = sandbox;
@@ -43,11 +45,48 @@ public class SkillService {
 
     @PostConstruct
     public void init() {
+        if (disabledConfig != null) {
+            for (String d : disabledConfig.split(",")) {
+                String t = d.trim();
+                if (!t.isEmpty()) disabled.add(t.toLowerCase(Locale.ROOT));
+            }
+        }
         if (reposOnStart && !repoList().isEmpty()) {
             refresh(); // clone/pull configured repos, then reload
         } else {
             reload();
         }
+    }
+
+    private boolean isDisabled(String name) {
+        return name != null && disabled.contains(name.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private synchronized List<SkillLibrary.Skill> enabledSkills() {
+        List<SkillLibrary.Skill> out = new ArrayList<>();
+        for (SkillLibrary.Skill sk : skills) if (!isDisabled(sk.name())) out.add(sk);
+        return out;
+    }
+
+    /** Skills for the management UI: name, description, and enabled flag. */
+    public synchronized List<Map<String, Object>> listForUi() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (SkillLibrary.Skill sk : skills) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", sk.name());
+            m.put("description", sk.description());
+            m.put("enabled", !isDisabled(sk.name()));
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** Enable/disable a skill by name; returns true if the skill exists. */
+    public synchronized boolean setEnabled(String name, boolean on) {
+        if (byName(name) == null) return false;
+        String key = name.trim().toLowerCase(Locale.ROOT);
+        if (on) disabled.remove(key); else disabled.add(key);
+        return true;
     }
 
     private Path dir() {
@@ -173,15 +212,17 @@ public class SkillService {
 
     /** Short index appended to the system prompt (or "" when disabled/empty). */
     public synchronized String indexAddendum() {
-        if (!enabled || skills.isEmpty()) return "";
+        List<SkillLibrary.Skill> active = enabledSkills();
+        if (!enabled || active.isEmpty()) return "";
         return "\n\n--- Available skills (call load_skill with the name to load full instructions) ---\n"
-                + SkillLibrary.index(skills);
+                + SkillLibrary.index(active);
     }
 
     /** When skills.auto-load is on, the best-matching skill's body for a query (or ""). */
     public synchronized String autoLoadAddendum(String query) {
-        if (!enabled || !autoLoad || skills.isEmpty()) return "";
-        List<SkillLibrary.Skill> top = SkillLibrary.select(skills, query, 1);
+        List<SkillLibrary.Skill> active = enabledSkills();
+        if (!enabled || !autoLoad || active.isEmpty()) return "";
+        List<SkillLibrary.Skill> top = SkillLibrary.select(active, query, 1);
         if (top.isEmpty()) return "";
         return "\n\n" + SkillLibrary.format(top.get(0), maxBody);
     }
@@ -204,10 +245,13 @@ public class SkillService {
                         + "matches one of the available skills before doing the work.",
                 schema(props, List.of("name")), false, args -> {
             if (!enabled) return "skills are disabled";
-            SkillLibrary.Skill s = byName(args.get("name") == null ? "" : String.valueOf(args.get("name")));
+            String want = args.get("name") == null ? "" : String.valueOf(args.get("name"));
+            SkillLibrary.Skill s = byName(want);
             if (s == null) {
-                return "skill not found. Available: " + (skills.isEmpty() ? "(none)" : SkillLibrary.index(skills));
+                return "skill not found. Available: "
+                        + (enabledSkills().isEmpty() ? "(none)" : SkillLibrary.index(enabledSkills()));
             }
+            if (isDisabled(s.name())) return "skill '" + s.name() + "' is disabled";
             return SkillLibrary.format(s, maxBody);
         });
     }
