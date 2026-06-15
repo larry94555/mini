@@ -51,4 +51,29 @@ class SessionBundleTest {
         assertTrue(SessionBundle.plans(Map.of()).isEmpty());
         assertTrue(SessionBundle.todos(Map.of()).isEmpty());
     }
+
+    @Test
+    void supportsRecognizesTheMajorVersion() {
+        assertTrue(SessionBundle.supports("imini-session/1"));
+        assertFalse(SessionBundle.supports("imini-session/2"));
+        assertFalse(SessionBundle.supports(null));
+    }
+
+    @Test
+    void contentForHashExcludesVolatileFieldsAndIntegrity() {
+        Map<String, Object> b = SessionBundle.build("s", "o", 999L,
+                List.of(Map.of("role", "user", "content", "hi")), List.of(), List.of());
+        b.put("integrity", "deadbeef");
+        Map<String, Object> c = SessionBundle.contentForHash(b);
+        assertEquals(List.of("version", "sessionId", "messages", "plans", "todos"),
+                new java.util.ArrayList<>(c.keySet()));
+        assertFalse(c.containsKey("exportedAt"));
+        assertFalse(c.containsKey("integrity"));
+    }
+
+    @Test
+    void integrityGetterReadsOrDefaultsToEmpty() {
+        assertEquals("abc", SessionBundle.integrity(Map.of("integrity", "abc")));
+        assertEquals("", SessionBundle.integrity(Map.of("version", "x")));
+    }
 }

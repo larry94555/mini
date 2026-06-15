@@ -32,6 +32,28 @@ public final class SessionBundle {
         return m;
     }
 
+    /** True if this build understands the bundle's (major) version. */
+    public static boolean supports(String version) {
+        return version != null && version.startsWith("imini-session/1");
+    }
+
+    /** The content to hash for integrity: everything except the volatile/derived fields. Pure. */
+    public static Map<String, Object> contentForHash(Map<String, Object> bundle) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("version", bundle == null ? "" : bundle.getOrDefault("version", ""));
+        m.put("sessionId", bundle == null ? "" : bundle.getOrDefault("sessionId", ""));
+        m.put("messages", messages(bundle));
+        m.put("plans", plans(bundle));
+        m.put("todos", bundle == null ? List.of() : bundle.getOrDefault("todos", List.of()));
+        return m;
+    }
+
+    /** The stored integrity hash (or "" if none). */
+    public static String integrity(Map<String, Object> bundle) {
+        Object v = bundle == null ? null : bundle.get("integrity");
+        return v == null ? "" : String.valueOf(v);
+    }
+
     public static List<Map<String, Object>> todoPayload(List<TodoStore.Item> todos) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (todos != null) {

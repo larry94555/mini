@@ -1491,3 +1491,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** under each step in the live plan panel (and later in the plan-history viewer) a blue
   `[edits] files changed this step: ...` line appears beside that step's tool calls. (Requires
   `agent.audit.tool-calls=true`, which also drives the per-step transcript.)
+
+---
+
+# Bundle integrity / import options + per-skill enable/disable
+
+## 158. Integrity + version helpers (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionBundleTest` passes the new cases -- `supports` recognizes `imini-session/1` and
+  rejects `2`/null; `contentForHash` returns exactly version/sessionId/messages/plans/todos (no
+  `exportedAt`, no `integrity`); `integrity` reads the field or defaults to "".
+
+## 159. Integrity-checked import with modes (manual)
+
+- **Run:** export a session (`GET /session/export`); note the `integrity` field. Import it with `POST
+  /session/import?mode=new` -> a fresh `imp-...` session. Re-import with `mode=replace&target=<id>` or
+  `mode=merge&target=<id>` (a session you own) -> conversation replaced or appended; plans re-archived.
+  Edit a byte of the bundle and import -> `strict=true` (default) refuses with "integrity check failed";
+  `strict=false` imports with a `warning`. A bundle with an unsupported `version` is rejected.
+
+## 160. Per-skill enable/disable (manual)
+
+- **Setup:** at least one skill loaded; sign in as admin.
+- **Observe:** `GET /skills` lists skills with `enabled:true`. `POST /skills/toggle {"name":"X",
+  "enabled":false}` disables `X`; it then disappears from the prompt's skills index and `load_skill X`
+  returns "disabled". Re-enable to restore. In the UI, the admin-only *Skills* card shows a checkbox per
+  skill (and a *refresh* link); non-admins do not see the card. `skills.disabled=X` starts `X` off.

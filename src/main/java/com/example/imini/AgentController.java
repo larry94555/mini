@@ -58,11 +58,14 @@ public class AgentController {
     private final PlanStore plans;
     private final RunRecorder recorder;
     private final PlanHistory history;
+    private final SkillService skills;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
-                           AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history) {
+                           AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
+                           SkillService skills) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -76,6 +79,7 @@ public class AgentController {
         this.plans = plans;
         this.recorder = recorder;
         this.history = history;
+        this.skills = skills;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -419,22 +423,69 @@ public class AgentController {
                 if (full != null) plans.add(full);
             }
         }
-        return SessionBundle.build(sessionId, sessions.owner(sessionId), System.currentTimeMillis(),
-                sessions.get(sessionId), plans, todos.get(sessionId));
+        Map<String, Object> bundle = SessionBundle.build(sessionId, sessions.owner(sessionId),
+                System.currentTimeMillis(), sessions.get(sessionId), plans, todos.get(sessionId));
+        try {
+            bundle.put("integrity", SkillManifest.sha256(mapper.writeValueAsString(SessionBundle.contentForHash(bundle))));
+        } catch (Exception ignore) {
+            // integrity is best-effort
+        }
+        return bundle;
     }
 
     /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
     @PostMapping("/session/import")
-    public Map<String, Object> importSession(@RequestBody Map<String, Object> bundle) {
+    public Map<String, Object> importSession(@RequestBody Map<String, Object> bundle,
+            @RequestParam(name = "mode", defaultValue = "new") String mode,
+            @RequestParam(name = "target", required = false) String target,
+            @RequestParam(name = "strict", defaultValue = "true") boolean strict) {
         List<String> problems = SessionBundle.validate(bundle);
         if (!problems.isEmpty()) return Map.of("error", "invalid bundle", "problems", problems);
+        if (!SessionBundle.supports(String.valueOf(bundle.get("version")))) {
+            return Map.of("error", "unsupported bundle version",
+                    "version", String.valueOf(bundle.getOrDefault("version", "")));
+        }
 
-        String newId = "imp-" + UUID.randomUUID().toString().substring(0, 8);
-        sessions.claim(newId, currentUser());
+        // integrity: verify the stored hash against a recomputed one (strict => refuse on mismatch)
+        String warning = null;
+        String stored = SessionBundle.integrity(bundle);
+        if (!stored.isBlank()) {
+            String recomputed;
+            try {
+                recomputed = SkillManifest.sha256(mapper.writeValueAsString(SessionBundle.contentForHash(bundle)));
+            } catch (Exception e) {
+                recomputed = "";
+            }
+            if (!stored.equalsIgnoreCase(recomputed)) {
+                if (strict) return Map.of("error", "integrity check failed", "expected", stored, "actual", recomputed);
+                warning = "integrity mismatch (imported anyway)";
+            }
+        } else {
+            warning = "no integrity hash in bundle";
+        }
+
+        // resolve destination session + mode
+        String m = mode == null ? "new" : mode.trim().toLowerCase(java.util.Locale.ROOT);
+        String sessionId;
+        if (target != null && !target.isBlank() && !"new".equals(m)) {
+            sessionId = target.trim();
+            requireAccess(sessionId); // owner/admin/unowned for an existing target
+            sessions.claim(sessionId, currentUser());
+        } else {
+            sessionId = "imp-" + UUID.randomUUID().toString().substring(0, 8);
+            sessions.claim(sessionId, currentUser());
+            m = "new";
+        }
 
         List<Map<String, Object>> messages = SessionBundle.messages(bundle);
-        sessions.save(newId, messages);
-        todos.set(newId, SessionBundle.todos(bundle));
+        if ("merge".equals(m)) {
+            List<Map<String, Object>> combined = new java.util.ArrayList<>(sessions.get(sessionId));
+            combined.addAll(messages);
+            sessions.save(sessionId, combined);
+        } else { // new | replace
+            sessions.save(sessionId, messages);
+        }
+        todos.set(sessionId, SessionBundle.todos(bundle));
 
         // restore plan history oldest-first so seq numbering is preserved
         List<Map<String, Object>> plans = new java.util.ArrayList<>(SessionBundle.plans(bundle));
@@ -464,15 +515,50 @@ public class AgentController {
                         i++;
                     }
                 }
-                if (!items.isEmpty()) { history.archive(newId, goal, items, transcript, report); restored++; }
+                if (!items.isEmpty()) { history.archive(sessionId, goal, items, transcript, report); restored++; }
             } catch (Exception ignore) {
                 // skip a malformed plan; import the rest
             }
         }
-        audit.record(currentUser(), "import", "session:" + newId,
-                "messages=" + messages.size() + " plans=" + restored);
-        return Map.of("sessionId", newId, "messages", messages.size(), "plans", restored,
-                "todos", SessionBundle.todos(bundle).size());
+        audit.record(currentUser(), "import", "session:" + sessionId,
+                "mode=" + m + " messages=" + messages.size() + " plans=" + restored);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("sessionId", sessionId);
+        out.put("mode", m);
+        out.put("messages", messages.size());
+        out.put("plans", restored);
+        out.put("todos", SessionBundle.todos(bundle).size());
+        if (warning != null) out.put("warning", warning);
+        return out;
+    }
+
+    // ---- skills management -------------------------------------------------
+
+    /** List loaded skills (name, description, enabled) for the UI. Open to any authenticated user. */
+    @GetMapping("/skills")
+    public Map<String, Object> skills() {
+        List<Map<String, Object>> list = skills.listForUi();
+        return Map.of("skills", list, "count", list.size());
+    }
+
+    /** Enable/disable a skill (admin only; skills are a global resource). */
+    @PostMapping("/skills/toggle")
+    public Map<String, Object> toggleSkill(@RequestBody Map<String, Object> body) {
+        requireAdmin();
+        String name = String.valueOf(body.getOrDefault("name", ""));
+        boolean enabled = !Boolean.FALSE.equals(body.get("enabled")); // default to enable
+        boolean found = skills.setEnabled(name, enabled);
+        audit.record(currentUser(), "skill-toggle", "skill:" + name, enabled ? "enabled" : "disabled");
+        return Map.of("name", name, "enabled", enabled, "found", found, "skills", skills.listForUi());
+    }
+
+    /** Re-pull the configured remote skill repositories and reload (admin only). */
+    @PostMapping("/skills/refresh")
+    public Map<String, Object> refreshSkills() {
+        requireAdmin();
+        String msg = skills.refresh();
+        audit.record(currentUser(), "skill-refresh", "skills", msg);
+        return Map.of("message", msg, "skills", skills.listForUi());
     }
 
     // ---- retrieval / memory ------------------------------------------------
@@ -498,6 +584,14 @@ public class AgentController {
 
     private static String currentUser() {
         return RequestContext.current().user();
+    }
+
+    /** 403 unless the caller is an admin. */
+    private void requireAdmin() {
+        Principal p = RequestContext.current();
+        if (p == null || !p.isAdmin()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin only");
+        }
     }
 
     /** 403 unless the caller owns this session (or is admin, or the session is unowned). */

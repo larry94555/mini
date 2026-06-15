@@ -55,9 +55,9 @@ No cloud API key is required.
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
-| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, and a provenance registry (`search_skills`/`install_skill`, hash-verified) |
+| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), and per-skill enable/disable (UI + `/skills`) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, export/import), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import, skills toggles), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -173,7 +173,10 @@ http://localhost:8081
 | `POST /transfer` | `{sessionId,to}` transfer ownership; prior owner keeps read (owner/admin) |
 | `GET /plans?sessionId=` | List the session's archived plan history (newest first) |
 | `GET /session/export?sessionId=` | Download a portable bundle (conversation + plan history + todos) |
-| `POST /session/import` | Import a bundle JSON into a NEW session owned by you; returns its id |
+| `POST /session/import?mode=&target=&strict=` | Import a bundle (integrity-checked); mode new/replace/merge |
+| `GET /skills` | List loaded skills (name, description, enabled) |
+| `POST /skills/toggle` | `{name,enabled}` enable/disable a skill (admin) |
+| `POST /skills/refresh` | Re-pull remote skill repos and reload (admin) |
 | `GET /plan?sessionId=` | Read the current saved plan: goal + steps + statuses + per-step tool transcript |
 | `GET /plan?sessionId=&n=` | Read archived plan `n` from history: goal + steps + tools + coding report |
 | `GET /todos?sessionId=` | Read session todos |
@@ -480,10 +483,16 @@ SHA-256**, and -- only on a match -- writes the skill locally with its provenanc
 `sha256`) recorded in the front-matter. A hash mismatch refuses the install; an entry with no `sha256`
 installs with a warning.
 
+**Enable / disable.** Skills can be turned off without deleting them -- a disabled skill is dropped from
+the prompt index, auto-load, and `load_skill`. `GET /skills` lists every loaded skill with its `enabled`
+flag; admins flip one with `POST /skills/toggle {name, enabled}` (and re-pull remotes with `POST
+/skills/refresh`). The **web UI** shows a *Skills* card (admin only) with a checkbox per skill and a
+*refresh* link. Seed the disabled set at startup with `skills.disabled=name1,name2`.
+
 Config: `skills.enabled` (default true), `skills.dir` (default `skills`), `skills.auto-load` (default
 false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skills.cache-dir` (default
 `skill-cache`), `skills.repo-timeout-seconds` (default 60), `skills.repos-on-start` (default true),
-`skills.registry` (default empty).
+`skills.registry` (default empty), `skills.disabled` (default empty).
 
 > Honest scope: skills are READ-ONLY instructions, not executable bundles -- if a skill suggests
 > running a script, that still goes through `run_command` and the sandbox command policy (no auto-exec),
@@ -503,14 +512,26 @@ curl "localhost:8080/session/export?sessionId=proj" > proj.json   # download a b
 curl -XPOST localhost:8080/session/import --data @proj.json        # -> {sessionId, messages, plans, todos}
 ```
 
-`GET /session/export` returns a `imini-session/1` bundle (ownership/shared-read scoped). `POST
-/session/import` validates it, creates a **new** session owned by the caller, restores the conversation
-and todos, and re-archives each plan into the new session's history (oldest-first, preserving order);
-it returns the new session id and counts. In the **web UI**, the *Session bundle* card has *Export*
-(downloads `<sessionId>.json`) and *Import* (pick a bundle file; the UI switches to the new session).
+`GET /session/export` returns a `imini-session/1` bundle (ownership/shared-read scoped) and stamps it
+with an `integrity` SHA-256 over its content. `POST /session/import` validates the bundle, checks the
+version is supported, and (when an `integrity` hash is present) **recomputes and compares it** -- in the
+default `strict=true` mode a mismatch is refused; `strict=false` imports anyway with a warning. The
+`mode` controls the destination:
 
-> Honest scope: import always creates a new session (it never overwrites an existing one); the bundle is
-> plain JSON with no signing or encryption; very large sessions produce large bundles (no streaming).
+| `mode` | effect |
+| --- | --- |
+| `new` (default) | create a fresh `imp-...` session owned by you |
+| `replace` | restore into the `target` session (overwrites its conversation/todos) |
+| `merge` | append the bundle's messages to the `target` session |
+
+`replace`/`merge` need a `target=<sessionId>` you can manage; plans are re-archived oldest-first either
+way. In the **web UI**, the *Session bundle* card has *Export* (downloads `<sessionId>.json`), an import
+**mode** selector, and *Import* (pick a file -- `new` switches to the imported session; `replace`/`merge`
+target the current session).
+
+> Honest scope: integrity is a content SHA-256 (tamper-evidence), not a signature -- stripping the field
+> bypasses the check, and `strict=false` imports regardless. The bundle is plain JSON (no encryption, no
+> streaming for very large sessions). `merge` only appends messages (it does not de-duplicate).
 
 ## Session sharing and ownership
 
