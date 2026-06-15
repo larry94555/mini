@@ -206,6 +206,14 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Sharing carried by export/import bundles: the bundle version is now `imini-session/3` and carries the
+  session `owner` + `readers`; import with `restoreSharing=true` re-grants those readers (the importer
+  becomes owner). Integrity stays version-aware (v1 hashes without overrides/readers, v2 without
+  readers) and migration upconverts older bundles (`SessionBundle` readers/build/contentForHash/migrate,
+  unit-tested).
+- Activity view polish: the admin *Activity* card filters by user (exact) and action (substring), a
+  "this session only" toggle, and prev/next pagination; `GET /audit` gained `action`/`offset`
+  (`AuditLog.filter` overload, unit-tested).
 - Skill overrides carried by export/import bundles: the bundle version is now `imini-session/2` and
   carries `skillOverrides: [{name, enabled}]`; import re-applies them to the destination session.
   Integrity is version-aware (v1 bundles hash without the field, so old exports still verify) and
@@ -289,9 +297,9 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
 >    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. Activity view polish: filter by user/action/target and paginate the audit card; surface it as a
->    per-session timeline too.
-> 3. Bundle export of session sharing/ownership (and optional restore), so a migrated session can carry
->    its reader list, not just its content + skill overrides.
+> 2. CSV/JSON export of the audit trail (and a date range) for offline review or compliance archiving,
+>    building on the now-filterable `/audit`.
+> 3. A per-session activity tab in the session view (the "this session only" audit filter surfaced
+>    inline next to plan history), so non-admin owners can see their own session's events.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

@@ -1629,3 +1629,38 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** as an admin, the web UI shows an *Activity* card listing recent `/audit` events
   (time, user, action, target, outcome) -- e.g. `skill-session-toggle`, `import`, `skill-request`. A
   *refresh* link reloads it; non-admins do not see the card (and `GET /audit` is admin-gated).
+
+---
+
+# Audit filtering/pagination + sharing in bundles
+
+## 173. Audit filter + paging (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AuditLogTest` passes -- `filter` matches user (exact, case-insensitive), action
+  (substring, case-insensitive), and target (substring), and pages via offset/limit (offset past the end
+  yields none). `SessionBundleTest` covers the v3 changes (see case 174).
+
+## 174. Bundle v3 carries readers; version-aware hash + migration (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionBundleTest` passes -- `VERSION` is `imini-session/3`; `supports` accepts v1/v2/v3;
+  a built (v3) bundle hashes version/sessionId/messages/plans/todos/skillOverrides/readers, a v1 bundle
+  hashes none of the extras, and a v2 bundle hashes skillOverrides but NOT readers (so old integrity
+  values verify); a built bundle carries the reader list; v1 and v2 bundles migrate to v3 (gaining empty
+  readers).
+
+## 175. Activity card: filter, this-session, paginate (manual, admin)
+
+- **Observe:** as admin, the *Activity* card filters as you type a `user` or `action`; the "this session
+  only" toggle restricts to events whose target contains `session:<current>`; *prev*/*next* page through
+  results (prev disabled at the start; next disabled on a short page).
+
+## 176. Sharing restored on import (manual)
+
+- **Setup:** a session shared with `cara` (case 152), exported.
+- **Observe:** the exported JSON has `version: imini-session/3`, an `owner`, and `readers:["cara"]`.
+  Importing with the UI "restore shared-with list" checked (or `restoreSharing=true`) makes the new
+  session readable by `cara` again (you are its owner); the response reports `sharedWith`. Importing
+  without the option restores content only. Older v1/v2 bundles still import (integrity verifies; they
+  upconvert, granting no readers).

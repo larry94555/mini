@@ -314,9 +314,11 @@ public class AgentController {
     /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
     @GetMapping("/audit")
     public List<AuditLog.Entry> audit(@RequestParam(name = "user", defaultValue = "") String user,
+                                      @RequestParam(name = "action", defaultValue = "") String action,
                                       @RequestParam(name = "target", defaultValue = "") String target,
+                                      @RequestParam(name = "offset", defaultValue = "0") int offset,
                                       @RequestParam(name = "limit", defaultValue = "100") int limit) {
-        return audit.recent(user, target, limit);
+        return audit.recent(user, action, target, offset, limit);
     }
 
     // ---- remote approvals --------------------------------------------------
@@ -427,7 +429,8 @@ public class AgentController {
         }
         Map<String, Object> bundle = SessionBundle.build(sessionId, sessions.owner(sessionId),
                 System.currentTimeMillis(), sessions.get(sessionId), plans, todos.get(sessionId),
-                skills.sessionOverridesFor(sessionId));
+                skills.sessionOverridesFor(sessionId),
+                new java.util.ArrayList<>(sessions.readers(sessionId)));
         try {
             bundle.put("integrity", SkillManifest.sha256(mapper.writeValueAsString(SessionBundle.contentForHash(bundle))));
         } catch (Exception ignore) {
@@ -483,6 +486,7 @@ public class AgentController {
         out.put("supported", supported);
         out.put("preview", preview);
         out.put("skillOverrides", SessionBundle.skillOverrides(migrated).size());
+        out.put("readers", SessionBundle.readers(migrated).size());
         return out;
     }
 
@@ -490,7 +494,8 @@ public class AgentController {
     public Map<String, Object> importSession(@RequestBody Map<String, Object> bundle,
             @RequestParam(name = "mode", defaultValue = "new") String mode,
             @RequestParam(name = "target", required = false) String target,
-            @RequestParam(name = "strict", defaultValue = "true") boolean strict) {
+            @RequestParam(name = "strict", defaultValue = "true") boolean strict,
+            @RequestParam(name = "restoreSharing", defaultValue = "false") boolean restoreSharing) {
         List<String> problems = SessionBundle.validate(bundle);
         if (!problems.isEmpty()) return Map.of("error", "invalid bundle", "problems", problems);
 
@@ -551,6 +556,17 @@ public class AgentController {
             if (!sn.isBlank() && skills.setSessionEnabled(sessionId, sn, on)) overrides++;
         }
 
+        // optionally re-grant the bundle's reader list (the caller is the new owner)
+        int sharedWith = 0;
+        if (restoreSharing) {
+            for (String reader : SessionBundle.readers(bundle)) {
+                if (reader != null && !reader.isBlank() && !reader.equals(currentUser())) {
+                    sessions.share(sessionId, reader);
+                    sharedWith++;
+                }
+            }
+        }
+
         // restore plan history oldest-first so seq numbering is preserved
         List<Map<String, Object>> plans = new java.util.ArrayList<>(SessionBundle.plans(bundle));
         java.util.Collections.reverse(plans);
@@ -593,6 +609,7 @@ public class AgentController {
         out.put("plans", restored);
         out.put("todos", SessionBundle.todos(bundle).size());
         out.put("skillOverrides", overrides);
+        out.put("sharedWith", sharedWith);
         if (warning != null) out.put("warning", warning);
         return out;
     }
