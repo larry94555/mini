@@ -2,310 +2,258 @@
 
 This roadmap tracks the next improvements for `imini` as a Claude Code-style learning harness.
 
-`imini` already has the core educational harness pieces: agent loop, local llama.cpp model serving, tool calling, file tools, `apply_patch`, codebase navigation, git tools, sessions, checkpoints, retrieval, project memory, permissions, plan mode, todos, MCP, hooks, slash commands, web UI, remote approvals, auth/rate limiting, metrics, Docker, and CI.
+`imini` already has the core educational harness pieces: agent loop, local llama.cpp model serving, tool
+calling, file tools, `apply_patch`, codebase navigation, git tools, sessions, checkpoints, retrieval, a
+simple project-memory loader, permissions, plan mode, todos, MCP, hooks, slash commands, web UI, remote
+approvals, auth/rate limiting, metrics, Docker, and CI. The next work should not re-add those features.
 
-The next work should not re-add those features. It should make the existing system easier to learn from, easier to trust, and safer to run.
+## North-star priority
 
-## 1. Educational completeness
+The goal is to make `imini` a complete *educational* representation of the high-value, frequently used
+features of the Claude Code harness, while keeping the implementation small enough to read and
+understand in a weekend.
 
-Goal: a developer should be able to learn Claude Code-style harness architecture from this repository in a weekend.
+When choosing the next task, prefer features that are:
 
-### Next
+- used frequently in day-to-day Claude Code workflows,
+- educationally important for understanding the harness/model split,
+- small enough to implement and test deterministically,
+- useful even with a weak local llama.cpp model,
+- not already represented elsewhere in the repo.
 
-- Keep `docs/LEARNING_PATH.md` current as the main guided curriculum.
-- Keep `docs/TRACE_EDIT.md` current as the canonical end-to-end trace.
-- Keep `docs/CONCEPT_MAP.md` current as the mapping from agent concepts to implementation files.
-- Add more trace documents:
-  - `docs/traces/plan-mode.md`
-  - `docs/traces/remote-approval.md`
-  - `docs/traces/bad-tool-call-recovery.md`
-  - `docs/traces/mcp-tool-call.md`
-- Add small exercises at the end of each learning module.
-- Add a short demo script for recording a walkthrough video.
+Do **not** prioritize admin polish, monetization, packaging, or enterprise hardening ahead of missing
+core workflow representation -- unless the task is specifically about trust/security administration.
 
-### Later
+## High-value Claude Code feature coverage
 
-- Add diagrams for the agent loop, approval flow, and persistence flow.
-- Add a glossary for terms such as tool call, schema, compaction, checkpoint, MCP, hook, slash command, and sandbox.
-- Add a `docs/PRODUCTION_NOTES.md` file that explains what is educational versus production-grade.
+This is the main priority section. These are the high-frequency Claude Code workflows that are still
+missing or only partially represented in `imini`, in priority order.
 
-## 2. Source readability
+### Priority 1: Claude-like memory and `/init`
+
+The repo has a simple project-context loader (`ProjectContext` reads one top-level `IMINI.md` /
+`CLAUDE.md` / `AGENTS.md`). Claude Code's everyday workflow depends on richer, layered memory.
+
+- Add `/init` to inspect the repository and draft or update `CLAUDE.md`.
+- Add `/memory` to show loaded memory files and the effective memory context.
+- Support `CLAUDE.local.md`.
+- Support `.claude/CLAUDE.md`.
+- Support `.claude/rules/*.md`.
+- Support simple `@path` imports inside memory files.
+- Add diagnostics showing exactly which memory files loaded and why.
+
+### Priority 2: Explicit context references
+
+- Add `@file` and `@directory` prompt references.
+- Resolve references safely inside the workspace (no path traversal).
+- Add size/cap controls.
+- Show referenced context in trace/UI output.
+- Add MCP resource references later.
+
+### Priority 3: Skills UX parity
+
+The repo already has a substantial skills backend (local/remote `SKILL.md`, `load_skill`, `save_skill`,
+registry with provenance, enable/disable, proposals, session overrides, bundle export). Skills are
+**not** missing -- the remaining work is Claude-like *UX parity*:
+
+- Add `/skills`.
+- Add direct `/<skill-name>` invocation.
+- Add bundled educational skills such as `code-review`, `debug`, `batch`, and `loop`.
+- Add `$ARGUMENTS` substitution.
+- Add frontmatter support for `when_to_use`, `argument-hint`, and `allowed_tools`.
+- Add skill invocation trace entries.
+- Add `context: fork` later, after a subagent registry exists.
+
+### Priority 4: Custom subagent registry
+
+A single constrained research sub-agent exists (`SubAgent`); there is no registry or delegation surface.
+
+- Add `agents/*.md`.
+- Add `/agents`.
+- Add `/agent <name> <task>`.
+- Add `delegate_agent(name, task)`.
+- Provide built-in `explore`, `review`, `debug`, and `research` agents.
+- Support allowed tools and a model profile per agent.
+
+### Priority 5: Patch preview and review UX
+
+- Add `preview_patch`.
+- Add `apply_previewed_patch`.
+- Add `discard_previewed_patch`.
+- Add a browser diff viewer.
+- Add hunk-level approval later.
+
+### Later priorities
+
+- LSP-backed code intelligence.
+- Session fork/rename/export UX polish.
+- `/loop` and scheduled local tasks.
+- Image input.
+- Plugin packaging.
+
+## Current recommended priority
+
+The highest-value next feature is **Claude-like memory and `/init`**.
+
+The repo already has a simple project-context loader, but Claude Code's frequent workflow depends on
+richer memory:
+
+- `/init` to generate or improve `CLAUDE.md`,
+- `/memory` to inspect loaded instructions,
+- `CLAUDE.local.md`,
+- `.claude/rules/*.md`,
+- nested memory behavior,
+- simple memory diagnostics.
+
+After memory, implement `@file` / `@directory` references, then improve skill UX with `/skills` and
+direct `/<skill-name>` invocation.
+
+Do not prioritize activity-view polish, bundle metadata, monetization packaging, or cryptographic skill
+provenance ahead of these workflow features -- unless the current task is explicitly about
+trust/security administration.
+
+## Guidance for AI implementers
+
+This section helps future AI coding agents pick the next task correctly.
+
+- Prefer missing high-frequency Claude Code workflow features.
+- Prefer features that make the harness easier to learn from.
+- Prefer features that help a weak local model succeed.
+- Prefer deterministic, testable changes.
+- Avoid broad rewrites unless explicitly requested.
+- Keep formatting-only changes separate from behavior changes.
+- Do not continue polishing recently completed areas unless they are blocking.
+- Before implementing, check whether the feature already exists in `README.md`, the tests, and the
+  source files.
+
+Current top priorities:
+
+1. `/init` and richer memory.
+2. `@file` and `@directory` prompt references.
+3. Skills UX parity: `/skills`, direct skill invocation, bundled skills.
+4. Custom subagent registry.
+5. Patch preview and UI diff review.
+
+## Next 10 recommended PRs
+
+1. Add `/memory` diagnostics.
+2. Add `/init` to draft/update `CLAUDE.md`.
+3. Add `CLAUDE.local.md` and `.claude/rules/*.md` loading.
+4. Add `@file` references.
+5. Add `@directory` references.
+6. Add `/skills` and direct `/<skill-name>` invocation.
+7. Add bundled `code-review`, `debug`, `batch`, and `loop` skills.
+8. Add `agents/*.md` registry and `/agents`.
+9. Add `delegate_agent(name, task)`.
+10. Add `preview_patch` and a browser diff viewer.
+
+## Recently completed (summary)
+
+Short summary only; see the git history / PR notes for full detail.
+
+- **Skills:** local/remote `SKILL.md`, `load_skill`, `save_skill`, registry with provenance,
+  enable/disable, member proposals, per-session overrides, and bundle export.
+- **Plan mode:** execution, retry, re-planning, step verification, live streaming, persistence/resume,
+  history, and a per-step tool transcript.
+- **Edit trust:** git-backed edit summaries, structured coding reports, schema validation, and per-step
+  diff deltas.
+- **Sessions:** export/import, integrity checks, migration, import preview, sharing, and ownership
+  transfer.
+- **UI/ops:** plan-history viewer, activity view (filter/paginate/export), per-session activity,
+  sharing surface, and audit entries.
+
+## Supporting tracks (lower priority)
+
+These remain valuable but should come after the high-value Claude Code feature coverage above. They are
+not the immediate next priority.
+
+### Educational completeness
+
+Goal: a developer should be able to learn Claude Code-style harness architecture from this repo in a
+weekend.
+
+- Keep `docs/LEARNING_PATH.md`, `docs/TRACE_EDIT.md`, and `docs/CONCEPT_MAP.md` current.
+- Add more trace documents: plan-mode, remote-approval, bad-tool-call-recovery, mcp-tool-call.
+- Add small exercises at the end of each learning module and a short demo script.
+- Later: diagrams for the agent loop / approval / persistence flows; a glossary; a
+  `docs/PRODUCTION_NOTES.md` (educational vs production-grade).
+
+### Source readability
 
 Goal: the most important classes should be readable without a formatter or IDE magic.
 
-### Next
+- Continue manually reformatting high-value teaching files (`AgentEngine`, `BuiltinTools`,
+  `CodebaseTools`, `ContextManager`, `CheckpointStore`, `SessionStore`, `AgentController`,
+  `LlamaClient`).
+- Keep formatting-only changes separate from behavior changes; avoid huge one-line files.
+- Later: reintroduce automated formatting once JDK/formatter versions are pinned, then add a CI check.
 
-- Continue manually reformatting high-value teaching files:
-  - `AgentEngine.java`
-  - `BuiltinTools.java`
-  - `CodebaseTools.java`
-  - `ContextManager.java`
-  - `CheckpointStore.java`
-  - `SessionStore.java`
-  - `AgentController.java`
-  - `LlamaClient.java`
-- Keep formatting-only changes separate from behavior changes whenever possible.
-- Avoid huge one-line Java and Markdown files.
+### Deterministic harness tests
 
-### Later
+Goal: test harness behavior without a live model.
 
-- Reintroduce automated formatting once the local JDK and formatter versions are pinned and verified.
-- Add a formatting check in CI after the formatter is stable.
+- Add scripted traces for the real `AgentEngine` using a fake `LlamaClient`.
+- Test denied-approval recovery, interrupt/steer behavior, and checkpoint grouping for multi-file
+  patches.
+- Later: a small offline eval suite over fake model scripts; a live smoke suite when a local
+  `llama-server` is available.
 
-## 3. Deterministic harness tests
+### Edit trust and verification
 
-Goal: test harness behavior without depending on a live model.
+Goal: file changes should be easy to review and hard to misrepresent. (Edit summaries, coding reports,
+schema enforcement, and per-step diff deltas are done; explicit patch preview tooling is now Priority 5
+above.)
 
-### Done baseline
-
-- Schema validation tests.
-- Retry tests.
-- Sandbox tests.
-- Codebase navigation tests.
-- SSE serialization tests.
-- Fake-model harness tests.
-- Bad-model behavior scenarios.
-
-### Done since
-
-- Plan-mode executor with retry, re-planning, step verification (declared + auto-suggested checks), live SSE streaming, persistence/resume, and tool-call-level audit + per-step transcript -- all with deterministic pure-logic tests (`PlannerTest`, `PlanRecoveryTest`, `StepCheckTest`, `PlanPersistenceTest`, `PlanStreamTest`, `CheckLibraryTest`, `ToolCallTest`).
-
-### Next
-
-- Add scripted traces for the real `AgentEngine` using a fake `LlamaClient` once the engine is easier to instantiate in tests.
-- Test plan mode end-to-end: a mutating call should be recorded but not executed.
-- Test denied approval recovery: the model should receive a `DENIED` tool result and continue safely.
-- Test interrupt/steer behavior with a fake streaming model.
-- Test checkpoint grouping for multi-file patches.
-
-### Later
-
-- Add a small offline eval suite that runs against fake model scripts.
-- Add a live smoke suite that runs only when a local `llama-server` is available.
-
-## 4. Edit trust and verification
-
-Goal: file changes should be easy to review and hard to misrepresent.
-
-### Done since
-
-- Edit-trust summary: after any run that changed files, a git-verified block (`git status` +
-  `git diff --stat`) is appended to the final answer (`EditSummary` + `GitInspector`), and the plan
-  synthesis step is prompted to note changed files, verification, and risks. Pure parsing is unit
-  tested (`EditSummaryTest`). Toggle with `agent.verify-edits`.
-
-### Done since
-
-- Structured coding report: runs that change files end with a rendered report (changed files, commands
-  run, verification, tests not run, risks). Factual fields come from git + the tool recorder; soft
-  fields from a small JSON model call (`CodingReport`, unit-tested). Toggle with `agent.coding-report`.
-
-### Done since
-
-- Intermediate diff feedback: after each plan step that changes files, an `[edits this step]` note
-  (files changed + `git diff --stat`) is fed into later steps and the final synthesis, so the model can
-  react to unexpected diffs mid-plan (`EditSummary.stepNote`, unit-tested). Toggle with
-  `agent.plan.step-diff`.
-
-### Next
-
-- (done) Validate/enforce the report schema -- gaps (missing verification/risks/summary for changed
-  files) are flagged inline + logged via `CodingReport.validate`; see `agent.coding-report.enforce`.
-- Per-step diff *deltas* (snapshot/restore) rather than the cumulative working-tree stat, for precise
-  attribution of which step caused which change.
-
-### Later
-
-- Add explicit patch preview tools:
-  - `preview_patch`
-  - `apply_previewed_patch`
-  - `discard_previewed_patch`
-- Add a UI diff viewer.
 - Add a final-answer schema for coding tasks.
 - Add project-specific verification commands in `IMINI.md` or `.imini/config`.
 
-## 5. Codebase understanding
+### Codebase understanding
 
-Goal: improve the quality of repo understanding now that the deterministic navigation tools exist.
+Goal: improve repo-understanding quality on top of the existing deterministic navigation tools.
 
-### Next
+- Improve `repo_tree` for larger repos; better caps/paging for `grep`, `read_many`, `git_log`,
+  `git_blame`.
+- Make symbol extraction easier to extend by language; add edge-case tests.
+- Add a repository-map summary (tree + key files + top symbols).
+- Later: optional LSP-backed symbol lookup, dependency-graph summaries, call-site search, smarter
+  retrieval refresh after mutation.
 
-- Improve `repo_tree` output for larger repositories.
-- Add better caps and paging for `grep`, `read_many`, `git_log`, and `git_blame`.
-- Make symbol extraction easier to extend by language.
-- Add tests for symbol extraction edge cases.
-- Add a simple repository map summary that combines tree, key files, and top symbols.
+### Production safety
 
-### Later
-
-- Add optional LSP-backed symbol lookup.
-- Add dependency graph summaries for Java/Maven projects.
-- Add call-site search for selected languages.
-- Add smarter retrieval refresh after file mutation.
-
-## 6. Production safety
-
-Goal: move from educational safety controls to enforceable execution boundaries.
-
-### Biggest gap
-
-The biggest production gap is still command and tool isolation. Command screening and path checks are useful, but they are not a complete security boundary.
-
-### Next
+Goal: move from educational safety controls to enforceable execution boundaries. The biggest gap is
+still real command/tool isolation -- policy checks and path screening are not a complete boundary.
 
 - Document the difference between policy checks and real isolation.
 - Make `sandbox.command-mode=allowlist` the recommended shared-deployment setting.
 - Add a `/doctor` or startup check that warns when running without containerized command execution.
-- Add stricter defaults for shared or Docker deployment profiles.
-- Ensure all tool calls include run/session IDs in logs. (Done: mutating tool calls are audited with `session:<id>[ step:N]` attribution.)
+- Later: per-run/per-session container/jail, network off by default, workspace-only mounts, CPU/memory/
+  process limits, hardened MCP execution, and append-only audit of prompts/diffs/results.
 
-### Later
-
-- Run shell commands in a per-run or per-session container/jail.
-- Disable network by default for tool execution.
-- Mount only the workspace.
-- Add CPU, memory, and process limits.
-- Harden MCP server execution and permissions.
-- Add append-only audit logs for prompts, tool calls, approvals, diffs, and results. (Partly done: request-level + per-tool-call audit entries and a per-step tool transcript now exist; prompts/diffs/results not yet captured.)
-
-## 7. Multi-user and operations
+### Multi-user and operations
 
 Goal: make the app safer to run for more than one user.
 
-### Next
+- Clarify that API-key auth is app-level auth, not full identity/RBAC; add per-key attribution where
+  missing; document running behind a reverse proxy; add backup/restore notes for `.imini/imini.db`.
+- Later: per-user workspaces and permission policies, OAuth/OIDC, Prometheus/OpenTelemetry metrics, an
+  admin audit dashboard.
 
-- Clarify that API-key auth is app-level auth, not full identity/RBAC.
-- Add per-key attribution to run logs where missing.
-- Add docs for running behind a reverse proxy.
-- Add backup/restore notes for `.imini/imini.db`.
+### Trust/security administration
 
-### Later
+These are legitimate when the current task is explicitly about trust/security administration, but they
+should not jump ahead of the missing core workflow features above.
 
-- Per-user workspaces.
-- Per-user permission policies.
-- OAuth/OIDC or external auth integration.
-- Prometheus/OpenTelemetry metrics.
-- Admin audit dashboard.
+- Cryptographic provenance for skills and bundles (signing + a trust root) building on the existing
+  SHA-256 integrity hashing.
+- Record per-session skill toggles against the session target (so they appear in the per-session
+  activity tab) and add a `detail` column to audit entries.
+- Scheduled/rotating audit export to a file path or webhook for long-term retention.
 
-## 8. Monetization and packaging
+### Monetization and packaging
 
-Goal: package the project as a learning asset before trying to sell it as a developer tool.
+Goal: package the project as a learning asset before selling it as a developer tool. Lowest priority.
 
-### Next
-
-- Add a course outline.
-- Add a five-minute demo script.
-- Add a landing-page-style section to the README: who this is for and what they will learn.
-- Add a clear license if one is missing.
-
-### Later
-
-- Create workshop materials.
-- Add optional enterprise hardening modules.
-- Consider paid support or consulting only after the learning path is polished.
-
-## Recently completed
-
-- Audit trail export: `GET /audit/export?format=csv|json` downloads the (filtered) trail with a
-  `since`/`until` window; the admin *Activity* card has date pickers + Export CSV/JSON
-  (`AuditLog.filterRange`/`toCsv`, pure + unit-tested).
-- Per-session activity tab: `GET /session/activity?sessionId=` returns a session's own events (target ==
-  the session), readable by anyone with session access; the web UI shows a *Session activity* card with
-  paging, so non-admin owners/readers can see their session's history.
-- Sharing carried by export/import bundles: the bundle version is now `imini-session/3` and carries the
-  session `owner` + `readers`; import with `restoreSharing=true` re-grants those readers (the importer
-  becomes owner). Integrity stays version-aware (v1 hashes without overrides/readers, v2 without
-  readers) and migration upconverts older bundles (`SessionBundle` readers/build/contentForHash/migrate,
-  unit-tested).
-- Activity view polish: the admin *Activity* card filters by user (exact) and action (substring), a
-  "this session only" toggle, and prev/next pagination; `GET /audit` gained `action`/`offset`
-  (`AuditLog.filter` overload, unit-tested).
-- Skill overrides carried by export/import bundles: the bundle version is now `imini-session/2` and
-  carries `skillOverrides: [{name, enabled}]`; import re-applies them to the destination session.
-  Integrity is version-aware (v1 bundles hash without the field, so old exports still verify) and
-  migration upconverts v1 -> v2 (`SessionBundle` build/contentForHash/migrate/skillOverrides, unit-tested).
-- Consolidated activity view: an admin-only *Activity* card in the web UI renders recent `/audit`
-  entries (skill toggles, session overrides, proposals, imports, etc.) without curling.
-- Per-session skill overrides: a skill can be enabled/disabled for one session on top of the global
-  default (`POST /skills/session-toggle` / `session-reset`, `GET /skills?sessionId=`); the effective
-  state (override else global, via the pure `SkillService.effectiveEnabled`, unit-tested) drives that
-  session's skills index/auto-load. Persisted in `session_skill_state`; UI per-row session checkbox +
-  reset + admin global link.
-- Requester-facing proposal status: members see their own proposals + status (`GET
-  /skills/requests/mine`), can withdraw (`/skills/requests/withdraw`) or edit (`/skills/requests/update`)
-  a pending one; the UI *Skills* card shows a "my requests" list.
-- Import preview: `POST /session/import/preview` (and a UI *Preview* button) projects an import's
-  before/incoming/after counts for messages/todos/plans under the chosen mode, plus integrity/version
-  status, without applying anything (`SessionBundle.preview`, pure, unit-tested).
-- Member skill proposals: members can `POST /skills/request {name,description,body}` to queue a skill
-  proposal; admins review via `GET /skills/requests` and `POST /skills/requests/resolve {id,approve}`
-  (approve saves it). Backed by `skill_requests` (in-memory without a DB); UI form + admin queue.
-- Persisted skill toggles + member-visible skills list: enable/disable state is stored in a `skill_state`
-  table (survives restart; in-memory when no DB), and the web UI *Skills* card is now visible to all --
-  members get a read-only list, admins keep the checkboxes + refresh.
-- Bundle version/migration path: import normalizes older/looser bundles (missing or `imini-session/0`
-  version, legacy `history` alias, string `todos`) into the current shape via `SessionBundle.migrate`
-  (pure, unit-tested), after the integrity check and before the version gate.
-- Bundle integrity + import options: exports carry an `integrity` SHA-256 over their content; import
-  recomputes/compares it (strict by default) and supports `mode=new|replace|merge` into a chosen
-  `target` session, with a version-support gate (`SessionBundle.supports`/`contentForHash`/`integrity`,
-  unit-tested).
-- Per-skill enable/disable + Skills card: `GET /skills` lists loaded skills with an `enabled` flag;
-  admins toggle via `POST /skills/toggle` and re-pull via `POST /skills/refresh`; disabled skills drop
-  out of the index/auto-load/load_skill. The web UI has an admin-only *Skills* card. `skills.disabled`
-  seeds the off set.
-- Session export / import: a whole session (conversation + plan history with steps/tools/reports +
-  todos) exports as a portable `imini-session/1` JSON bundle (`GET /session/export`) and imports into a
-  new owned session (`POST /session/import`), with a *Session bundle* card in the UI (`SessionBundle`
-  pure build/validate, unit-tested).
-- Per-step deltas in the web UI: each step's `[edits this step]` delta now also shows as a blue
-  `[edits]` line under the step in the live plan panel and the plan-history viewer (`RunRecorder.note`
-  feeds the per-step transcript).
-- Per-step diff deltas (snapshot/restore): each plan step's `[edits this step]` note now reports the
-  step's EXACT delta by snapshotting the working tree before/after into a throwaway git index and
-  diffing the snapshots (attributes re-edits correctly; per-step not cumulative). Falls back to the
-  recorder-delta + cumulative stat when snapshots are unavailable (`agent.plan.step-diff.snapshot`;
-  `GitInspector.snapshotTree`/`diff*Between`, `EditSummary.parseNames` unit-tested).
-- Web UI sharing surface: a *Sharing* card shows the session owner + readers and offers share / revoke /
-  transfer over the existing endpoints (controls gated to owner/admin/unowned client-side); refreshes on
-  session switch and after each action.
-- Skill registry with provenance: a manifest of available skills (`{name, description, source, version,
-  sha256}`) drives `search_skills` (lexical) and `install_skill`, which fetches a skill from its source,
-  VERIFIES the SHA-256, and saves it locally with provenance front-matter; remote repos can be pinned
-  with `url#ref` (`SkillManifest` + `SkillLibrary.splitRepoSpec`, unit-tested; `skills.registry`).
-- Web UI plan-history + report viewer: a *Plan history* card lists a session's past plans and expands
-  any one to its step checklist (with per-step tools) and coding report, reusing the streaming plan
-  renderer; refreshes on run completion and session switch; ownership/shared-read scoped.
-- Skills Phase 3 (remote repositories, read-only): an allowlist of git URLs (`skills.repos`) is
-  cloned/pulled read-only into a cache and merged with local skills (local overrides remote,
-  earlier-repo-wins via `SkillLibrary.merge`, unit-tested); `refresh_skills` re-pulls. Instructions
-  only -- no executable bundles. A skill registry with provenance/signing is the remaining piece.
-- Session sharing / ownership transfer: an owner can grant read access (`POST /share`/`/unshare`),
-  inspect access (`GET /shares`), and transfer ownership (`POST /transfer`, prior owner kept as reader);
-  read endpoints resolve via `Ownership.canRead` (unit-tested), management stays owner/admin-only.
-- Skills (Phase 1 + 2): reusable `SKILL.md` instruction bundles discovered from `skills/`, a short
-  index injected into the system prompt, `load_skill` (progressive disclosure) + `save_skill` (capture
-  knowledge) tools, optional `skills.auto-load` for weaker models (`SkillLibrary` pure + unit-tested,
-  `SkillService`). Read-only instructions only -- no executable bundles or remote repos yet.
-- Plan history: completed plans are archived per session (goal + final checklist + per-step tool
-  transcript + coding report), listed at `GET /plans` and fetched at `GET /plan?n=<seq>`
-  (`PlanHistory`, pure `summarize` unit-tested; `agent.plan.history-max`).
-- Coding-report schema enforcement: incomplete reports (no verification/risks/summary for changed
-  files) are flagged inline + logged (`CodingReport.validate`, unit-tested; `agent.coding-report.enforce`).
-
-## Current recommended priority
-
-The plan-mode arc is now complete end to end: structured execution, retry, re-planning, step
-verification (declared + suggested checks), live UI streaming, persistence/resume, and tool-call-level
-audit with a per-step transcript that is now surfaced in the web UI.
-
-The next highest-leverage engineering changes are:
-
-> 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
->    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. Record per-session skill toggles against the session target (not just skill:NAME) so they show in
->    the per-session activity tab, and add a detail column to audit entries.
-> 3. Scheduled/rotating audit export to a file path (or webhook) for long-term retention beyond the
->    in-table window.
-
-Both are much smaller than full sandboxing and continue to improve trust and learnability.
+- Add a course outline, a five-minute demo script, a README "who this is for" section, and a clear
+  license if missing.
+- Later: workshop materials, optional enterprise hardening modules, paid support/consulting only after
+  the learning path is polished.
