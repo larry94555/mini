@@ -206,6 +206,14 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Per-session skill overrides: a skill can be enabled/disabled for one session on top of the global
+  default (`POST /skills/session-toggle` / `session-reset`, `GET /skills?sessionId=`); the effective
+  state (override else global, via the pure `SkillService.effectiveEnabled`, unit-tested) drives that
+  session's skills index/auto-load. Persisted in `session_skill_state`; UI per-row session checkbox +
+  reset + admin global link.
+- Requester-facing proposal status: members see their own proposals + status (`GET
+  /skills/requests/mine`), can withdraw (`/skills/requests/withdraw`) or edit (`/skills/requests/update`)
+  a pending one; the UI *Skills* card shows a "my requests" list.
 - Import preview: `POST /session/import/preview` (and a UI *Preview* button) projects an import's
   before/incoming/after counts for messages/todos/plans under the chosen mode, plus integrity/version
   status, without applying anything (`SessionBundle.preview`, pure, unit-tested).
@@ -275,8 +283,9 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
 >    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. Notify/track proposal outcomes for the requester (a "my requests" view + status), and allow a
->    member to edit/withdraw a pending proposal.
-> 3. Per-session skill overrides (enable/disable a skill for one session) on top of the global toggle.
+> 2. Carry per-session skill overrides through session export/import bundles, so a shared/imported
+>    session keeps its tuned skill set.
+> 3. A consolidated audit/activity view in the UI (skill toggles, proposals, imports) so admins can see
+>    recent governance actions without curling `/audit`.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

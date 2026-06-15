@@ -93,12 +93,22 @@ public class AgentLoop {
         return systemPrompt() + skills.autoLoadAddendum(query);
     }
 
+    /** Session-aware prompt: the skills index honors this session's per-session overrides. */
+    private String systemPromptFor(String sessionId) {
+        return BASE_SYSTEM_PROMPT + AgentProfile.guidance(profile) + project.addendum()
+                + skills.indexAddendum(sessionId);
+    }
+
+    private String systemPromptFor(String query, String sessionId) {
+        return systemPromptFor(sessionId) + skills.autoLoadAddendum(query, sessionId);
+    }
+
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userQuestion)) return slash.help();
         String question = slash.expand(userQuestion);
         recorder.beginEdits(sessionId);
-        return withEditTrust(sessionId, engine.run(systemPrompt(question), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
+        return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
@@ -136,7 +146,7 @@ public class AgentLoop {
         List<String> steps = Planner.parsePlan(planText);
         if (steps.isEmpty()) {
             sink.log("plan: no steps parsed; running directly");
-            return withEditTrust(sessionId, engine.run(systemPrompt(), g, registry.tools(), mode, "main", sessionId, sink), mode, sink);
+            return withEditTrust(sessionId, engine.run(systemPromptFor(sessionId), g, registry.tools(), mode, "main", sessionId, sink), mode, sink);
         }
         sink.log("plan: " + steps.size() + " step(s)");
 
@@ -146,7 +156,7 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return finishPlan(sessionId, g, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+        return finishPlan(sessionId, g, engine.run(systemPromptFor(sessionId), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
@@ -170,7 +180,7 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return finishPlan(sessionId, g, engine.run(systemPrompt(), Planner.synthesisPrompt(g, results),
+        return finishPlan(sessionId, g, engine.run(systemPromptFor(sessionId), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
@@ -181,7 +191,7 @@ public class AgentLoop {
             java.util.Set<String> beforePaths = planStepDiff ? recorder.changedPaths(sessionId) : java.util.Set.of();
             String beforeTree = (planStepDiff && planStepSnapshot) ? git.snapshotTree() : "";
             try {
-                String out = engine.run(systemPrompt(), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
+                String out = engine.run(systemPromptFor(sessionId), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
                 if (planStepDiff) {
                     java.util.List<String> delta;
                     String stat;

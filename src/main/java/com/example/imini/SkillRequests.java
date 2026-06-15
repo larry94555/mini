@@ -75,6 +75,34 @@ public class SkillRequests {
         return out;
     }
 
+    /** Requests submitted by a given user, newest first. */
+    public List<Map<String, Object>> listByRequester(String requester) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> r : list(null)) {
+            if (requester != null && requester.equals(r.get("requester"))) out.add(r);
+        }
+        return out;
+    }
+
+    /** Update a proposal's editable fields (caller checks ownership/status). */
+    public boolean update(String id, String name, String description, String body) {
+        if (db != null && db.available()) {
+            try {
+                return db.update("UPDATE skill_requests SET name=?, description=?, body=? WHERE id=?",
+                        name, description, body, id) > 0;
+            } catch (Exception e) {
+                log.warn("[skill-req] update failed: " + e.getMessage());
+                return false;
+            }
+        }
+        Map<String, Object> r = mem.get(id);
+        if (r == null) return false;
+        r.put("name", name);
+        r.put("description", description);
+        r.put("body", body);
+        return true;
+    }
+
     public Map<String, Object> get(String id) {
         if (db != null && db.available()) {
             List<Map<String, Object>> r = db.query(

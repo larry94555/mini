@@ -1574,3 +1574,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   for the member but lists the proposal for the admin. As the admin, *approve* -> the skill is saved and
   now appears (enabled) in the skills list and `load_skill`; *reject* -> it is marked rejected and not
   saved. Both outcomes are audited.
+
+---
+
+# Per-session skill overrides + requester "my requests"
+
+## 167. Effective-enablement resolution (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SkillServiceTest` passes -- `effectiveEnabled` returns the global default when there is
+  no override, and the override (true or false) when one is present.
+
+## 168. Per-session skill override (manual)
+
+- **Setup:** at least one enabled skill; a session you can access.
+- **Observe:** `POST /skills/session-toggle {sessionId, name, enabled:false}` (or unchecking the per-row
+  box in the *Skills* card) drops that skill from the session's prompt index / auto-load for that
+  session only -- other sessions are unaffected. `GET /skills?sessionId=<id>` shows `enabled:false`,
+  `global:true`, `override:false`. *reset* (`/skills/session-reset`) removes the override and the skill
+  returns to its global state. Admins can still flip the global default via the `[global]` link.
+  Overrides survive a restart (DB-backed).
+
+## 169. My requests: status, withdraw, edit (manual)
+
+- **Setup:** a non-admin member who has submitted a proposal (case 166).
+- **Observe:** `GET /skills/requests/mine` (the "my requests" list in the *Skills* card) shows the
+  member's proposals with status. While `pending`, `POST /skills/requests/withdraw {id}` marks it
+  `withdrawn` and `POST /skills/requests/update {id,...}` edits it; both reject another user's request
+  (403) and refuse once a request is no longer pending. After an admin approves/rejects, the status
+  updates accordingly.
