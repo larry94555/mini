@@ -57,7 +57,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted global + per-session overrides), and member skill proposals (admin-reviewed, with a "my requests" view) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides + sharing, skills toggles + proposals, filterable activity log), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides + sharing, skills toggles + proposals, filterable activity log w/ CSV/JSON export, per-session activity), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -204,6 +204,8 @@ http://localhost:8081
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
+| `GET /audit/export?format=csv\|json&since=&until=&...` | Download the (filtered, windowed) audit trail (admin) |
+| `GET /session/activity?sessionId=&offset=&limit=` | This session's events (anyone with session access) |
 | `GET /` | Browser UI |
 
 ## Plan-driven execution
@@ -667,6 +669,20 @@ curl "localhost:8080/audit?user=bob"               -H "X-API-Key: <admin>"
 curl "localhost:8080/audit?action=skill&offset=20" -H "X-API-Key: <admin>"
 curl "localhost:8080/audit?target=session:proj"    -H "X-API-Key: <admin>"
 ```
+
+**Export.** `GET /audit/export?format=csv|json` downloads the trail (same `user`/`action`/`target`
+filters plus a `since`/`until` epoch-millis window; `0` = unbounded) as a `text/csv` or
+`application/json` attachment -- the admin *Activity* card has date pickers and *Export CSV*/*Export
+JSON* buttons. CSV is RFC-4180-escaped.
+
+```
+curl "localhost:8080/audit/export?format=csv&since=1717200000000" -H "X-API-Key: <admin>" -o audit.csv
+```
+
+**Per-session activity.** `GET /session/activity?sessionId=<id>` returns just that session's events
+(those whose audit target is the session) and is readable by **anyone with access to the session**, not
+only admins -- so a session owner or reader can see their own session's history (imports, sharing
+changes, etc.). The web UI shows a *Session activity* card (with prev/next) for the current session.
 
 ### Tool-call detail & per-step transcript
 

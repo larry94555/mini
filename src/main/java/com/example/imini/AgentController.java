@@ -3,6 +3,7 @@ package com.example.imini;
 import com.example.imini.PermissionService.Mode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -319,6 +320,50 @@ public class AgentController {
                                       @RequestParam(name = "offset", defaultValue = "0") int offset,
                                       @RequestParam(name = "limit", defaultValue = "100") int limit) {
         return audit.recent(user, action, target, offset, limit);
+    }
+
+    /** Download the audit trail as CSV or JSON, with optional filters and a [since, until] window (ms). */
+    @GetMapping("/audit/export")
+    public ResponseEntity<String> auditExport(
+            @RequestParam(name = "format", defaultValue = "csv") String format,
+            @RequestParam(name = "user", defaultValue = "") String user,
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "target", defaultValue = "") String target,
+            @RequestParam(name = "since", defaultValue = "0") long since,
+            @RequestParam(name = "until", defaultValue = "0") long until,
+            @RequestParam(name = "limit", defaultValue = "1000") int limit) {
+        List<AuditLog.Entry> rows = audit.range(user, action, target, since, until, limit);
+        boolean json = "json".equalsIgnoreCase(format);
+        String body;
+        try {
+            body = json ? mapper.writeValueAsString(rows) : AuditLog.toCsv(rows);
+        } catch (Exception e) {
+            body = json ? "[]" : AuditLog.toCsv(rows);
+        }
+        String filename = "audit." + (json ? "json" : "csv");
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
+                .contentType(json ? MediaType.APPLICATION_JSON : MediaType.valueOf("text/csv"))
+                .body(body);
+    }
+
+    /** Session-scoped activity (events whose target is this session) -- readable by anyone with access. */
+    @GetMapping("/session/activity")
+    public Map<String, Object> sessionActivity(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "offset", defaultValue = "0") int offset,
+            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        requireRead(sessionId);
+        String tag = "session:" + sessionId;
+        List<AuditLog.Entry> hits = audit.recent(null, null, tag, 0, 1000);
+        List<AuditLog.Entry> exact = new java.util.ArrayList<>();
+        for (AuditLog.Entry e : hits) {
+            if (tag.equals(e.target())) exact.add(e); // avoid prefix collisions (session:s1 vs session:s12)
+        }
+        int from = Math.max(0, offset);
+        List<AuditLog.Entry> page = new java.util.ArrayList<>();
+        for (int i = from; i < exact.size() && page.size() < Math.max(1, limit); i++) page.add(exact.get(i));
+        return Map.of("sessionId", sessionId, "offset", from, "entries", page);
     }
 
     // ---- remote approvals --------------------------------------------------

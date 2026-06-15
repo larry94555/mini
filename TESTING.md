@@ -1664,3 +1664,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   session readable by `cara` again (you are its owner); the response reports `sharedWith`. Importing
   without the option restores content only. Older v1/v2 bundles still import (integrity verifies; they
   upconvert, granting no readers).
+
+---
+
+# Audit export + per-session activity
+
+## 177. Range filter + CSV (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AuditLogTest` passes the new cases -- `filterRange` applies a `[since, until]` window
+  (0 = unbounded) and caps with `limit`; `toCsv` writes the header row and RFC-4180-escapes fields
+  containing commas/quotes/newlines.
+
+## 178. Download the audit trail (manual, admin)
+
+- **Run:** `GET /audit/export?format=csv` (and `format=json`), optionally with `user`/`action`/`target`
+  and `since`/`until` (epoch ms). In the UI, set the date pickers and click *Export CSV* / *Export JSON*.
+- **Observe:** a `text/csv` (or `application/json`) attachment downloads with the filtered, windowed
+  rows; CSV opens cleanly in a spreadsheet (quoted fields intact). Non-admins are blocked (the `/audit`
+  path is admin-gated).
+
+## 179. Per-session activity tab (manual)
+
+- **Setup:** a session with some events (an import, a share change); sign in as the owner (non-admin).
+- **Observe:** the *Session activity* card lists that session's events (e.g. `import`, `session-share`)
+  with prev/next paging; switching sessions reloads it. `GET /session/activity?sessionId=<id>` works for
+  the owner/readers (requireRead) and returns only entries whose target is exactly `session:<id>` (no
+  prefix collisions). A user with no access gets 403.

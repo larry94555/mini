@@ -117,6 +117,14 @@
       <div id="planHistory" class="muted">(none)</div>
       <div id="planHistoryDetail" style="margin-top:8px;display:none"></div>
     </div>
+    <div class="card" id="sessionActivityCard">
+      <h3>Session activity <a class="linklike" id="refreshSessActLink" title="Reload this session's events">refresh</a></h3>
+      <div id="sessActList" class="muted">(none)</div>
+      <div class="row" style="gap:6px;margin-top:4px;align-items:center">
+        <button id="sessActPrev">prev</button><button id="sessActNext">next</button>
+        <span class="muted" id="sessActPage" style="font-size:11px"></span>
+      </div>
+    </div>
     <div class="card">
       <h3>Sharing <a class="linklike" id="refreshShares" title="Reload who can see this session">refresh</a></h3>
       <div id="shareInfo" class="muted">(loading)</div>
@@ -186,6 +194,14 @@
       <div class="row" style="gap:6px;margin-top:4px;align-items:center">
         <button id="auditPrev">prev</button><button id="auditNext">next</button>
         <span class="muted" id="auditPage" style="font-size:11px"></span>
+      </div>
+      <div class="row" style="gap:4px;margin-top:6px">
+        <input id="auditSince" type="date" title="from (inclusive)" style="flex:1"/>
+        <input id="auditUntil" type="date" title="to (inclusive)" style="flex:1"/>
+      </div>
+      <div class="row" style="gap:6px;margin-top:4px">
+        <button id="auditCsv" title="Download matching entries as CSV">Export CSV</button>
+        <button id="auditJson" title="Download matching entries as JSON">Export JSON</button>
       </div>
     </div>
   </div>
@@ -395,6 +411,7 @@ $("#sessionSelect").onchange = async (e) => {
   });
   refreshTodos(); refreshCheckpoints();
   $("#planHistoryDetail").style.display = "none"; refreshPlanHistory(); refreshSharing();
+  state.sessActOffset = 0; refreshSessionActivity();
 };
 async function refreshTodos(){
   const j = await getJson("/todos?sessionId="+encodeURIComponent(state.session));
@@ -628,6 +645,28 @@ async function withdrawReq(id){
   refreshMyRequests();
   if (state.me.admin) refreshSkillRequests();
 }
+const SESSACT_PAGE = 20;
+async function refreshSessionActivity(){
+  const el = $("#sessActList");
+  if (!el) return;
+  const off = state.sessActOffset || 0;
+  const j = await getJson("/session/activity?sessionId=" + encodeURIComponent(state.session)
+    + "&offset=" + off + "&limit=" + SESSACT_PAGE);
+  const rows = (j && Array.isArray(j.entries)) ? j.entries : [];
+  if (!rows.length){ el.innerHTML = off > 0 ? "(no more events)" : "(no events for this session)"; }
+  else el.innerHTML = rows.map(e =>
+    '<div style="font-size:11px;border-top:1px solid var(--border);padding:3px 0">'
+    + '<span class="muted">' + escapeHtml(String(e.time || e.ts || "")) + '</span> '
+    + escapeHtml(String(e.user || "")) + ' <b>' + escapeHtml(String(e.action || "")) + '</b>'
+    + (e.outcome ? ' <span class="muted">' + escapeHtml(String(e.outcome)) + '</span>' : '')
+    + '</div>').join("");
+  const page = $("#sessActPage"); if (page) page.textContent = "from " + (off + 1);
+  const prev = $("#sessActPrev"); if (prev) prev.disabled = off === 0;
+  const next = $("#sessActNext"); if (next) next.disabled = rows.length < SESSACT_PAGE;
+}
+$("#refreshSessActLink").onclick = () => { state.sessActOffset = 0; refreshSessionActivity(); };
+$("#sessActPrev").onclick = () => { state.sessActOffset = Math.max(0, (state.sessActOffset || 0) - SESSACT_PAGE); refreshSessionActivity(); };
+$("#sessActNext").onclick = () => { state.sessActOffset = (state.sessActOffset || 0) + SESSACT_PAGE; refreshSessionActivity(); };
 const AUDIT_PAGE = 20;
 async function refreshAudit(){
   const el = $("#auditList");
@@ -660,6 +699,34 @@ $("#auditNext").onclick = () => { state.auditOffset = (state.auditOffset || 0) +
 $("#auditUser").oninput = auditReload;
 $("#auditAction").oninput = auditReload;
 $("#auditThisSession").onchange = auditReload;
+function dateMs(id, endOfDay){
+  const v = $(id) && $(id).value;
+  if (!v) return 0;
+  const t = Date.parse(v);
+  if (isNaN(t)) return 0;
+  return endOfDay ? t + 86399999 : t;
+}
+async function exportAudit(format){
+  const u = ($("#auditUser") && $("#auditUser").value.trim()) || "";
+  const a = ($("#auditAction") && $("#auditAction").value.trim()) || "";
+  const since = dateMs("#auditSince", false), until = dateMs("#auditUntil", true);
+  let qs = "?format=" + encodeURIComponent(format) + "&limit=1000";
+  if (u) qs += "&user=" + encodeURIComponent(u);
+  if (a) qs += "&action=" + encodeURIComponent(a);
+  if ($("#auditThisSession") && $("#auditThisSession").checked) qs += "&target=" + encodeURIComponent("session:" + state.session);
+  if (since) qs += "&since=" + since;
+  if (until) qs += "&until=" + until;
+  try {
+    const r = await fetch("/audit/export" + qs, { headers: headers() });
+    if (!r.ok){ appendLog("[audit] export failed (" + r.status + ")"); return; }
+    const text = await r.text();
+    const url = URL.createObjectURL(new Blob([text], { type: format === "json" ? "application/json" : "text/csv" }));
+    const el = document.createElement("a"); el.href = url; el.download = "audit." + (format === "json" ? "json" : "csv"); el.click();
+    URL.revokeObjectURL(url);
+  } catch (e){ appendLog("[audit] export error"); }
+}
+$("#auditCsv").onclick = () => exportAudit("csv");
+$("#auditJson").onclick = () => exportAudit("json");
 $("#refreshAuditLink").onclick = refreshAudit;
 async function refreshMetrics(){
   const j = await getJson("/metrics");
@@ -690,7 +757,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>
