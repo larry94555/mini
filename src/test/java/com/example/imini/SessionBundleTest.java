@@ -54,8 +54,9 @@ class SessionBundleTest {
 
     @Test
     void supportsRecognizesTheMajorVersion() {
-        assertTrue(SessionBundle.supports("imini-session/1"));
-        assertFalse(SessionBundle.supports("imini-session/2"));
+        assertTrue(SessionBundle.supports("imini-session/1")); // legacy still importable
+        assertTrue(SessionBundle.supports("imini-session/2")); // current
+        assertFalse(SessionBundle.supports("imini-session/9"));
         assertFalse(SessionBundle.supports(null));
     }
 
@@ -65,10 +66,18 @@ class SessionBundleTest {
                 List.of(Map.of("role", "user", "content", "hi")), List.of(), List.of());
         b.put("integrity", "deadbeef");
         Map<String, Object> c = SessionBundle.contentForHash(b);
-        assertEquals(List.of("version", "sessionId", "messages", "plans", "todos"),
-                new java.util.ArrayList<>(c.keySet()));
+        assertEquals(List.of("version", "sessionId", "messages", "plans", "todos", "skillOverrides"),
+                new java.util.ArrayList<>(c.keySet())); // v2 hashes the overrides too
         assertFalse(c.containsKey("exportedAt"));
         assertFalse(c.containsKey("integrity"));
+
+        // a legacy v1 bundle is hashed WITHOUT skillOverrides, so old integrity values still verify
+        Map<String, Object> v1 = new java.util.LinkedHashMap<>();
+        v1.put("version", "imini-session/1");
+        v1.put("sessionId", "s");
+        v1.put("messages", List.of());
+        v1.put("todos", List.of());
+        assertFalse(SessionBundle.contentForHash(v1).containsKey("skillOverrides"));
     }
 
     @Test
@@ -110,6 +119,22 @@ class SessionBundleTest {
         Map<String, Object> m = SessionBundle.migrate(cur);
         assertEquals(SessionBundle.VERSION, m.get("version"));
         assertEquals("completed", SessionBundle.todos(m).get(0).status());
+    }
+
+    @Test
+    void bundleCarriesSkillOverridesAndV1MigratesToCurrentWithEmptyOverrides() {
+        List<Map<String, Object>> ov = List.of(Map.of("name", "commit-message", "enabled", false));
+        Map<String, Object> b = SessionBundle.build("s", "o", 1L, List.of(), List.of(), List.of(), ov);
+        assertEquals("imini-session/2", b.get("version"));
+        assertEquals(1, SessionBundle.skillOverrides(b).size());
+        assertEquals("commit-message", SessionBundle.skillOverrides(b).get(0).get("name"));
+
+        Map<String, Object> v1 = new java.util.LinkedHashMap<>();
+        v1.put("version", "imini-session/1");
+        v1.put("messages", List.of());
+        Map<String, Object> mig = SessionBundle.migrate(v1);
+        assertEquals(SessionBundle.VERSION, mig.get("version"));
+        assertTrue(SessionBundle.skillOverrides(mig).isEmpty());
     }
 
     @SuppressWarnings("unchecked")

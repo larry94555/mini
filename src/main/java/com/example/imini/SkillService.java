@@ -94,6 +94,21 @@ public class SkillService {
         return out;
     }
 
+    /** A session's per-session overrides as [{name, enabled}] (for export bundles). */
+    public synchronized List<Map<String, Object>> sessionOverridesFor(String sessionId) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        Map<String, Boolean> m = sessionId == null ? null : sessionOverrides.get(sessionId);
+        if (m != null) {
+            for (Map.Entry<String, Boolean> e : m.entrySet()) {
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("name", e.getKey());
+                r.put("enabled", e.getValue());
+                out.add(r);
+            }
+        }
+        return out;
+    }
+
     /** Set a per-session override (true/false) for a skill. */
     public synchronized boolean setSessionEnabled(String sessionId, String name, boolean on) {
         if (byName(name) == null || sessionId == null || sessionId.isBlank()) return false;

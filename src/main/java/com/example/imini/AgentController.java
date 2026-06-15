@@ -426,7 +426,8 @@ public class AgentController {
             }
         }
         Map<String, Object> bundle = SessionBundle.build(sessionId, sessions.owner(sessionId),
-                System.currentTimeMillis(), sessions.get(sessionId), plans, todos.get(sessionId));
+                System.currentTimeMillis(), sessions.get(sessionId), plans, todos.get(sessionId),
+                skills.sessionOverridesFor(sessionId));
         try {
             bundle.put("integrity", SkillManifest.sha256(mapper.writeValueAsString(SessionBundle.contentForHash(bundle))));
         } catch (Exception ignore) {
@@ -481,6 +482,7 @@ public class AgentController {
         out.put("version", String.valueOf(migrated.get("version")));
         out.put("supported", supported);
         out.put("preview", preview);
+        out.put("skillOverrides", SessionBundle.skillOverrides(migrated).size());
         return out;
     }
 
@@ -541,6 +543,14 @@ public class AgentController {
         }
         todos.set(sessionId, SessionBundle.todos(bundle));
 
+        // restore per-session skill overrides onto the destination session
+        int overrides = 0;
+        for (Map<String, Object> ov : SessionBundle.skillOverrides(bundle)) {
+            String sn = String.valueOf(ov.get("name"));
+            boolean on = !Boolean.FALSE.equals(ov.get("enabled"));
+            if (!sn.isBlank() && skills.setSessionEnabled(sessionId, sn, on)) overrides++;
+        }
+
         // restore plan history oldest-first so seq numbering is preserved
         List<Map<String, Object>> plans = new java.util.ArrayList<>(SessionBundle.plans(bundle));
         java.util.Collections.reverse(plans);
@@ -582,6 +592,7 @@ public class AgentController {
         out.put("messages", messages.size());
         out.put("plans", restored);
         out.put("todos", SessionBundle.todos(bundle).size());
+        out.put("skillOverrides", overrides);
         if (warning != null) out.put("warning", warning);
         return out;
     }
