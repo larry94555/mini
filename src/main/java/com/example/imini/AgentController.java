@@ -61,13 +61,14 @@ public class AgentController {
     private final PlanHistory history;
     private final SkillService skills;
     private final SkillRequests skillRequests;
+    private final ProjectContext project;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
-                           SkillService skills, SkillRequests skillRequests) {
+                           SkillService skills, SkillRequests skillRequests, ProjectContext project) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -83,6 +84,7 @@ public class AgentController {
         this.history = history;
         this.skills = skills;
         this.skillRequests = skillRequests;
+        this.project = project;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -809,6 +811,24 @@ public class AgentController {
     public Map<String, String> memory(@RequestParam(name = "q") String q,
                                       @RequestParam(name = "k", defaultValue = "5") int k) {
         return Map.of("result", retrieval.search(q, k));
+    }
+
+    /** Project-memory diagnostics: which CLAUDE.md-style files loaded (and imports), in order. */
+    @GetMapping("/memory/files")
+    public Map<String, Object> memoryFiles() {
+        List<MemoryLoader.Source> sources = project.diagnostics();
+        List<Map<String, Object>> files = new java.util.ArrayList<>();
+        int totalBytes = 0;
+        for (MemoryLoader.Source s : sources) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("path", s.path());
+            m.put("reason", s.reason());
+            m.put("bytes", s.bytes());
+            m.put("depth", s.depth());
+            files.add(m);
+            if (!s.reason().startsWith("skipped")) totalBytes += s.bytes();
+        }
+        return Map.of("files", files, "count", files.size(), "totalBytes", totalBytes, "report", project.report());
     }
 
     // ---- helpers -----------------------------------------------------------
