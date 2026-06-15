@@ -206,6 +206,12 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Import preview: `POST /session/import/preview` (and a UI *Preview* button) projects an import's
+  before/incoming/after counts for messages/todos/plans under the chosen mode, plus integrity/version
+  status, without applying anything (`SessionBundle.preview`, pure, unit-tested).
+- Member skill proposals: members can `POST /skills/request {name,description,body}` to queue a skill
+  proposal; admins review via `GET /skills/requests` and `POST /skills/requests/resolve {id,approve}`
+  (approve saves it). Backed by `skill_requests` (in-memory without a DB); UI form + admin queue.
 - Persisted skill toggles + member-visible skills list: enable/disable state is stored in a `skill_state`
   table (survives restart; in-memory when no DB), and the web UI *Skills* card is now visible to all --
   members get a read-only list, admins keep the checkboxes + refresh.
@@ -269,9 +275,8 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
 >    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. A skills management surface for members beyond read-only: request/propose a skill, or per-session
->    skill overrides, rather than only the global admin toggle.
-> 3. Bundle diff/preview before import (show what a replace/merge would change) to make the new import
->    modes safer.
+> 2. Notify/track proposal outcomes for the requester (a "my requests" view + status), and allow a
+>    member to edit/withdraw a pending proposal.
+> 3. Per-session skill overrides (enable/disable a skill for one session) on top of the global toggle.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.

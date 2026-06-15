@@ -55,9 +55,9 @@ No cloud API key is required.
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
-| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), and per-skill enable/disable (persisted; member-visible list, admin toggles) |
+| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted; member-visible list, admin toggles), and member skill proposals (admin-reviewed) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import, skills toggles), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview, skills toggles + proposals), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -93,6 +93,7 @@ No cloud API key is required.
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
 | `SkillManifest.java` | Pure skill-registry manifest: parse, lexical search, SHA-256 verify |
+| `SkillRequests.java` | Queue of member skill proposals awaiting admin review (DB-backed) |
 | `SkillService.java` | Loads local + remote skills; index; `load_skill`/`save_skill`/`refresh_skills`/`search_skills`/`install_skill` |
 | `ProjectContext.java` | Loads `IMINI.md`, `CLAUDE.md`, or `AGENTS.md` into the system prompt |
 | `TodoStore.java` | Per-session task checklists |
@@ -174,9 +175,13 @@ http://localhost:8081
 | `GET /plans?sessionId=` | List the session's archived plan history (newest first) |
 | `GET /session/export?sessionId=` | Download a portable bundle (conversation + plan history + todos) |
 | `POST /session/import?mode=&target=&strict=` | Import a bundle (integrity-checked); mode new/replace/merge |
+| `POST /session/import/preview?mode=&target=` | Project an import's before/incoming/after counts (no apply) |
 | `GET /skills` | List loaded skills (name, description, enabled) |
 | `POST /skills/toggle` | `{name,enabled}` enable/disable a skill (admin) |
 | `POST /skills/refresh` | Re-pull remote skill repos and reload (admin) |
+| `POST /skills/request` | `{name,description,body}` propose a skill (any member) |
+| `GET /skills/requests?status=` | List skill proposals (admin) |
+| `POST /skills/requests/resolve` | `{id,approve}` approve (save) or reject a proposal (admin) |
 | `GET /plan?sessionId=` | Read the current saved plan: goal + steps + statuses + per-step tool transcript |
 | `GET /plan?sessionId=&n=` | Read archived plan `n` from history: goal + steps + tools + coding report |
 | `GET /todos?sessionId=` | Read session todos |
@@ -492,6 +497,12 @@ members see a **read-only** list of skills and their state, while admins get the
 *refresh* link. Seed the disabled set at startup with `skills.disabled=name1,name2` (the persisted state
 takes over once an admin toggles).
 
+**Member proposals.** Members who cannot toggle skills can still *propose* one: `POST /skills/request`
+with `{name, description, body}` queues a proposal (the UI *Skills* card has a "Propose a skill" form
+for everyone). Admins review the queue with `GET /skills/requests`, then `POST /skills/requests/resolve`
+with `{id, approve}` -- approving saves it as a local skill (same path as `save_skill`), rejecting just
+marks it. Proposals live in the `skill_requests` table (in-memory without a DB).
+
 Config: `skills.enabled` (default true), `skills.dir` (default `skills`), `skills.auto-load` (default
 false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skills.cache-dir` (default
 `skill-cache`), `skills.repo-timeout-seconds` (default 60), `skills.repos-on-start` (default true),
@@ -537,6 +548,11 @@ the integrity check, which is always over the bundle as received): a missing or 
 version is stamped to the current one, a legacy `history` key is read as `messages`, and `todos` given
 as plain strings are wrapped into `{content, status:"pending"}`. A bundle whose (migrated) version is
 still unsupported is rejected.
+
+**Preview.** `POST /session/import/preview` (or the UI *Preview* button) reports what an import *would*
+do without touching anything: the integrity status (`ok`/`mismatch`/`none`), the (migrated) version and
+whether it is supported, and a before/incoming/after count for messages, todos, and plans under the
+chosen mode -- so you can see that, say, a `merge` would grow messages from 10 to 15 before committing.
 
 > Honest scope: integrity is a content SHA-256 (tamper-evidence), not a signature -- stripping the field
 > bypasses the check, and `strict=false` imports regardless. The bundle is plain JSON (no encryption, no
