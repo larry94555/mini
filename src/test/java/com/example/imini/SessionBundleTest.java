@@ -76,4 +76,39 @@ class SessionBundleTest {
         assertEquals("abc", SessionBundle.integrity(Map.of("integrity", "abc")));
         assertEquals("", SessionBundle.integrity(Map.of("version", "x")));
     }
+
+    @Test
+    void migrateWrapsStringTodosAndStampsVersion() {
+        java.util.Map<String, Object> b = new java.util.LinkedHashMap<>();
+        b.put("version", "imini-session/1");
+        b.put("messages", List.of());
+        b.put("todos", List.of("buy milk", "walk dog"));
+        Map<String, Object> m = SessionBundle.migrate(b);
+        List<TodoStore.Item> todos = SessionBundle.todos(m);
+        assertEquals(2, todos.size());
+        assertEquals("buy milk", todos.get(0).content());
+        assertEquals("pending", todos.get(0).status());
+    }
+
+    @Test
+    void migrateRenamesHistoryAndStampsMissingVersion() {
+        java.util.Map<String, Object> b = new java.util.LinkedHashMap<>();
+        b.put("history", List.of(Map.of("role", "user", "content", "hi")));
+        Map<String, Object> m = SessionBundle.migrate(b);
+        assertEquals(SessionBundle.VERSION, m.get("version"));
+        assertEquals(1, SessionBundle.messages(m).size());
+        assertFalse(m.containsKey("history"));
+        assertTrue(SessionBundle.supports(String.valueOf(m.get("version"))));
+    }
+
+    @Test
+    void migrateUpconvertsLegacyVersionAndLeavesCurrentAlone() {
+        assertEquals(SessionBundle.VERSION,
+                SessionBundle.migrate(Map.of("version", "imini-session/0", "messages", List.of())).get("version"));
+        Map<String, Object> cur = SessionBundle.build("s", "o", 1L, List.of(), List.of(),
+                List.of(new TodoStore.Item("t", "completed")));
+        Map<String, Object> m = SessionBundle.migrate(cur);
+        assertEquals(SessionBundle.VERSION, m.get("version"));
+        assertEquals("completed", SessionBundle.todos(m).get(0).status());
+    }
 }

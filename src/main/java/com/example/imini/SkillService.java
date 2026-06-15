@@ -24,6 +24,7 @@ public class SkillService {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SkillService.class);
 
     private final Sandbox sandbox;
+    private final Database db;
 
     @Value("${skills.enabled:true}") private boolean enabled;
     @Value("${skills.dir:skills}") private String skillsDir;
@@ -39,8 +40,9 @@ public class SkillService {
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
     private final java.util.Set<String> disabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    public SkillService(Sandbox sandbox) {
+    public SkillService(Sandbox sandbox, Database db) {
         this.sandbox = sandbox;
+        this.db = db;
     }
 
     @PostConstruct
@@ -51,6 +53,7 @@ public class SkillService {
                 if (!t.isEmpty()) disabled.add(t.toLowerCase(Locale.ROOT));
             }
         }
+        loadDisabledState(); // persisted toggles survive restart
         if (reposOnStart && !repoList().isEmpty()) {
             refresh(); // clone/pull configured repos, then reload
         } else {
@@ -86,7 +89,33 @@ public class SkillService {
         if (byName(name) == null) return false;
         String key = name.trim().toLowerCase(Locale.ROOT);
         if (on) disabled.remove(key); else disabled.add(key);
+        persistState(key, on);
         return true;
+    }
+
+    private void loadDisabledState() {
+        if (db == null || !db.available()) return;
+        try {
+            db.query("SELECT name, enabled FROM skill_state", rs -> {
+                try {
+                    if (rs.getInt(2) == 0) disabled.add(rs.getString(1).toLowerCase(Locale.ROOT));
+                } catch (Exception ignore) {
+                }
+                return new int[0];
+            });
+        } catch (Exception e) {
+            log.warn("[skills] could not load skill_state: " + e.getMessage());
+        }
+    }
+
+    private void persistState(String key, boolean on) {
+        if (db == null || !db.available()) return; // in-memory only when no DB
+        try {
+            db.update("INSERT INTO skill_state(name, enabled) VALUES(?, ?) "
+                    + "ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled", key, on ? 1 : 0);
+        } catch (Exception e) {
+            log.warn("[skills] could not persist skill_state: " + e.getMessage());
+        }
     }
 
     private Path dir() {

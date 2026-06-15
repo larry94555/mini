@@ -1518,3 +1518,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   "enabled":false}` disables `X`; it then disappears from the prompt's skills index and `load_skill X`
   returns "disabled". Re-enable to restore. In the UI, the admin-only *Skills* card shows a checkbox per
   skill (and a *refresh* link); non-admins do not see the card. `skills.disabled=X` starts `X` off.
+
+---
+
+# Persisted skill toggles + member list, and bundle migration
+
+## 161. Bundle migration (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionBundleTest` passes the migration cases -- string `todos` are wrapped into
+  `{content, status:"pending"}`; a legacy `history` key becomes `messages` and a missing version is
+  stamped to the current one; `imini-session/0` upconverts to current while an already-current bundle is
+  left intact.
+
+## 162. Skill toggle persists across restart (manual)
+
+- **Setup:** a DB-backed run (default), at least one skill, signed in as admin.
+- **Observe:** disable a skill via the UI *Skills* card (or `POST /skills/toggle`); stop and restart the
+  app; `GET /skills` still reports that skill `enabled:false` and it stays out of the prompt index /
+  `load_skill`. Re-enable it; the change again survives a restart. With no database configured the
+  toggle still works for the running process (not persisted).
+
+## 163. Member read-only skills list (manual)
+
+- **Setup:** keys for an admin and a non-admin member.
+- **Observe:** both see the *Skills* card. The admin sees checkboxes and a *refresh* link and can toggle.
+  The member sees the same skills with their enabled state but the checkboxes are disabled and there is
+  no *refresh* link; attempting a toggle has no effect (and `POST /skills/toggle` returns 403 for a
+  member regardless).

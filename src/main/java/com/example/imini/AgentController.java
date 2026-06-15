@@ -441,12 +441,9 @@ public class AgentController {
             @RequestParam(name = "strict", defaultValue = "true") boolean strict) {
         List<String> problems = SessionBundle.validate(bundle);
         if (!problems.isEmpty()) return Map.of("error", "invalid bundle", "problems", problems);
-        if (!SessionBundle.supports(String.valueOf(bundle.get("version")))) {
-            return Map.of("error", "unsupported bundle version",
-                    "version", String.valueOf(bundle.getOrDefault("version", "")));
-        }
 
-        // integrity: verify the stored hash against a recomputed one (strict => refuse on mismatch)
+        // integrity: verify the stored hash against a recomputed one (over the bundle AS RECEIVED, before
+        // any migration), strict => refuse on mismatch
         String warning = null;
         String stored = SessionBundle.integrity(bundle);
         if (!stored.isBlank()) {
@@ -462,6 +459,13 @@ public class AgentController {
             }
         } else {
             warning = "no integrity hash in bundle";
+        }
+
+        // migrate older/looser bundles into the current shape, THEN gate on the (migrated) version
+        bundle = SessionBundle.migrate(bundle);
+        if (!SessionBundle.supports(String.valueOf(bundle.get("version")))) {
+            return Map.of("error", "unsupported bundle version",
+                    "version", String.valueOf(bundle.getOrDefault("version", "")));
         }
 
         // resolve destination session + mode

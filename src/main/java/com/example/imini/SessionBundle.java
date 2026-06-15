@@ -37,6 +37,47 @@ public final class SessionBundle {
         return version != null && version.startsWith("imini-session/1");
     }
 
+    /**
+     * Normalize an older / looser bundle into the current shape (pure). Handles: a missing or legacy
+     * ({@code imini-session/0}) version (stamped to {@link #VERSION} after transforms); a {@code history}
+     * alias for {@code messages}; and {@code todos} given as plain strings (wrapped to
+     * {@code {content, status:"pending"}}). A bundle already at the current version is returned
+     * essentially unchanged. Run this AFTER verifying integrity (which is over the bundle as received).
+     */
+    public static Map<String, Object> migrate(Map<String, Object> bundle) {
+        Map<String, Object> b = new LinkedHashMap<>();
+        if (bundle != null) b.putAll(bundle);
+        String version = b.get("version") == null ? "" : String.valueOf(b.get("version"));
+        boolean legacy = version.isBlank() || version.equals("imini-session/0");
+
+        if (!b.containsKey("messages") && b.get("history") instanceof List) {
+            b.put("messages", b.remove("history")); // legacy alias
+            legacy = true;
+        }
+        Object todos = b.get("todos");
+        if (todos instanceof List<?> l) {
+            List<Map<String, Object>> norm = new ArrayList<>();
+            boolean changed = false;
+            for (Object e : l) {
+                if (e instanceof Map<?, ?> m) {
+                    Map<String, Object> t = new LinkedHashMap<>();
+                    t.put("content", m.get("content") == null ? "" : String.valueOf(m.get("content")));
+                    t.put("status", m.get("status") == null ? "pending" : String.valueOf(m.get("status")));
+                    norm.add(t);
+                } else { // a plain string -> wrap it
+                    Map<String, Object> t = new LinkedHashMap<>();
+                    t.put("content", e == null ? "" : String.valueOf(e));
+                    t.put("status", "pending");
+                    norm.add(t);
+                    changed = true;
+                }
+            }
+            if (changed) b.put("todos", norm);
+        }
+        if (legacy) b.put("version", VERSION);
+        return b;
+    }
+
     /** The content to hash for integrity: everything except the volatile/derived fields. Pure. */
     public static Map<String, Object> contentForHash(Map<String, Object> bundle) {
         Map<String, Object> m = new LinkedHashMap<>();

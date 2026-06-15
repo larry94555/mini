@@ -55,7 +55,7 @@ No cloud API key is required.
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
-| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), and per-skill enable/disable (UI + `/skills`) |
+| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), and per-skill enable/disable (persisted; member-visible list, admin toggles) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import, skills toggles), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
@@ -87,7 +87,7 @@ No cloud API key is required.
 | `Sandbox.java` | Command screening, read confinement, optional container execution wrapper |
 | `CheckpointStore.java` | Snapshot-before-edit and rewind |
 | `SessionStore.java` | Session history persistence |
-| `SessionBundle.java` | Pure build/validate/extract of a portable session export bundle |
+| `SessionBundle.java` | Pure build/validate/extract/migrate of a portable session export bundle |
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
 | `RetrievalService.java` | Workspace indexing and memory search |
@@ -486,8 +486,11 @@ installs with a warning.
 **Enable / disable.** Skills can be turned off without deleting them -- a disabled skill is dropped from
 the prompt index, auto-load, and `load_skill`. `GET /skills` lists every loaded skill with its `enabled`
 flag; admins flip one with `POST /skills/toggle {name, enabled}` (and re-pull remotes with `POST
-/skills/refresh`). The **web UI** shows a *Skills* card (admin only) with a checkbox per skill and a
-*refresh* link. Seed the disabled set at startup with `skills.disabled=name1,name2`.
+/skills/refresh`). Toggles are **persisted** in the `skill_state` table, so they survive a restart (with
+no database configured they are in-memory for the run). The **web UI** shows a *Skills* card to everyone:
+members see a **read-only** list of skills and their state, while admins get the checkboxes and the
+*refresh* link. Seed the disabled set at startup with `skills.disabled=name1,name2` (the persisted state
+takes over once an admin toggles).
 
 Config: `skills.enabled` (default true), `skills.dir` (default `skills`), `skills.auto-load` (default
 false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skills.cache-dir` (default
@@ -528,6 +531,12 @@ default `strict=true` mode a mismatch is refused; `strict=false` imports anyway 
 way. In the **web UI**, the *Session bundle* card has *Export* (downloads `<sessionId>.json`), an import
 **mode** selector, and *Import* (pick a file -- `new` switches to the imported session; `replace`/`merge`
 target the current session).
+
+**Migration.** Import normalizes older or looser bundles into the current shape before restoring (after
+the integrity check, which is always over the bundle as received): a missing or `imini-session/0`
+version is stamped to the current one, a legacy `history` key is read as `messages`, and `todos` given
+as plain strings are wrapped into `{content, status:"pending"}`. A bundle whose (migrated) version is
+still unsupported is rejected.
 
 > Honest scope: integrity is a content SHA-256 (tamper-evidence), not a signature -- stripping the field
 > bypasses the check, and `strict=false` imports regardless. The bundle is plain JSON (no encryption, no
