@@ -490,13 +490,16 @@ async function refreshSkills(){
   const j = await getJson("/skills");
   const el = $("#skillsList");
   if (!el) return;
+  const admin = state.me.admin;
+  const link = $("#refreshSkillsLink");
+  if (link) link.style.display = admin ? "" : "none"; // members get a read-only list
   const list = (j && Array.isArray(j.skills)) ? j.skills : [];
   if (!list.length){ el.innerHTML = "(no skills loaded)"; return; }
   el.innerHTML = list.map(s =>
     '<label style="display:block;font-size:12px;line-height:1.6" title="'+escapeHtml(String(s.description||""))+'">'
     + '<input type="checkbox" class="skillToggle" data-name="'+escapeHtml(String(s.name))+'"'
-    + (s.enabled ? ' checked' : '') + '/> ' + escapeHtml(String(s.name)) + '</label>').join("");
-  el.querySelectorAll(".skillToggle").forEach(cb => cb.onchange = () => toggleSkill(cb.getAttribute("data-name"), cb.checked));
+    + (s.enabled ? ' checked' : '') + (admin ? '' : ' disabled') + '/> ' + escapeHtml(String(s.name)) + '</label>').join("");
+  if (admin) el.querySelectorAll(".skillToggle").forEach(cb => cb.onchange = () => toggleSkill(cb.getAttribute("data-name"), cb.checked));
 }
 async function toggleSkill(name, enabled){
   const r = await post("/skills/toggle", { name: name, enabled: enabled });
@@ -527,8 +530,8 @@ async function refreshIdentity(){
     const card = $("#metricsCard");
     if (card) card.style.display = admin ? "" : "none";
     const sc = $("#skillsCard");
-    if (sc) sc.style.display = admin ? "" : "none";
-    if (admin) refreshSkills();
+    if (sc) sc.style.display = ""; // visible to all; toggles are admin-only (read-only for members)
+    refreshSkills();
     if (admin && !metricsTimer){ refreshMetrics(); metricsTimer = setInterval(refreshMetrics, 5000); }
     if (!admin && metricsTimer){ clearInterval(metricsTimer); metricsTimer = null; }
   } catch (e) { /* leave UI as-is on error */ }

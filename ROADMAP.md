@@ -206,6 +206,12 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Persisted skill toggles + member-visible skills list: enable/disable state is stored in a `skill_state`
+  table (survives restart; in-memory when no DB), and the web UI *Skills* card is now visible to all --
+  members get a read-only list, admins keep the checkboxes + refresh.
+- Bundle version/migration path: import normalizes older/looser bundles (missing or `imini-session/0`
+  version, legacy `history` alias, string `todos`) into the current shape via `SessionBundle.migrate`
+  (pure, unit-tested), after the integrity check and before the version gate.
 - Bundle integrity + import options: exports carry an `integrity` SHA-256 over their content; import
   recomputes/compares it (strict by default) and supports `mode=new|replace|merge` into a chosen
   `target` session, with a version-support gate (`SessionBundle.supports`/`contentForHash`/`integrity`,
@@ -263,9 +269,9 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
 >    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. A bundle version/migration path (read older `imini-session/N` bundles into the current shape), now
->    that imports gate on `SessionBundle.supports`.
-> 3. Per-skill enable/disable persistence (survive restart) + a non-admin read-only skills list in the
->    UI so members can see what's available.
+> 2. A skills management surface for members beyond read-only: request/propose a skill, or per-session
+>    skill overrides, rather than only the global admin toggle.
+> 3. Bundle diff/preview before import (show what a replace/merge would change) to make the new import
+>    modes safer.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
