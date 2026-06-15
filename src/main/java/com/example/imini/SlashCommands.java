@@ -54,6 +54,7 @@ public class SlashCommands {
     public String help() {
         StringBuilder sb = new StringBuilder("Available slash commands:\n");
         sb.append("  /memory            show which project-memory files are loaded\n");
+        sb.append("  /init              scan the repo and draft/update CLAUDE.md\n");
         if (templates.isEmpty()) {
             sb.append("  (none -- add .md files to the commands/ folder)");
         } else {

@@ -97,6 +97,8 @@ No cloud API key is required.
 | `SkillService.java` | Loads local + remote skills; index; `load_skill`/`save_skill`/`refresh_skills`/`search_skills`/`install_skill` |
 | `ProjectContext.java` | Loads layered memory files (`CLAUDE.md`, `.claude/rules/*.md`, ...) into the system prompt; backs `/memory` |
 | `MemoryLoader.java` | Pure memory helpers: candidate load order + `@path` import expansion |
+| `RepoScan.java` / `InitDraft.java` | Pure `/init` logic: build-system/language detection + `CLAUDE.md` draft |
+| `InitService.java` | Scans the repo and creates/drafts `CLAUDE.md`; backs `/init` |
 | `TodoStore.java` | Per-session task checklists |
 | `InterruptService.java` | Per-session interrupt and steering |
 | `Approvals.java` | Pending remote approval registry |
@@ -202,6 +204,7 @@ http://localhost:8081
 | `POST /index` | Build or rebuild retrieval index |
 | `GET /memory?q=&k=` | Search indexed workspace memory (retrieval) |
 | `GET /memory/files` | Project-memory diagnostics: which memory files loaded, in order, and why |
+| `POST /init?write=&overwrite=` | Scan the repo and draft `CLAUDE.md` (optionally write it) |
 | `GET /health` | Health check |
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
@@ -457,6 +460,26 @@ Loaded project memory (3 entries, 412 bytes):
 > Note: this replaces the earlier single-file behavior (only the first of `IMINI.md`/`CLAUDE.md`/
 > `AGENTS.md`). All present layered files now load; a repo with just one of them behaves as before.
 > `GET /memory/files` is the memory-file view; `GET /memory?q=` remains the separate retrieval search.
+
+### Bootstrapping memory with `/init`
+
+Don't have a `CLAUDE.md` yet? Type `/init` in chat. `imini` scans the repository -- detecting the build
+system, primary languages, and top-level layout -- and drafts a `CLAUDE.md` scaffold with sections for
+overview, build/test commands, layout, conventions, and agent notes. The scan is **deterministic** (no
+model call), so it works reliably even with a weak local model.
+
+- If `CLAUDE.md` does **not** exist, `/init` writes it and reports what it found; it is immediately
+  picked up as project memory (confirm with `/memory`). Fill in the Conventions/Notes sections.
+- If `CLAUDE.md` **already** exists, `/init` never overwrites it: it shows the proposed draft and lists
+  any scaffold sections your file is missing, so you can copy what you want.
+
+For explicit control, `POST /init?write=true` creates the file (and `&overwrite=true` replaces an
+existing one); without `write` it returns a preview (build system, languages, missing sections, draft).
+
+```
+curl -X POST "localhost:8080/init"                       -H "X-API-Key: <key>"   # preview only
+curl -X POST "localhost:8080/init?write=true"            -H "X-API-Key: <key>"   # create if absent
+```
 
 ## Skills
 
