@@ -590,9 +590,33 @@ public class AgentController {
 
     /** List loaded skills (name, description, enabled) for the UI. Open to any authenticated user. */
     @GetMapping("/skills")
-    public Map<String, Object> skills() {
-        List<Map<String, Object>> list = skills.listForUi();
+    public Map<String, Object> skills(@RequestParam(name = "sessionId", required = false) String sessionId) {
+        List<Map<String, Object>> list = skills.listForUi(sessionId);
         return Map.of("skills", list, "count", list.size());
+    }
+
+    /** Set a per-session skill override (enable/disable for this session only). */
+    @PostMapping("/skills/session-toggle")
+    public Map<String, Object> sessionToggleSkill(@RequestBody Map<String, Object> body) {
+        String sessionId = String.valueOf(body.getOrDefault("sessionId", ""));
+        requireAccess(sessionId);
+        String name = String.valueOf(body.getOrDefault("name", ""));
+        boolean enabled = !Boolean.FALSE.equals(body.get("enabled"));
+        boolean found = skills.setSessionEnabled(sessionId, name, enabled);
+        audit.record(currentUser(), "skill-session-toggle", "skill:" + name,
+                sessionId + " " + (enabled ? "enabled" : "disabled"));
+        return Map.of("name", name, "enabled", enabled, "found", found, "skills", skills.listForUi(sessionId));
+    }
+
+    /** Clear a per-session override (revert this skill to the global default for this session). */
+    @PostMapping("/skills/session-reset")
+    public Map<String, Object> sessionResetSkill(@RequestBody Map<String, Object> body) {
+        String sessionId = String.valueOf(body.getOrDefault("sessionId", ""));
+        requireAccess(sessionId);
+        String name = String.valueOf(body.getOrDefault("name", ""));
+        skills.clearSessionEnabled(sessionId, name);
+        audit.record(currentUser(), "skill-session-reset", "skill:" + name, sessionId);
+        return Map.of("name", name, "skills", skills.listForUi(sessionId));
     }
 
     /** Enable/disable a skill (admin only; skills are a global resource). */
@@ -659,6 +683,44 @@ public class AgentController {
                 (approve ? "approved " : "rejected ") + id);
         return Map.of("id", id, "status", approve ? "approved" : "rejected", "result", result,
                 "requests", skillRequests.list("pending"));
+    }
+
+    /** The caller's own skill proposals and their status. */
+    @GetMapping("/skills/requests/mine")
+    public Map<String, Object> myskillRequests() {
+        return Map.of("requests", skillRequests.listByRequester(currentUser()));
+    }
+
+    /** Withdraw one of the caller's own pending proposals. */
+    @PostMapping("/skills/requests/withdraw")
+    public Map<String, Object> withdrawSkillRequest(@RequestBody Map<String, Object> body) {
+        String id = String.valueOf(body.getOrDefault("id", ""));
+        Map<String, Object> req = skillRequests.get(id);
+        if (req == null) return Map.of("error", "request not found", "id", id);
+        if (!currentUser().equals(req.get("requester"))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "not your request");
+        }
+        if (!"pending".equals(req.get("status"))) return Map.of("error", "only pending requests can be withdrawn");
+        skillRequests.setStatus(id, "withdrawn");
+        return Map.of("id", id, "status", "withdrawn", "requests", skillRequests.listByRequester(currentUser()));
+    }
+
+    /** Edit one of the caller's own pending proposals. */
+    @PostMapping("/skills/requests/update")
+    public Map<String, Object> updateSkillRequest(@RequestBody Map<String, Object> body) {
+        String id = String.valueOf(body.getOrDefault("id", ""));
+        Map<String, Object> req = skillRequests.get(id);
+        if (req == null) return Map.of("error", "request not found", "id", id);
+        if (!currentUser().equals(req.get("requester"))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "not your request");
+        }
+        if (!"pending".equals(req.get("status"))) return Map.of("error", "only pending requests can be edited");
+        String name = String.valueOf(body.getOrDefault("name", req.get("name"))).trim();
+        String desc = String.valueOf(body.getOrDefault("description", req.get("description"))).trim();
+        String text = String.valueOf(body.getOrDefault("body", req.get("body"))).trim();
+        if (name.isEmpty() || text.isEmpty()) return Map.of("error", "name and body are required");
+        skillRequests.update(id, name, desc, text);
+        return Map.of("id", id, "status", "pending", "requests", skillRequests.listByRequester(currentUser()));
     }
 
     // ---- retrieval / memory ------------------------------------------------

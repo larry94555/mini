@@ -39,6 +39,8 @@ public class SkillService {
 
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
     private final java.util.Set<String> disabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // sessionId -> (skill-name-lowercased -> enabled) ; per-session override of the global default
+    private final Map<String, Map<String, Boolean>> sessionOverrides = new java.util.concurrent.ConcurrentHashMap<>();
 
     public SkillService(Sandbox sandbox, Database db) {
         this.sandbox = sandbox;
@@ -54,6 +56,7 @@ public class SkillService {
             }
         }
         loadDisabledState(); // persisted toggles survive restart
+        loadSessionOverrides();
         if (reposOnStart && !repoList().isEmpty()) {
             refresh(); // clone/pull configured repos, then reload
         } else {
@@ -65,20 +68,67 @@ public class SkillService {
         return name != null && disabled.contains(name.trim().toLowerCase(Locale.ROOT));
     }
 
+    /** Resolve effective enablement: a per-session override wins over the global default. Pure. */
+    static boolean effectiveEnabled(boolean global, Boolean override) {
+        return override != null ? override : global;
+    }
+
+    private Boolean sessionOverride(String sessionId, String name) {
+        if (sessionId == null) return null;
+        Map<String, Boolean> m = sessionOverrides.get(sessionId);
+        return m == null ? null : m.get(name.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /** Is a skill effectively enabled for this session (override, else global)? */
+    private boolean isEnabledFor(String sessionId, String name) {
+        return effectiveEnabled(!isDisabled(name), sessionOverride(sessionId, name));
+    }
+
     private synchronized List<SkillLibrary.Skill> enabledSkills() {
+        return enabledSkillsFor(null);
+    }
+
+    private synchronized List<SkillLibrary.Skill> enabledSkillsFor(String sessionId) {
         List<SkillLibrary.Skill> out = new ArrayList<>();
-        for (SkillLibrary.Skill sk : skills) if (!isDisabled(sk.name())) out.add(sk);
+        for (SkillLibrary.Skill sk : skills) if (isEnabledFor(sessionId, sk.name())) out.add(sk);
         return out;
+    }
+
+    /** Set a per-session override (true/false) for a skill. */
+    public synchronized boolean setSessionEnabled(String sessionId, String name, boolean on) {
+        if (byName(name) == null || sessionId == null || sessionId.isBlank()) return false;
+        String key = name.trim().toLowerCase(Locale.ROOT);
+        sessionOverrides.computeIfAbsent(sessionId, k -> new java.util.concurrent.ConcurrentHashMap<>()).put(key, on);
+        persistSessionState(sessionId, key, Boolean.valueOf(on));
+        return true;
+    }
+
+    /** Remove a per-session override (revert to the global default). */
+    public synchronized boolean clearSessionEnabled(String sessionId, String name) {
+        if (sessionId == null) return false;
+        String key = name.trim().toLowerCase(Locale.ROOT);
+        Map<String, Boolean> m = sessionOverrides.get(sessionId);
+        if (m != null) m.remove(key);
+        persistSessionState(sessionId, key, null);
+        return true;
     }
 
     /** Skills for the management UI: name, description, and enabled flag. */
     public synchronized List<Map<String, Object>> listForUi() {
+        return listForUi(null);
+    }
+
+    public synchronized List<Map<String, Object>> listForUi(String sessionId) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (SkillLibrary.Skill sk : skills) {
+            boolean global = !isDisabled(sk.name());
+            Boolean override = sessionOverride(sessionId, sk.name());
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("name", sk.name());
             m.put("description", sk.description());
-            m.put("enabled", !isDisabled(sk.name()));
+            m.put("enabled", effectiveEnabled(global, override)); // effective for this session
+            m.put("global", global);
+            m.put("override", override); // null = no per-session override
             out.add(m);
         }
         return out;
@@ -115,6 +165,38 @@ public class SkillService {
                     + "ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled", key, on ? 1 : 0);
         } catch (Exception e) {
             log.warn("[skills] could not persist skill_state: " + e.getMessage());
+        }
+    }
+
+    private void loadSessionOverrides() {
+        if (db == null || !db.available()) return;
+        try {
+            db.query("SELECT session_id, name, enabled FROM session_skill_state", rs -> {
+                try {
+                    sessionOverrides.computeIfAbsent(rs.getString(1),
+                            k -> new java.util.concurrent.ConcurrentHashMap<>())
+                            .put(rs.getString(2).toLowerCase(Locale.ROOT), rs.getInt(3) != 0);
+                } catch (Exception ignore) {
+                }
+                return new int[0];
+            });
+        } catch (Exception e) {
+            log.warn("[skills] could not load session_skill_state: " + e.getMessage());
+        }
+    }
+
+    private void persistSessionState(String sessionId, String key, Boolean on) {
+        if (db == null || !db.available()) return;
+        try {
+            if (on == null) {
+                db.update("DELETE FROM session_skill_state WHERE session_id=? AND name=?", sessionId, key);
+            } else {
+                db.update("INSERT INTO session_skill_state(session_id, name, enabled) VALUES(?, ?, ?) "
+                        + "ON CONFLICT(session_id, name) DO UPDATE SET enabled=excluded.enabled",
+                        sessionId, key, on ? 1 : 0);
+            }
+        } catch (Exception e) {
+            log.warn("[skills] could not persist session_skill_state: " + e.getMessage());
         }
     }
 
@@ -241,7 +323,11 @@ public class SkillService {
 
     /** Short index appended to the system prompt (or "" when disabled/empty). */
     public synchronized String indexAddendum() {
-        List<SkillLibrary.Skill> active = enabledSkills();
+        return indexAddendum(null);
+    }
+
+    public synchronized String indexAddendum(String sessionId) {
+        List<SkillLibrary.Skill> active = enabledSkillsFor(sessionId);
         if (!enabled || active.isEmpty()) return "";
         return "\n\n--- Available skills (call load_skill with the name to load full instructions) ---\n"
                 + SkillLibrary.index(active);
@@ -249,7 +335,11 @@ public class SkillService {
 
     /** When skills.auto-load is on, the best-matching skill's body for a query (or ""). */
     public synchronized String autoLoadAddendum(String query) {
-        List<SkillLibrary.Skill> active = enabledSkills();
+        return autoLoadAddendum(query, null);
+    }
+
+    public synchronized String autoLoadAddendum(String query, String sessionId) {
+        List<SkillLibrary.Skill> active = enabledSkillsFor(sessionId);
         if (!enabled || !autoLoad || active.isEmpty()) return "";
         List<SkillLibrary.Skill> top = SkillLibrary.select(active, query, 1);
         if (top.isEmpty()) return "";

@@ -168,6 +168,7 @@
         <button id="reqSubmit" style="margin-top:4px">Submit proposal</button>
         <div id="reqMsg" class="muted" style="font-size:12px;margin-top:4px"></div>
       </details>
+      <div id="myRequests"></div>
     </div>
     <div class="card" id="metricsCard">
       <h3>Metrics <span class="muted" id="metricsAge"></span></h3>
@@ -515,20 +516,39 @@ async function previewBundle(file){
 $("#previewBundle").onclick = () => $("#previewFile").click();
 $("#previewFile").onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) previewBundle(f); e.target.value = ""; };
 async function refreshSkills(){
-  const j = await getJson("/skills");
+  const j = await getJson("/skills?sessionId=" + encodeURIComponent(state.session));
   const el = $("#skillsList");
   if (!el) return;
   const admin = state.me.admin;
   const link = $("#refreshSkillsLink");
-  if (link) link.style.display = admin ? "" : "none"; // members get a read-only list
+  if (link) link.style.display = admin ? "" : "none";
   const list = (j && Array.isArray(j.skills)) ? j.skills : [];
-  if (!list.length){ el.innerHTML = "(no skills loaded)"; return; }
-  el.innerHTML = list.map(s =>
-    '<label style="display:block;font-size:12px;line-height:1.6" title="'+escapeHtml(String(s.description||""))+'">'
-    + '<input type="checkbox" class="skillToggle" data-name="'+escapeHtml(String(s.name))+'"'
-    + (s.enabled ? ' checked' : '') + (admin ? '' : ' disabled') + '/> ' + escapeHtml(String(s.name)) + '</label>').join("");
-  if (admin) el.querySelectorAll(".skillToggle").forEach(cb => cb.onchange = () => toggleSkill(cb.getAttribute("data-name"), cb.checked));
+  if (!list.length){ el.innerHTML = "(no skills loaded)"; refreshSkillRequests(); return; }
+  // checkbox = effective state for THIS session; toggling sets a per-session override
+  el.innerHTML = '<div class="muted" style="font-size:11px">checkbox = this session; reset reverts to global</div>'
+    + list.map(s => {
+    const overridden = (s.override !== null && s.override !== undefined);
+    return '<label style="display:block;font-size:12px;line-height:1.6" title="'+escapeHtml(String(s.description||""))+'">'
+      + '<input type="checkbox" class="skillSess" data-name="'+escapeHtml(String(s.name))+'"'+(s.enabled?' checked':'')+'/> '
+      + escapeHtml(String(s.name))
+      + (overridden ? ' <span class="muted">(session '+(s.override?'on':'off')+')</span> <a class="linklike skillReset" data-name="'+escapeHtml(String(s.name))+'">reset</a>' : '')
+      + (admin ? ' <a class="linklike skillGlobal" data-name="'+escapeHtml(String(s.name))+'" data-on="'+(s.global?'1':'0')+'">[global: '+(s.global?'on':'off')+']</a>' : '')
+      + '</label>';
+  }).join("");
+  el.querySelectorAll(".skillSess").forEach(cb => cb.onchange = () => toggleSkillSession(cb.getAttribute("data-name"), cb.checked));
+  el.querySelectorAll(".skillReset").forEach(a => a.onclick = () => resetSkillSession(a.getAttribute("data-name")));
+  if (admin) el.querySelectorAll(".skillGlobal").forEach(a => a.onclick = () => toggleSkill(a.getAttribute("data-name"), a.getAttribute("data-on") !== "1"));
   refreshSkillRequests();
+}
+async function toggleSkillSession(name, enabled){
+  const r = await post("/skills/session-toggle", { sessionId: state.session, name: name, enabled: enabled });
+  if (!r.ok) appendLog("[skills] session toggle failed (" + r.status + ")");
+  refreshSkills();
+}
+async function resetSkillSession(name){
+  const r = await post("/skills/session-reset", { sessionId: state.session, name: name });
+  if (!r.ok) appendLog("[skills] session reset failed (" + r.status + ")");
+  refreshSkills();
 }
 async function toggleSkill(name, enabled){
   const r = await post("/skills/toggle", { name: name, enabled: enabled });
@@ -554,10 +574,10 @@ async function submitSkillRequest(){
 async function refreshSkillRequests(){
   const el = $("#skillRequests");
   if (!el) return;
-  if (!state.me.admin){ el.innerHTML = ""; return; } // admin-only review queue
+  if (!state.me.admin){ el.innerHTML = ""; refreshMyRequests(); return; } // admin-only review queue
   const j = await getJson("/skills/requests");
   const reqs = (j && Array.isArray(j.requests)) ? j.requests : [];
-  if (!reqs.length){ el.innerHTML = '<div class="muted" style="font-size:12px;margin-top:6px">no pending requests</div>'; return; }
+  if (!reqs.length){ el.innerHTML = '<div class="muted" style="font-size:12px;margin-top:6px">no pending requests</div>'; refreshMyRequests(); return; }
   el.innerHTML = '<div style="font-size:12px;margin-top:6px">pending requests:</div>' + reqs.map(q =>
     '<div style="font-size:12px;border-top:1px solid var(--border);padding:4px 0">'
     + escapeHtml(String(q.name)) + ' <span class="muted">by ' + escapeHtml(String(q.requester||"")) + '</span><br>'
@@ -565,6 +585,7 @@ async function refreshSkillRequests(){
     + '<a class="linklike reqReject" data-id="'+escapeHtml(String(q.id))+'">reject</a></div>').join("");
   el.querySelectorAll(".reqApprove").forEach(a => a.onclick = () => resolveReq(a.getAttribute("data-id"), true));
   el.querySelectorAll(".reqReject").forEach(a => a.onclick = () => resolveReq(a.getAttribute("data-id"), false));
+  refreshMyRequests();
 }
 async function resolveReq(id, approve){
   const r = await post("/skills/requests/resolve", { id: id, approve: approve });
@@ -572,6 +593,25 @@ async function resolveReq(id, approve){
   refreshSkillRequests(); refreshSkills();
 }
 $("#reqSubmit").onclick = submitSkillRequest;
+async function refreshMyRequests(){
+  const el = $("#myRequests");
+  if (!el) return;
+  const j = await getJson("/skills/requests/mine");
+  const reqs = (j && Array.isArray(j.requests)) ? j.requests : [];
+  if (!reqs.length){ el.innerHTML = ""; return; }
+  el.innerHTML = '<div style="font-size:12px;margin-top:6px">my requests:</div>' + reqs.map(q =>
+    '<div style="font-size:12px;border-top:1px solid var(--border);padding:4px 0">'
+    + escapeHtml(String(q.name)) + ' <span class="muted">' + escapeHtml(String(q.status)) + '</span>'
+    + (q.status === "pending" ? ' <a class="linklike myWithdraw" data-id="'+escapeHtml(String(q.id))+'">withdraw</a>' : '')
+    + '</div>').join("");
+  el.querySelectorAll(".myWithdraw").forEach(a => a.onclick = () => withdrawReq(a.getAttribute("data-id")));
+}
+async function withdrawReq(id){
+  const r = await post("/skills/requests/withdraw", { id: id });
+  appendLog("[skills] request " + id + " withdrawn");
+  refreshMyRequests();
+  if (state.me.admin) refreshSkillRequests();
+}
 async function refreshMetrics(){
   const j = await getJson("/metrics");
   if (j){ $("#metrics").textContent = JSON.stringify(j, null, 2); $("#metricsAge").textContent = "· "+new Date().toLocaleTimeString(); }

@@ -55,7 +55,7 @@ No cloud API key is required.
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
-| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted; member-visible list, admin toggles), and member skill proposals (admin-reviewed) |
+| Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted global + per-session overrides), and member skill proposals (admin-reviewed, with a "my requests" view) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview, skills toggles + proposals), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
@@ -179,9 +179,15 @@ http://localhost:8081
 | `GET /skills` | List loaded skills (name, description, enabled) |
 | `POST /skills/toggle` | `{name,enabled}` enable/disable a skill (admin) |
 | `POST /skills/refresh` | Re-pull remote skill repos and reload (admin) |
+| `GET /skills?sessionId=` | List skills with effective state for a session (+global/override) |
+| `POST /skills/session-toggle` | `{sessionId,name,enabled}` per-session override (session access) |
+| `POST /skills/session-reset` | `{sessionId,name}` clear a per-session override (session access) |
 | `POST /skills/request` | `{name,description,body}` propose a skill (any member) |
 | `GET /skills/requests?status=` | List skill proposals (admin) |
 | `POST /skills/requests/resolve` | `{id,approve}` approve (save) or reject a proposal (admin) |
+| `GET /skills/requests/mine` | The caller's own proposals and their status |
+| `POST /skills/requests/withdraw` | `{id}` withdraw your own pending proposal |
+| `POST /skills/requests/update` | `{id,name,description,body}` edit your own pending proposal |
 | `GET /plan?sessionId=` | Read the current saved plan: goal + steps + statuses + per-step tool transcript |
 | `GET /plan?sessionId=&n=` | Read archived plan `n` from history: goal + steps + tools + coding report |
 | `GET /todos?sessionId=` | Read session todos |
@@ -501,7 +507,19 @@ takes over once an admin toggles).
 with `{name, description, body}` queues a proposal (the UI *Skills* card has a "Propose a skill" form
 for everyone). Admins review the queue with `GET /skills/requests`, then `POST /skills/requests/resolve`
 with `{id, approve}` -- approving saves it as a local skill (same path as `save_skill`), rejecting just
-marks it. Proposals live in the `skill_requests` table (in-memory without a DB).
+marks it. Proposals live in the `skill_requests` table (in-memory without a DB). A member can review their own
+proposals and their status via `GET /skills/requests/mine` (the *Skills* card shows a "my requests"
+list), withdraw a pending one with `POST /skills/requests/withdraw {id}`, or edit it with `POST
+/skills/requests/update {id, ...}`.
+
+**Per-session overrides.** Beyond the global default, a skill can be enabled or disabled for a single
+session: `POST /skills/session-toggle {sessionId, name, enabled}` sets an override and `POST
+/skills/session-reset {sessionId, name}` clears it (both need access to that session). The effective
+state for a session is the override if present, otherwise the global default -- this is what drives the
+skills index and auto-load for that session's runs. `GET /skills?sessionId=<id>` returns each skill's
+effective `enabled`, its `global` default, and any `override`. In the *Skills* card the per-row checkbox
+toggles **this session** (anyone with session access); a *reset* link clears the override, and admins
+get a `[global: on/off]` link to flip the global default. Overrides persist in `session_skill_state`.
 
 Config: `skills.enabled` (default true), `skills.dir` (default `skills`), `skills.auto-load` (default
 false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skills.cache-dir` (default
