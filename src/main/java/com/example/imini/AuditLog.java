@@ -96,4 +96,54 @@ public class AuditLog {
     private static String nz(String s) {
         return s == null ? "" : s;
     }
+
+    /** All entries (newest first) matching user/action/target within [since, until] (0 = unbounded). */
+    public List<Entry> range(String user, String action, String target, long since, long until, int limit) {
+        List<Entry> all;
+        if (db.available()) {
+            all = db.query("SELECT id, ts, user, action, target, outcome FROM audit ORDER BY ts DESC, rowid DESC LIMIT ?",
+                    rs -> new Entry(rs.getString(1), rs.getLong(2), Instant.ofEpochMilli(rs.getLong(2)).toString(),
+                            rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6)),
+                    HARD_CAP);
+        } else {
+            all = new ArrayList<>(mem);
+        }
+        return filterRange(all, user, action, target, since, until, limit);
+    }
+
+    /** Pure: user/action/target match (see {@link #filter}) plus a time window [since, until]. */
+    public static List<Entry> filterRange(List<Entry> entries, String user, String action, String target,
+                                          long since, long until, int limit) {
+        List<Entry> matched = filter(entries, user, action, target, 0, HARD_CAP);
+        List<Entry> windowed = new ArrayList<>();
+        int lim = limit <= 0 ? HARD_CAP : Math.min(limit, HARD_CAP);
+        for (Entry e : matched) {
+            if (since > 0 && e.ts() < since) continue;
+            if (until > 0 && e.ts() > until) continue;
+            windowed.add(e);
+            if (windowed.size() >= lim) break;
+        }
+        return windowed;
+    }
+
+    /** Pure: render entries as CSV (header + RFC-4180-escaped rows). */
+    public static String toCsv(List<Entry> entries) {
+        StringBuilder sb = new StringBuilder("id,ts,time,user,action,target,outcome\n");
+        if (entries != null) {
+            for (Entry e : entries) {
+                sb.append(csv(e.id())).append(',').append(e.ts()).append(',').append(csv(e.time())).append(',')
+                  .append(csv(e.user())).append(',').append(csv(e.action())).append(',')
+                  .append(csv(e.target())).append(',').append(csv(e.outcome())).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String csv(String s) {
+        String v = s == null ? "" : s;
+        if (v.contains(",") || v.contains("\"") || v.contains("\n") || v.contains("\r")) {
+            return "\"" + v.replace("\"", "\"\"") + "\"";
+        }
+        return v;
+    }
 }

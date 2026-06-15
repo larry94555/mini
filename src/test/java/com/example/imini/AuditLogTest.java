@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure filtering of audit entries by user (exact), action (substring), target (substring), with paging. */
 class AuditLogTest {
@@ -36,5 +37,28 @@ class AuditLogTest {
     @Test
     void actionMatchIsCaseInsensitiveSubstring() {
         assertEquals(2, AuditLog.filter(sample(), null, "TOGGLE", null, 0, 10).size());
+    }
+
+    @Test
+    void filterRangeAppliesTimeWindow() {
+        List<AuditLog.Entry> es = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            es.add(new AuditLog.Entry("id" + i, i * 100L, "t" + i, "alice", "import", "session:s", "ok"));
+        }
+        // ts are 0,100,200,300,400; window [150,350] -> 200,300
+        assertEquals(2, AuditLog.filterRange(es, null, null, null, 150, 350, 100).size());
+        // 0/0 = unbounded
+        assertEquals(5, AuditLog.filterRange(es, null, null, null, 0, 0, 100).size());
+        // limit caps
+        assertEquals(2, AuditLog.filterRange(es, null, null, null, 0, 0, 2).size());
+    }
+
+    @Test
+    void toCsvWritesHeaderAndEscapesFields() {
+        String csv = AuditLog.toCsv(List.of(
+                new AuditLog.Entry("x1", 1L, "T", "al,ice", "imp\"ort", "session:s", "ok")));
+        assertTrue(csv.startsWith("id,ts,time,user,action,target,outcome\n"));
+        assertTrue(csv.contains("\"al,ice\""));       // comma -> quoted
+        assertTrue(csv.contains("\"imp\"\"ort\""));   // quote -> doubled + quoted
     }
 }

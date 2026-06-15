@@ -206,6 +206,12 @@ Goal: package the project as a learning asset before trying to sell it as a deve
 
 ## Recently completed
 
+- Audit trail export: `GET /audit/export?format=csv|json` downloads the (filtered) trail with a
+  `since`/`until` window; the admin *Activity* card has date pickers + Export CSV/JSON
+  (`AuditLog.filterRange`/`toCsv`, pure + unit-tested).
+- Per-session activity tab: `GET /session/activity?sessionId=` returns a session's own events (target ==
+  the session), readable by anyone with session access; the web UI shows a *Session activity* card with
+  paging, so non-admin owners/readers can see their session's history.
 - Sharing carried by export/import bundles: the bundle version is now `imini-session/3` and carries the
   session `owner` + `readers`; import with `restoreSharing=true` re-grants those readers (the importer
   becomes owner). Integrity stays version-aware (v1 hashes without overrides/readers, v2 without
@@ -297,9 +303,9 @@ The next highest-leverage engineering changes are:
 
 > 1. Cryptographic provenance for skills (signing + a trust root) building on the registry's and
 >    bundle's hash verification -- the natural next layer now that both hash for integrity.
-> 2. CSV/JSON export of the audit trail (and a date range) for offline review or compliance archiving,
->    building on the now-filterable `/audit`.
-> 3. A per-session activity tab in the session view (the "this session only" audit filter surfaced
->    inline next to plan history), so non-admin owners can see their own session's events.
+> 2. Record per-session skill toggles against the session target (not just skill:NAME) so they show in
+>    the per-session activity tab, and add a detail column to audit entries.
+> 3. Scheduled/rotating audit export to a file path (or webhook) for long-term retention beyond the
+>    in-table window.
 
 Both are much smaller than full sandboxing and continue to improve trust and learnability.
