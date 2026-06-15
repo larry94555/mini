@@ -55,7 +55,8 @@ class SessionBundleTest {
     @Test
     void supportsRecognizesTheMajorVersion() {
         assertTrue(SessionBundle.supports("imini-session/1")); // legacy still importable
-        assertTrue(SessionBundle.supports("imini-session/2")); // current
+        assertTrue(SessionBundle.supports("imini-session/2")); // legacy still importable
+        assertTrue(SessionBundle.supports("imini-session/3")); // current
         assertFalse(SessionBundle.supports("imini-session/9"));
         assertFalse(SessionBundle.supports(null));
     }
@@ -66,18 +67,29 @@ class SessionBundleTest {
                 List.of(Map.of("role", "user", "content", "hi")), List.of(), List.of());
         b.put("integrity", "deadbeef");
         Map<String, Object> c = SessionBundle.contentForHash(b);
-        assertEquals(List.of("version", "sessionId", "messages", "plans", "todos", "skillOverrides"),
-                new java.util.ArrayList<>(c.keySet())); // v2 hashes the overrides too
+        assertEquals(List.of("version", "sessionId", "messages", "plans", "todos", "skillOverrides", "readers"),
+                new java.util.ArrayList<>(c.keySet())); // v3 hashes overrides + readers
         assertFalse(c.containsKey("exportedAt"));
         assertFalse(c.containsKey("integrity"));
 
-        // a legacy v1 bundle is hashed WITHOUT skillOverrides, so old integrity values still verify
+        // a legacy v1 bundle is hashed WITHOUT skillOverrides/readers, so old integrity values still verify
         Map<String, Object> v1 = new java.util.LinkedHashMap<>();
         v1.put("version", "imini-session/1");
         v1.put("sessionId", "s");
         v1.put("messages", List.of());
         v1.put("todos", List.of());
         assertFalse(SessionBundle.contentForHash(v1).containsKey("skillOverrides"));
+        assertFalse(SessionBundle.contentForHash(v1).containsKey("readers"));
+
+        // a v2 bundle hashes skillOverrides but NOT readers (so v2 integrity values still verify)
+        Map<String, Object> v2 = new java.util.LinkedHashMap<>();
+        v2.put("version", "imini-session/2");
+        v2.put("sessionId", "s");
+        v2.put("messages", List.of());
+        v2.put("todos", List.of());
+        v2.put("skillOverrides", List.of());
+        assertTrue(SessionBundle.contentForHash(v2).containsKey("skillOverrides"));
+        assertFalse(SessionBundle.contentForHash(v2).containsKey("readers"));
     }
 
     @Test
@@ -122,19 +134,32 @@ class SessionBundleTest {
     }
 
     @Test
-    void bundleCarriesSkillOverridesAndV1MigratesToCurrentWithEmptyOverrides() {
+    void bundleCarriesOverridesAndReadersAndOlderVersionsMigrateToCurrent() {
         List<Map<String, Object>> ov = List.of(Map.of("name", "commit-message", "enabled", false));
-        Map<String, Object> b = SessionBundle.build("s", "o", 1L, List.of(), List.of(), List.of(), ov);
-        assertEquals("imini-session/2", b.get("version"));
+        Map<String, Object> b = SessionBundle.build("s", "o", 1L, List.of(), List.of(), List.of(), ov,
+                List.of("bob", "cara"));
+        assertEquals("imini-session/3", b.get("version"));
         assertEquals(1, SessionBundle.skillOverrides(b).size());
-        assertEquals("commit-message", SessionBundle.skillOverrides(b).get(0).get("name"));
+        assertEquals(List.of("bob", "cara"), SessionBundle.readers(b));
 
+        // a v1 bundle upconverts to current with empty overrides + readers
         Map<String, Object> v1 = new java.util.LinkedHashMap<>();
         v1.put("version", "imini-session/1");
         v1.put("messages", List.of());
-        Map<String, Object> mig = SessionBundle.migrate(v1);
-        assertEquals(SessionBundle.VERSION, mig.get("version"));
-        assertTrue(SessionBundle.skillOverrides(mig).isEmpty());
+        Map<String, Object> m1 = SessionBundle.migrate(v1);
+        assertEquals(SessionBundle.VERSION, m1.get("version"));
+        assertTrue(SessionBundle.skillOverrides(m1).isEmpty());
+        assertTrue(SessionBundle.readers(m1).isEmpty());
+
+        // a v2 bundle (has overrides) upconverts to current, gaining empty readers
+        Map<String, Object> v2 = new java.util.LinkedHashMap<>();
+        v2.put("version", "imini-session/2");
+        v2.put("messages", List.of());
+        v2.put("skillOverrides", ov);
+        Map<String, Object> m2 = SessionBundle.migrate(v2);
+        assertEquals(SessionBundle.VERSION, m2.get("version"));
+        assertEquals(1, SessionBundle.skillOverrides(m2).size());
+        assertTrue(SessionBundle.readers(m2).isEmpty());
     }
 
     @SuppressWarnings("unchecked")

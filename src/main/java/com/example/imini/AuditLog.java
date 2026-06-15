@@ -52,6 +52,10 @@ public class AuditLog {
 
     /** Most recent entries (newest first), optionally filtered by user and/or target substring. */
     public List<Entry> recent(String user, String target, int limit) {
+        return recent(user, null, target, 0, limit);
+    }
+
+    public List<Entry> recent(String user, String action, String target, int offset, int limit) {
         List<Entry> all;
         if (db.available()) {
             all = db.query("SELECT id, ts, user, action, target, outcome FROM audit ORDER BY ts DESC, rowid DESC LIMIT ?",
@@ -61,19 +65,31 @@ public class AuditLog {
         } else {
             all = new ArrayList<>(mem);
         }
-        return filter(all, user, target, limit);
+        return filter(all, user, action, target, offset, limit);
     }
 
     /** Pure, unit-testable filter: by exact user (case-insensitive) and/or target substring, capped. */
     public static List<Entry> filter(List<Entry> entries, String user, String target, int limit) {
+        return filter(entries, user, null, target, 0, limit);
+    }
+
+    /** Filter by user (exact, case-insensitive), action (substring), target (substring), then page. Pure. */
+    public static List<Entry> filter(List<Entry> entries, String user, String action, String target,
+                                     int offset, int limit) {
         int lim = limit <= 0 ? 100 : Math.min(limit, HARD_CAP);
-        List<Entry> out = new ArrayList<>();
+        int off = Math.max(0, offset);
+        List<Entry> matched = new ArrayList<>();
         for (Entry e : entries) {
-            if (user != null && !user.isBlank() && !user.equalsIgnoreCase(e.user())) continue;
-            if (target != null && !target.isBlank() && !e.target().contains(target)) continue;
-            out.add(e);
-            if (out.size() >= lim) break;
+            String u = e.user() == null ? "" : e.user();
+            String a = e.action() == null ? "" : e.action();
+            String t = e.target() == null ? "" : e.target();
+            if (user != null && !user.isBlank() && !user.equalsIgnoreCase(u)) continue;
+            if (action != null && !action.isBlank() && !a.toLowerCase().contains(action.toLowerCase())) continue;
+            if (target != null && !target.isBlank() && !t.contains(target)) continue;
+            matched.add(e);
         }
+        List<Entry> out = new ArrayList<>();
+        for (int i = off; i < matched.size() && out.size() < lim; i++) out.add(matched.get(i));
         return out;
     }
 

@@ -13,7 +13,7 @@ import java.util.Map;
  */
 public final class SessionBundle {
 
-    public static final String VERSION = "imini-session/2";
+    public static final String VERSION = "imini-session/3";
 
     private SessionBundle() {}
 
@@ -29,6 +29,14 @@ public final class SessionBundle {
                                             List<Map<String, Object>> messages,
                                             List<Map<String, Object>> plans, List<TodoStore.Item> todos,
                                             List<Map<String, Object>> skillOverrides) {
+        return build(sessionId, owner, exportedAt, messages, plans, todos, skillOverrides, List.of());
+    }
+
+    /** Assemble a bundle including skill overrides and the session's reader list ({@code [name,...]}). */
+    public static Map<String, Object> build(String sessionId, String owner, long exportedAt,
+                                            List<Map<String, Object>> messages,
+                                            List<Map<String, Object>> plans, List<TodoStore.Item> todos,
+                                            List<Map<String, Object>> skillOverrides, List<String> readers) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("version", VERSION);
         m.put("sessionId", sessionId == null ? "" : sessionId);
@@ -38,13 +46,15 @@ public final class SessionBundle {
         m.put("plans", plans == null ? List.of() : plans);
         m.put("todos", todoPayload(todos));
         m.put("skillOverrides", skillOverrides == null ? List.of() : skillOverrides);
+        m.put("readers", readers == null ? List.of() : readers);
         return m;
     }
 
     /** True if this build understands the bundle's (major) version. */
     public static boolean supports(String version) {
         return version != null
-                && (version.startsWith("imini-session/1") || version.startsWith("imini-session/2"));
+                && (version.startsWith("imini-session/1") || version.startsWith("imini-session/2")
+                    || version.startsWith("imini-session/3"));
     }
 
     /**
@@ -59,7 +69,8 @@ public final class SessionBundle {
         if (bundle != null) b.putAll(bundle);
         String version = b.get("version") == null ? "" : String.valueOf(b.get("version"));
         boolean legacy = version.isBlank() || version.equals("imini-session/0")
-                || version.startsWith("imini-session/1"); // pre-overrides -> upconvert to current
+                || version.startsWith("imini-session/1")  // pre-overrides
+                || version.startsWith("imini-session/2"); // pre-readers -> upconvert to current
 
         if (!b.containsKey("messages") && b.get("history") instanceof List) {
             b.put("messages", b.remove("history")); // legacy alias
@@ -86,6 +97,7 @@ public final class SessionBundle {
             if (changed) b.put("todos", norm);
         }
         if (!b.containsKey("skillOverrides")) b.put("skillOverrides", List.of());
+        if (!b.containsKey("readers")) b.put("readers", List.of());
         if (legacy) b.put("version", VERSION);
         return b;
     }
@@ -99,8 +111,12 @@ public final class SessionBundle {
         m.put("plans", plans(bundle));
         m.put("todos", bundle == null ? List.of() : bundle.getOrDefault("todos", List.of()));
         String version = bundle == null ? "" : String.valueOf(bundle.getOrDefault("version", ""));
-        if (version.startsWith("imini-session/2")) { // v1 bundles hashed without this field
+        boolean v2plus = version.startsWith("imini-session/2") || version.startsWith("imini-session/3");
+        if (v2plus) { // v1 bundles hashed without this field
             m.put("skillOverrides", bundle.getOrDefault("skillOverrides", List.of()));
+        }
+        if (version.startsWith("imini-session/3")) { // v1/v2 bundles hashed without readers
+            m.put("readers", bundle.getOrDefault("readers", List.of()));
         }
         return m;
     }
@@ -110,6 +126,14 @@ public final class SessionBundle {
     public static List<Map<String, Object>> skillOverrides(Map<String, Object> b) {
         Object o = b == null ? null : b.get("skillOverrides");
         return o instanceof List ? (List<Map<String, Object>>) o : List.of();
+    }
+
+    /** The session's reader (shared-with) usernames carried by the bundle. */
+    public static List<String> readers(Map<String, Object> b) {
+        List<String> out = new ArrayList<>();
+        Object o = b == null ? null : b.get("readers");
+        if (o instanceof List<?> l) for (Object e : l) if (e != null) out.add(String.valueOf(e));
+        return out;
     }
 
     /** The stored integrity hash (or "" if none). */

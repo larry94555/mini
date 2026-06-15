@@ -57,7 +57,7 @@ No cloud API key is required.
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted global + per-session overrides), and member skill proposals (admin-reviewed, with a "my requests" view) |
 | Extensibility | MCP client, research sub-agent, hooks, slash commands |
-| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides, skills toggles + proposals, activity log), remote approvals |
+| UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides + sharing, skills toggles + proposals, filterable activity log), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
 ## File map
@@ -174,7 +174,7 @@ http://localhost:8081
 | `POST /transfer` | `{sessionId,to}` transfer ownership; prior owner keeps read (owner/admin) |
 | `GET /plans?sessionId=` | List the session's archived plan history (newest first) |
 | `GET /session/export?sessionId=` | Download a portable bundle (conversation + plan history + todos) |
-| `POST /session/import?mode=&target=&strict=` | Import a bundle (integrity-checked); mode new/replace/merge |
+| `POST /session/import?mode=&target=&strict=&restoreSharing=` | Import a bundle; optionally restore its reader list |
 | `POST /session/import/preview?mode=&target=` | Project an import's before/incoming/after counts (no apply) |
 | `GET /skills` | List loaded skills (name, description, enabled) |
 | `POST /skills/toggle` | `{name,enabled}` enable/disable a skill (admin) |
@@ -203,7 +203,7 @@ http://localhost:8081
 | `GET /health` | Health check |
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
-| `GET /audit?user=&target=&limit=` | Audit trail of privileged actions, newest first (admin only) |
+| `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
 | `GET /` | Browser UI |
 
 ## Plan-driven execution
@@ -574,6 +574,14 @@ whose (migrated) version is still unsupported is rejected.
 shared or migrated session keeps its tuned skill set. The import/preview responses include a
 `skillOverrides` count.
 
+**Sharing travels too (opt-in restore).** The current bundle version is `imini-session/3` and also
+carries the session's `owner` and `readers` (its shared-with list). Import with `restoreSharing=true`
+(the UI's "restore the bundle's shared-with list" checkbox) re-grants those readers on the destination
+session -- the importer always becomes the new owner. Integrity stays version-aware: v1 bundles hash
+without `skillOverrides`/`readers` and v2 without `readers`, so older exports still verify; migration
+upconverts them (gaining empty fields). The import/preview responses include a `sharedWith`/`readers`
+count.
+
 **Preview.** `POST /session/import/preview` (or the UI *Preview* button) reports what an import *would*
 do without touching anything: the integrity status (`ok`/`mismatch`/`none`), the (migrated) version and
 whether it is supported, and a before/incoming/after count for messages, todos, and plans under the
@@ -581,7 +589,9 @@ chosen mode -- so you can see that, say, a `merge` would grow messages from 10 t
 
 **Activity log (admin).** The web UI shows an admin-only *Activity* card backed by `GET /audit`
 (recent governance/tool events: skill toggles, session overrides, proposals/resolutions, imports, and
-more) -- a readable window on the audit trail without curling the endpoint.
+more). It filters by `user` (exact) and `action` (substring), a "this session only" toggle (matches
+`target` containing `session:<id>`), and pages with prev/next (`offset`/`limit`) -- a readable window on
+the audit trail without curling the endpoint.
 
 > Honest scope: integrity is a content SHA-256 (tamper-evidence), not a signature -- stripping the field
 > bypasses the check, and `strict=false` imports regardless. The bundle is plain JSON (no encryption, no
@@ -654,6 +664,7 @@ Read it (admin only) at `GET /audit`, newest first, with optional filters:
 ```
 curl "localhost:8080/audit?limit=50"               -H "X-API-Key: <admin>"
 curl "localhost:8080/audit?user=bob"               -H "X-API-Key: <admin>"
+curl "localhost:8080/audit?action=skill&offset=20" -H "X-API-Key: <admin>"
 curl "localhost:8080/audit?target=session:proj"    -H "X-API-Key: <admin>"
 ```
 
