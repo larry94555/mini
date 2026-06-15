@@ -95,7 +95,8 @@ No cloud API key is required.
 | `SkillManifest.java` | Pure skill-registry manifest: parse, lexical search, SHA-256 verify |
 | `SkillRequests.java` | Queue of member skill proposals awaiting admin review (DB-backed) |
 | `SkillService.java` | Loads local + remote skills; index; `load_skill`/`save_skill`/`refresh_skills`/`search_skills`/`install_skill` |
-| `ProjectContext.java` | Loads `IMINI.md`, `CLAUDE.md`, or `AGENTS.md` into the system prompt |
+| `ProjectContext.java` | Loads layered memory files (`CLAUDE.md`, `.claude/rules/*.md`, ...) into the system prompt; backs `/memory` |
+| `MemoryLoader.java` | Pure memory helpers: candidate load order + `@path` import expansion |
 | `TodoStore.java` | Per-session task checklists |
 | `InterruptService.java` | Per-session interrupt and steering |
 | `Approvals.java` | Pending remote approval registry |
@@ -199,7 +200,8 @@ http://localhost:8081
 | `POST /rewind` | Rewind a session's last checkpoint |
 | `GET /checkpoints?sessionId=` | List session checkpoints |
 | `POST /index` | Build or rebuild retrieval index |
-| `GET /memory?q=&k=` | Search indexed workspace memory |
+| `GET /memory?q=&k=` | Search indexed workspace memory (retrieval) |
+| `GET /memory/files` | Project-memory diagnostics: which memory files loaded, in order, and why |
 | `GET /health` | Health check |
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
@@ -419,6 +421,42 @@ Useful tools:
 `imini` uses SQLite for durable sessions, checkpoints, and retrieval index data. If SQLite cannot be opened, the app falls back to in-memory behavior so the learning flow still works.
 
 Retrieval is lexical by default and works well for code identifiers. Optional embedding-based retrieval can be enabled if you run a model/server that supports embeddings.
+
+## Project memory
+
+Like Claude Code's `CLAUDE.md`, `imini` loads project memory files and appends them to the system prompt
+so the agent follows your conventions, commands, and preferences. Memory is now **layered**: several
+files are loaded (in a fixed order) and concatenated, and a memory file can pull in another with an
+`@path` import.
+
+Load order (each loaded if present, relative to the workspace root):
+
+1. `.claude/CLAUDE.md`
+2. `CLAUDE.md`
+3. `IMINI.md`
+4. `AGENTS.md`
+5. `.claude/rules/*.md` (sorted by filename)
+6. `CLAUDE.local.md` (last, so local overrides win)
+
+**Imports.** A line whose first token is `@<path>` inlines that file (resolved relative to the importing
+file, confined to the workspace). Imports are recursive but depth-, size-, and cycle-guarded; write a
+literal leading at-sign as `@@`. Caps: `memory.import-max-depth` (default 3), `memory.max-file-kb`
+(default 64).
+
+**Diagnostics (`/memory`).** Type `/memory` in chat (or call `GET /memory/files`) to see exactly which
+memory files loaded, in what order, their size, and why -- direct, imported (shown nested), or skipped
+(missing, cyclic, past the depth cap, or over the size cap). For example:
+
+```
+Loaded project memory (3 entries, 412 bytes):
+  - CLAUDE.md  [loaded (project memory)] 380B
+    - import .claude/conventions.md  [imported via @] 32B
+  - CLAUDE.local.md  [loaded (local override)] 32B
+```
+
+> Note: this replaces the earlier single-file behavior (only the first of `IMINI.md`/`CLAUDE.md`/
+> `AGENTS.md`). All present layered files now load; a repo with just one of them behaves as before.
+> `GET /memory/files` is the memory-file view; `GET /memory?q=` remains the separate retrieval search.
 
 ## Skills
 

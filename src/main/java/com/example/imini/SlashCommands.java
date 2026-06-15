@@ -53,6 +53,7 @@ public class SlashCommands {
 
     public String help() {
         StringBuilder sb = new StringBuilder("Available slash commands:\n");
+        sb.append("  /memory            show which project-memory files are loaded\n");
         if (templates.isEmpty()) {
             sb.append("  (none -- add .md files to the commands/ folder)");
         } else {

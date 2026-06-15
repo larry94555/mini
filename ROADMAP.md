@@ -61,12 +61,15 @@ workflow depends on richer memory behavior.
 Implement:
 
 - `/init` to inspect the repository and draft or update `CLAUDE.md`,
-- `/memory` to show loaded memory files and effective memory context,
-- `CLAUDE.local.md`,
-- `.claude/CLAUDE.md`,
-- `.claude/rules/*.md`,
-- simple `@path` imports inside memory files,
-- diagnostics showing exactly which memory files loaded and why.
+- ~~`/memory` to show loaded memory files and effective memory context~~ (done),
+- ~~`CLAUDE.local.md`~~ (done),
+- ~~`.claude/CLAUDE.md`~~ (done),
+- ~~`.claude/rules/*.md`~~ (done),
+- ~~simple `@path` imports inside memory files~~ (done),
+- ~~diagnostics showing exactly which memory files loaded and why~~ (done via `/memory`).
+
+The layered memory **loader** and `/memory` **diagnostics** now exist (see Recently completed); the
+remaining Priority 1 work is `/init` to draft/update `CLAUDE.md` from a repo scan.
 
 Why this is first:
 
@@ -166,19 +169,17 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The highest-value next feature is **Claude-like memory and `/init`**.
+The highest-value next feature is **`/init`**, the remaining half of Priority 1.
 
-The repository already has a simple project-context loader, but Claude Code’s
-frequent workflow depends on richer memory:
+The layered memory loader and `/memory` diagnostics now exist: `imini` loads
+`.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`, `AGENTS.md`, `.claude/rules/*.md`,
+and `CLAUDE.local.md` (in that order), inlines `@path` imports (depth/size/cycle
+guarded), and shows what loaded via `/memory` and `GET /memory/files`. What is
+left for Priority 1:
 
-- `/init` to generate or improve `CLAUDE.md`,
-- `/memory` to inspect loaded instructions,
-- `CLAUDE.local.md`,
-- `.claude/rules/*.md`,
-- nested memory behavior,
-- simple memory diagnostics.
+- `/init` to inspect the repository and draft or update `CLAUDE.md`.
 
-After memory, implement `@file` / `@directory` references, then improve skill
+After `/init`, implement `@file` / `@directory` references, then improve skill
 UX with `/skills` and direct `/skill-name` invocation.
 
 Do not prioritize activity-view polish, bundle metadata, monetization
@@ -210,16 +211,16 @@ Current top priorities:
 
 ## 4. Next 10 recommended PRs
 
-1. Add `/memory` diagnostics.
-2. Add `/init` to draft or update `CLAUDE.md`.
-3. Add `CLAUDE.local.md` and `.claude/rules/*.md` loading.
-4. Add `@file` references.
-5. Add `@directory` references.
-6. Add `/skills` and direct `/skill-name` invocation.
-7. Add bundled `code-review`, `debug`, `batch`, and `loop` skills.
-8. Add `agents/*.md` registry and `/agents`.
-9. Add `delegate_agent(name, task)`.
-10. Add `preview_patch` and browser diff viewer.
+1. ~~Add `/memory` diagnostics.~~ (done -- layered loader + `@path` imports + `/memory` / `GET /memory/files`)
+2. Add `/init` to draft or update `CLAUDE.md` from a repo scan.
+3. Add `@file` references.
+4. Add `@directory` references.
+5. Add `/skills` and direct `/skill-name` invocation.
+6. Add bundled `code-review`, `debug`, `batch`, and `loop` skills.
+7. Add `agents/*.md` registry and `/agents`.
+8. Add `delegate_agent(name, task)`.
+9. Add `preview_patch` and browser diff viewer.
+10. Add `@path`-import support to `/init` output and a `memory.max-imports` cap.
 
 ## 5. Educational completeness
 
@@ -323,6 +324,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Project memory (layered) + `/memory` diagnostics: loads `.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`,
+  `AGENTS.md`, `.claude/rules/*.md`, and `CLAUDE.local.md` (in order) into the system prompt, inlines
+  `@path` imports (depth/size/cycle guarded), and shows what loaded via the `/memory` command and
+  `GET /memory/files` (`MemoryLoader` pure + unit-tested; `ProjectContext` rewritten).
 - Skills: local/remote `SKILL.md`, registry, enable/disable, proposals,
   session overrides, and bundle export.
 - Plan mode: execution, retry, re-planning, verification, persistence/resume,

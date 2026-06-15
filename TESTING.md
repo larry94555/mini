@@ -1691,3 +1691,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   with prev/next paging; switching sessions reloads it. `GET /session/activity?sessionId=<id>` works for
   the owner/readers (requireRead) and returns only entries whose target is exactly `session:<id>` (no
   prefix collisions). A user with no access gets 403.
+
+---
+
+# Project memory (layered) + /memory diagnostics
+
+## 180. MemoryLoader: imports + @path expansion (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `MemoryLoaderTest` passes -- `imports` extracts `@path` lines (ignoring `@@` escapes and
+  mid-line at-signs); `expand` inlines nested imports, and records diagnostics for a cycle, a missing
+  target, and exceeding `import-max-depth` (rather than throwing or looping).
+
+## 181. /memory shows what loaded (manual)
+
+- **Setup (in the workspace root):** create `CLAUDE.md` containing a line `@.claude/conventions.md`, the
+  file `.claude/conventions.md`, a rule `.claude/rules/a-style.md`, and `CLAUDE.local.md`.
+- **Observe:** typing `/memory` in chat (or `GET /memory/files`) lists the loaded files in order --
+  `CLAUDE.md` (with `conventions.md` shown nested as an import), `.claude/rules/a-style.md` (rule), and
+  `CLAUDE.local.md` (local override) -- each with a byte count and a reason. The same files' contents
+  appear in the system prompt (the agent follows them).
+
+## 182. Memory guards: caps, cycles, traversal (manual)
+
+- **Observe:** an `@path` pointing outside the workspace (e.g. `@../secrets.md`) is reported as
+  "skipped: not found or outside workspace" and not inlined; a file larger than `memory.max-file-kb`
+  shows "skipped: exceeds NKB cap"; a circular import (`a.md` -> `b.md` -> `a.md`) is reported as
+  "skipped: import cycle" instead of looping; nesting beyond `memory.import-max-depth` is capped.
+- **Note:** `GET /memory/files` is the memory-file view; `GET /memory?q=` remains the separate
+  retrieval search and is unaffected.

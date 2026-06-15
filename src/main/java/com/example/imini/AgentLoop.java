@@ -106,6 +106,7 @@ public class AgentLoop {
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userQuestion)) return slash.help();
+        if (project.isMemoryCommand(userQuestion)) return project.report();
         String question = slash.expand(userQuestion);
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
@@ -114,6 +115,7 @@ public class AgentLoop {
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
     public String chat(String sessionId, String userMessage, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userMessage)) return slash.help();
+        if (project.isMemoryCommand(userMessage)) return project.report();
         String expanded = slash.expand(userMessage);
 
         List<Map<String, Object>> history = sessions.get(sessionId);
