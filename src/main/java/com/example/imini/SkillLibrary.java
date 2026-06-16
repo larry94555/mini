@@ -16,10 +16,11 @@ public final class SkillLibrary {
     private SkillLibrary() {}
 
     public record Skill(String name, String description, String body,
-                        String whenToUse, String argumentHint, java.util.List<String> allowedTools) {
+                        String whenToUse, String argumentHint, java.util.List<String> allowedTools,
+                        String context) {
         /** Convenience for callers/tests that don't supply front-matter metadata. */
         public Skill(String name, String description, String body) {
-            this(name, description, body, "", "", java.util.List.of());
+            this(name, description, body, "", "", java.util.List.of(), "");
         }
     }
 
@@ -27,7 +28,7 @@ public final class SkillLibrary {
     public static Skill parse(String text, String fallbackName) {
         if (text == null) return new Skill(fallbackName, "", "");
         String t = text.replace("\r\n", "\n");
-        String name = fallbackName, desc = "", body = t.strip(), whenToUse = "", argHint = "";
+        String name = fallbackName, desc = "", body = t.strip(), whenToUse = "", argHint = "", context = "";
         java.util.List<String> allowed = java.util.List.of();
         if (t.stripLeading().startsWith("---")) {
             int first = t.indexOf("---");
@@ -48,12 +49,14 @@ public final class SkillLibrary {
                         argHint = l.substring(14).strip();
                     } else if (lower.startsWith("allowed_tools:") || lower.startsWith("allowed-tools:")) {
                         allowed = parseList(l.substring(l.indexOf(':') + 1));
+                    } else if (lower.startsWith("context:")) {
+                        context = l.substring(8).strip();
                     }
                 }
             }
         }
         if (name == null || name.isBlank()) name = fallbackName;
-        return new Skill(name, desc == null ? "" : desc, body == null ? "" : body, whenToUse, argHint, allowed);
+        return new Skill(name, desc == null ? "" : desc, body == null ? "" : body, whenToUse, argHint, allowed, context);
     }
 
     /** Short index of names + descriptions, for the always-in-context skill list. */

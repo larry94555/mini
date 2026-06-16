@@ -63,13 +63,16 @@ public class AgentController {
     private final SkillRequests skillRequests;
     private final ProjectContext project;
     private final InitService init;
+    private final PreviewStore previews;
+    private final BuiltinTools builtins;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
                            TodoStore todos, InterruptService interrupt, RunService runService,
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
-                           SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init) {
+                           SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init,
+                           PreviewStore previews, BuiltinTools builtins) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -87,6 +90,8 @@ public class AgentController {
         this.skillRequests = skillRequests;
         this.project = project;
         this.init = init;
+        this.previews = previews;
+        this.builtins = builtins;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -842,6 +847,41 @@ public class AgentController {
             audit.record(currentUser(), "init", "CLAUDE.md", String.valueOf(r.get("message")));
         }
         return r;
+    }
+
+    /** Staged (not-yet-applied) patch previews for a session, for the browser diff viewer. */
+    @GetMapping("/preview")
+    public List<Map<String, Object>> previews(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireRead(sessionId);
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (PreviewStore.Preview p : previews.listFor(sessionId)) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", p.id());
+            m.put("summary", p.summary());
+            m.put("diff", p.diff());
+            m.put("ts", p.ts());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** Apply a staged preview (re-validates + snapshots). */
+    @PostMapping("/preview/apply")
+    public Map<String, Object> applyPreview(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+                                            @RequestParam(name = "id", defaultValue = "") String id) {
+        requireAccess(sessionId);
+        String result = builtins.applyPreview(sessionId, id);
+        audit.record(currentUser(), "preview-apply", "session:" + sessionId, result);
+        return Map.of("result", result);
+    }
+
+    /** Discard a staged preview without applying it. */
+    @PostMapping("/preview/discard")
+    public Map<String, Object> discardPreview(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+                                              @RequestParam(name = "id", defaultValue = "") String id) {
+        requireAccess(sessionId);
+        boolean ok = previews.discard(sessionId, id);
+        return Map.of("discarded", ok);
     }
 
     // ---- helpers -----------------------------------------------------------
