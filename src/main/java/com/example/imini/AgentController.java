@@ -860,6 +860,18 @@ public class AgentController {
             m.put("summary", p.summary());
             m.put("diff", p.diff());
             m.put("ts", p.ts());
+            List<Map<String, Object>> hunks = new java.util.ArrayList<>();
+            for (PreviewStore.Hunk h : p.hunks()) {
+                Map<String, Object> hm = new java.util.LinkedHashMap<>();
+                hm.put("index", h.index());
+                hm.put("path", h.path());
+                hm.put("kind", h.kind());
+                hm.put("added", h.added());
+                hm.put("removed", h.removed());
+                hm.put("diff", h.diff());
+                hunks.add(hm);
+            }
+            m.put("hunks", hunks);
             out.add(m);
         }
         return out;
@@ -868,9 +880,10 @@ public class AgentController {
     /** Apply a staged preview (re-validates + snapshots). */
     @PostMapping("/preview/apply")
     public Map<String, Object> applyPreview(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
-                                            @RequestParam(name = "id", defaultValue = "") String id) {
+                                            @RequestParam(name = "id", defaultValue = "") String id,
+                                            @RequestParam(name = "hunks", defaultValue = "") String hunks) {
         requireAccess(sessionId);
-        String result = builtins.applyPreview(sessionId, id);
+        String result = builtins.applyPreview(sessionId, id, hunks);
         audit.record(currentUser(), "preview-apply", "session:" + sessionId, result);
         return Map.of("result", result);
     }
@@ -878,10 +891,11 @@ public class AgentController {
     /** Discard a staged preview without applying it. */
     @PostMapping("/preview/discard")
     public Map<String, Object> discardPreview(@RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
-                                              @RequestParam(name = "id", defaultValue = "") String id) {
+                                              @RequestParam(name = "id", defaultValue = "") String id,
+                                              @RequestParam(name = "hunks", defaultValue = "") String hunks) {
         requireAccess(sessionId);
-        boolean ok = previews.discard(sessionId, id);
-        return Map.of("discarded", ok);
+        String result = builtins.discardPreview(sessionId, id, hunks);
+        return Map.of("result", result);
     }
 
     // ---- helpers -----------------------------------------------------------

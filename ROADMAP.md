@@ -156,9 +156,9 @@ Implement:
 - ~~`apply_previewed_patch`~~ (done -- re-validates + snapshots),
 - ~~`discard_previewed_patch`~~ (done),
 - ~~browser diff viewer~~ (done -- Patch preview card + `GET /preview`),
-- hunk-level approval later.
+- ~~hunk-level approval~~ (done -- per-edit hunks, apply/discard a subset).
 
-Priority 5's core is now **complete** (only the later hunk-level approval remains).
+Priority 5 is now **complete**.
 
 Why this is fifth:
 
@@ -183,19 +183,19 @@ references; skills UX parity (`/skills`, direct invocation, `$ARGUMENTS`, bundle
 frontmatter, and `context: fork`); a custom subagent registry; and patch preview + review UX
 (`preview_patch` / `apply_previewed_patch` / `discard_previewed_patch` + a browser diff viewer).
 
-With the numbered Claude Code feature priorities done, the next work comes from **Later
-priorities** -- pick by frequency and teaching value:
+All five numbered priorities and hunk-level approval are done. The remaining work comes from
+**Later priorities** -- pick by frequency and teaching value:
 
-- **hunk-level approval** for the patch-preview flow (apply/skip individual hunks),
-- LSP-backed code intelligence (go-to-def, find-refs) to improve navigation,
+- LSP-backed code intelligence (go-to-def, find-refs) to sharpen navigation and the explore/review
+  subagents,
 - session fork / rename / export UX polish,
 - `/loop` and scheduled local tasks,
 - image input,
 - plugin packaging.
 
-Hunk-level approval is the smallest high-value next step: it extends the preview store and the
-diff render that just shipped, and deepens the review-before-apply story. Keep avoiding
-trust/admin polish ahead of these unless the task is specifically trust/security work.
+LSP-backed code intelligence is the highest-value next step: it deepens the harness's codebase
+understanding (a core Claude Code capability) and directly improves the navigation tools and subagents.
+Keep avoiding trust/admin polish ahead of these unless the task is specifically trust/security work.
 
 ## 3. Guidance for AI implementers
 
@@ -232,7 +232,7 @@ Current top priorities:
 8. ~~Add `agents/*.md` registry and `/agents`.~~ (done)
 9. ~~Add `delegate_agent(name, task)`.~~ (done -- with built-in explore/review/debug/research)
 10. ~~Add `preview_patch` and a browser diff viewer.~~ (done -- + apply/discard, `context: fork` skills)
-11. Add hunk-level approval to the patch-preview flow.
+11. ~~Add hunk-level approval to the patch-preview flow.~~ (done -- `PreviewSelect`, per-hunk apply/discard)
 
 ## 5. Educational completeness
 
@@ -336,6 +336,9 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Hunk-level approval: a staged preview is a list of per-edit hunks; `apply_previewed_patch` /
+  `discard_previewed_patch` (and the web UI's per-hunk checkboxes + Apply selected/all) act on a chosen
+  subset (`hunks="0,2"` / `"1-3"`), leaving the rest staged (`PreviewSelect` pure + unit-tested).
 - Patch preview + review UX (Priority 5): `preview_patch` stages edits and returns a unified diff without
   writing; `apply_previewed_patch` re-validates against current files + snapshots; `discard_previewed_patch`
   drops it; a web-UI *Patch preview* card (and `GET /preview`, `POST /preview/apply|discard`) reviews

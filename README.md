@@ -110,7 +110,8 @@ No cloud API key is required.
 | `SubAgent.java` | Runs a delegated sub-agent loop (research, registry agent, or forked skill) in isolation |
 | `AgentLibrary.java` / `AgentRegistry.java` | Custom subagents: parsing + built-in/`agents/*.md` catalog |
 | `DiffRender.java` | Pure unified-diff rendering for patch previews |
-| `PreviewStore.java` | In-memory staged (not-yet-applied) patch previews, per session |
+| `PreviewStore.java` | In-memory staged patch previews (per session), each a list of hunks |
+| `PreviewSelect.java` | Pure hunk-selection parsing (`0,2`, `1-3`, `all`) for hunk-level approval |
 | `McpManager.java` | Optional MCP stdio client |
 | `AgentController.java` | HTTP endpoints |
 | `RunService.java` | Slot-bounded job queue for concurrent runs |
@@ -727,19 +728,25 @@ the change and returns a unified diff. Review it, then **`apply_previewed_patch`
 against the current files and snapshotting each change so it can be rewound), or **`discard_previewed_patch`**
 drops it. Both default to the most recent staged preview, or take an `id`.
 
-The web UI has a **Patch preview** card: it lists staged previews with their diffs and an **Apply** /
-**Discard** button each, so you can review-before-apply right in the browser. The same surface is
-available over HTTP:
+**Hunk-level approval.** A staged preview is a list of **hunks** -- one per edit, each independently
+applicable and numbered (`[0]`, `[1]`, ...). You don't have to take a preview all-or-nothing: pass
+`hunks` to apply or discard only some, e.g. `apply_previewed_patch hunks="0,2"` or `hunks="1-3"` (blank
+= all). Applied hunks are written and snapshotted; the rest stay staged (re-numbered) so you can handle
+them later.
+
+The web UI has a **Patch preview** card: each staged preview shows its hunks with a checkbox and per-hunk
+diff, and **Apply selected** / **Apply all** / **Discard** buttons -- review-and-pick right in the
+browser. The same surface is available over HTTP:
 
 ```
-curl "localhost:8080/preview?sessionId=default"                       -H "X-API-Key: <key>"
-curl -X POST "localhost:8080/preview/apply?sessionId=default&id=pv-1" -H "X-API-Key: <key>"
+curl "localhost:8080/preview?sessionId=default"                                -H "X-API-Key: <key>"
+curl -X POST "localhost:8080/preview/apply?sessionId=default&id=pv-1&hunks=0,2" -H "X-API-Key: <key>"
 ```
 
-> Honest scope: the diff is a single-hunk render (common prefix/suffix trimmed), good for the small
-> targeted edits `apply_patch` makes -- not a full LCS diff. Previews are in-memory and per-session
-> (ephemeral, not durable). `apply_previewed_patch` re-applies against the *current* files, so if a file
-> changed since staging, the apply aborts rather than clobbering it. Hunk-level approval is a later item.
+> Honest scope: each hunk is one `apply_patch` edit; a hunk's diff is a single-hunk render (common
+> prefix/suffix trimmed), good for small targeted edits -- not a full LCS diff. Previews are in-memory
+> and per-session (ephemeral). `apply_previewed_patch` re-applies the selected hunks against the
+> *current* files, so if a file changed since staging, the apply aborts rather than clobbering it.
 
 ## Session export / import
 
