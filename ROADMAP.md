@@ -111,11 +111,11 @@ Implement:
 - ~~bundled educational skills such as `code-review`, `debug`, `batch`, and
   `loop`~~ (done -- shipped under `skills/`),
 - ~~`$ARGUMENTS` substitution~~ (done -- `$ARGUMENTS`/`$ARGS`; args appended if no placeholder),
-- frontmatter support for `when_to_use`, `argument-hint`, and `allowed_tools`,
+- ~~frontmatter support for `when_to_use`, `argument-hint`, and `allowed_tools`~~ (done),
 - ~~skill invocation trace entries~~ (done -- `[skill] invoked /<name>`),
 - `context: fork` later, after the subagent registry exists.
 
-Still open: `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
+Priority 3 is now **complete** (only the later `context: fork` item remains, gated on subagents).
 
 Why this is third:
 
@@ -129,12 +129,14 @@ Generalize the existing research subagent into a reusable registry.
 
 Implement:
 
-- `agents/*.md`,
-- `/agents`,
-- `/agent NAME TASK`,
-- `delegate_agent(name, task)`,
-- built-in `explore`, `review`, `debug`, and `research` agents,
-- per-agent allowed tools and model profile.
+- ~~`agents/*.md`~~ (done -- disk agents override built-ins by name),
+- ~~`/agents`~~ (done),
+- ~~`/agent NAME TASK`~~ (done),
+- ~~`delegate_agent(name, task)`~~ (done -- tool),
+- ~~built-in `explore`, `review`, `debug`, and `research` agents~~ (done -- read-only),
+- ~~per-agent allowed tools and model profile~~ (done -- tool scope enforced; `model` advisory).
+
+Priority 4 is now **complete** (see Recently completed).
 
 Why this is fourth:
 
@@ -174,24 +176,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The highest-value next feature is now **skills UX parity** (Priority 3), since
-Priorities 1 and 2 are complete: layered memory + `/memory` + `/init`, and
-`@file` / `@directory` prompt references (workspace-confined, capped, shown on
-the trace).
+Priorities 1-4 are now complete: layered memory + `/memory` + `/init`; `@file` / `@directory`
+references; skills UX parity (`/skills`, direct `/skill-name`, `$ARGUMENTS`, bundled skills,
+`when_to_use`/`argument-hint`/`allowed_tools` frontmatter); and a custom subagent registry
+(`/agents`, `/agent <name> <task>`, `delegate_agent`, built-in explore/review/debug/research).
 
-`/skills` (listing), direct `/skill-name` invocation, `$ARGUMENTS` substitution,
-skill-invocation trace entries, and bundled educational skills (`code-review`,
-`debug`, `batch`, `loop`) now exist. The remaining Priority 3 work is:
+The highest-value next feature is **Priority 5 - patch preview and review UX**:
 
-- frontmatter for `when_to_use` (auto-load hinting), `argument-hint` (shown in
-  `/skills`), and `allowed_tools` (per-skill tool scoping).
+- `preview_patch` to stage a diff without applying it,
+- `apply_previewed_patch` / `discard_previewed_patch`,
+- a browser diff viewer for the staged change,
+- hunk-level approval later.
 
-After skill
-UX with `/skills` and direct `/skill-name` invocation.
-
-Do not prioritize activity-view polish, bundle metadata, monetization
-packaging, or cryptographic skill provenance ahead of these workflow features
-unless the current task is explicitly about trust or security administration.
+This builds on the existing `apply_patch` + edit-trust machinery and makes review-before-apply
+a first-class step. Do not prioritize trust/admin polish ahead of it unless the task is
+specifically about trust/security administration.
 
 ## 3. Guidance for AI implementers
 
@@ -224,10 +223,10 @@ Current top priorities:
 4. ~~Add `@directory` references.~~ (done -- one-level listing, capped)
 5. ~~Add `/skills` and direct `/skill-name` invocation.~~ (done -- `SkillInvocation`, `$ARGUMENTS`, trace)
 6. ~~Add bundled `code-review`, `debug`, `batch`, and `loop` skills.~~ (done -- under `skills/`)
-7. Add `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
-8. Add `agents/*.md` registry and `/agents`.
-9. Add `delegate_agent(name, task)`.
-10. Add `preview_patch` and browser diff viewer.
+7. ~~Add `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.~~ (done)
+8. ~~Add `agents/*.md` registry and `/agents`.~~ (done)
+9. ~~Add `delegate_agent(name, task)`.~~ (done -- with built-in explore/review/debug/research)
+10. Add `preview_patch` and a browser diff viewer.
 11. Add hunk-level approval to the patch-preview flow.
 
 ## 5. Educational completeness
@@ -332,6 +331,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Custom subagent registry (Priority 4): named, tool-scoped subagents that run in their own isolated loop
+  and return only a final answer -- built-in read-only `explore`/`review`/`debug`/`research`, plus
+  `agents/*.md` (disk overrides built-ins). Surfaced via `/agents`, `/agent <name> <task>`, and a
+  `delegate_agent` tool (`AgentLibrary` pure + unit-tested, `AgentRegistry`, generalized `SubAgent`).
+- Skill frontmatter (Priority 3): `when_to_use` (feeds the auto-load scorer), `argument-hint` (shown in
+  `/skills`), and `allowed_tools` (per-skill tool reminder on invocation), parsed by `SkillLibrary`.
 - Bundled educational skills: `code-review`, `debug`, `batch`, and `loop` ship as `SKILL.md` files under
   `skills/`, each using `$ARGUMENTS` and pairing with `@file` references / the deterministic tools, so
   `/skills` is useful out of the box (load/parse asserted by `BundledSkillsTest`).

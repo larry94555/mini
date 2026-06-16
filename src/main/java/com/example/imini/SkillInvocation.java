@@ -15,7 +15,7 @@ public final class SkillInvocation {
 
     /** Slash names that are built-in commands, never treated as skill invocations. */
     public static final Set<String> RESERVED = Set.of(
-            "help", "commands", "memory", "init", "skills");
+            "help", "commands", "memory", "init", "skills", "agent", "agents");
 
     /** A parsed slash invocation: the name after {@code /} and the remaining argument text. */
     public record Parsed(String name, String args) {}
@@ -62,6 +62,8 @@ public final class SkillInvocation {
         for (Map<String, Object> s : skills) {
             boolean enabled = Boolean.TRUE.equals(s.get("enabled"));
             sb.append(enabled ? "  /" : "  (disabled) /").append(s.get("name"));
+            Object hint = s.get("argumentHint");
+            if (hint != null && !String.valueOf(hint).isBlank()) sb.append(" ").append(hint);
             Object d = s.get("description");
             if (d != null && !String.valueOf(d).isBlank()) sb.append(" - ").append(d);
             sb.append("\n");

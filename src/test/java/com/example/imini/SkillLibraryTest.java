@@ -7,6 +7,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure skill parsing, indexing, selection, and formatting. */
@@ -89,5 +90,35 @@ class SkillLibraryTest {
 
     private static Skill byName(List<Skill> skills, String name) {
         return skills.stream().filter(s -> s.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    @Test
+    void parseReadsFrontmatterMetadata() {
+        String md = "---\nname: code-review\ndescription: Review a diff\n"
+                + "when_to_use: when reviewing pull requests\nargument-hint: <@file>\n"
+                + "allowed_tools: read_file, grep, git_diff\n---\nReview $ARGUMENTS.";
+        SkillLibrary.Skill s = SkillLibrary.parse(md, "x");
+        assertEquals("code-review", s.name());
+        assertEquals("<@file>", s.argumentHint());
+        assertEquals("when reviewing pull requests", s.whenToUse());
+        assertEquals(java.util.List.of("read_file", "grep", "git_diff"), s.allowedTools());
+        assertTrue(s.body().contains("$ARGUMENTS"));
+    }
+
+    @Test
+    void selectRanksByWhenToUse() {
+        SkillLibrary.Skill cr = SkillLibrary.parse(
+                "---\nname: code-review\ndescription: d\nwhen_to_use: reviewing pull requests and diffs\n---\nbody", "cr");
+        SkillLibrary.Skill other = new SkillLibrary.Skill("other", "unrelated thing", "");
+        java.util.List<SkillLibrary.Skill> sel =
+                SkillLibrary.select(java.util.List.of(cr, other), "reviewing pull requests", 2);
+        assertFalse(sel.isEmpty());
+        assertEquals("code-review", sel.get(0).name());
+    }
+
+    @Test
+    void parseListToleratesBracketsAndSpaces() {
+        assertEquals(java.util.List.of("a", "b", "c"), SkillLibrary.parseList("[a, b c]"));
+        assertEquals(java.util.List.of(), SkillLibrary.parseList(""));
     }
 }

@@ -1829,3 +1829,35 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   next invocation, disabling one (globally or per-session) removes it from `/skills` and makes
   `/<name>` fall through, and `save_skill` / proposals still work alongside them. No code change is
   needed to add or remove a bundled skill.
+
+---
+
+# Skill frontmatter + custom subagent registry
+
+## 195. Skill frontmatter parse + when_to_use ranking (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SkillLibraryTest` passes the new cases -- `parse` reads `when_to_use`, `argument-hint`,
+  and `allowed_tools` (comma list, bracket/space tolerant); `select` ranks a skill higher when the query
+  matches its `when_to_use`. In the UI/`/skills`, the `argument-hint` shows next to the name.
+
+## 196. AgentLibrary parsing + command + merge (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AgentLibraryTest` passes -- `parse` reads name/description/tools/model + body;
+  `parseCommand` splits `/agent <name> <task>` (null for `/agents` and non-commands); `merge` lets a
+  disk agent override a built-in of the same name; `renderList` shows names and tool scopes.
+
+## 197. /agents and /agent delegation (manual)
+
+- **Observe:** `/agents` lists `explore`, `review`, `debug`, `research` (plus any `agents/*.md`) with
+  tool scopes. `/agent explore where is the approval flow handled?` runs the explore subagent in its own
+  loop and returns a concise map; the trace shows `[agent] delegate /agent explore`. The main model can
+  also call the `delegate_agent` tool. A disabled feature (`agents.enabled=false`) hides both.
+
+## 198. Subagent tool scope + safety (manual)
+
+- **Observe:** an `agents/<name>.md` with `tools: grep, read_file` runs scoped to just those tools; a
+  name that matches no agent returns a helpful "no subagent named ..." message. Built-ins are read-only,
+  so the delegated loop runs in AUTO mode without escaping into writes. Per-skill `allowed_tools` adds a
+  "prefer these tools only" reminder when a skill is invoked with `/<skill-name>`.

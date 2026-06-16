@@ -657,6 +657,47 @@ false), `skills.max-body` (default 4000), `skills.repos` (default empty), `skill
 > manifest directory. `install_skill` verifies a SHA-256 (integrity) but there is no cryptographic
 > signing / trust root yet, and repo pinning supports branches/tags (shallow); treat sources as trusted.
 
+## Subagents
+
+A **subagent** is a named, tool-scoped helper the main agent (or you) can hand a focused subtask to. It
+runs in its **own** isolated loop and returns only its final answer -- all of its intermediate context
+(search results, file dumps) stays in the sub-conversation and never clutters the main window. That
+isolation is the point: delegate "explore the auth code" or "review this diff" and get back a clean
+summary.
+
+**Built-in agents.** `imini` ships with read-only subagents so the feature works out of the box:
+
+- `explore` -- map the codebase (glob/grep/repo_tree/read) and report where the relevant code lives.
+- `review` -- review code or a diff and return prioritized findings.
+- `debug` -- investigate a bug (read-only) and propose a minimal fix.
+- `research` -- search the web and summarize (web_search/web_fetch).
+
+**Using them.** `/agents` lists the available subagents with their tool scopes; `/agent <name> <task>`
+delegates, e.g. `/agent explore where is the approval flow handled?`. The main model can also delegate
+on its own via the **`delegate_agent`** tool (`{name, task}`). Each delegation is logged on the trace as
+`[agent] delegate /agent <name>`.
+
+**Custom agents.** Drop an `agents/<name>.md` in the workspace (configurable via `agents.dir`) to add or
+override an agent. Optional `---` front-matter sets `description`, `tools` (a comma-separated allow-list
+of tool names the agent may use), and `model`; the body is the agent's system prompt:
+
+```
+---
+name: explore
+description: Map the codebase and report where the relevant code lives.
+tools: glob, grep, repo_tree, read_many, read_file, view
+---
+You are an exploration subagent. Locate the relevant files and report a concise map...
+```
+
+A disk agent overrides a built-in of the same name. Set `agents.enabled=false` to turn the feature off.
+
+> Honest scope: a subagent is scoped to the tools its definition lists (resolved against the registered
+> tools); built-ins are read-only and run in AUTO mode, so they're safe to auto-run. A custom agent that
+> lists a mutating tool would run it without a separate approval prompt inside the sub-loop -- prefer
+> read-only tool sets for delegated agents. The `model` key is advisory (a profile name), not a separate
+> endpoint.
+
 ## Session export / import
 
 A whole session -- its conversation, plan history (steps + per-step tools + coding reports), and todos --

@@ -15,13 +15,20 @@ public final class SkillLibrary {
 
     private SkillLibrary() {}
 
-    public record Skill(String name, String description, String body) {}
+    public record Skill(String name, String description, String body,
+                        String whenToUse, String argumentHint, java.util.List<String> allowedTools) {
+        /** Convenience for callers/tests that don't supply front-matter metadata. */
+        public Skill(String name, String description, String body) {
+            this(name, description, body, "", "", java.util.List.of());
+        }
+    }
 
     /** Parse a SKILL.md: optional `---` front-matter (name/description), then the body. */
     public static Skill parse(String text, String fallbackName) {
         if (text == null) return new Skill(fallbackName, "", "");
         String t = text.replace("\r\n", "\n");
-        String name = fallbackName, desc = "", body = t.strip();
+        String name = fallbackName, desc = "", body = t.strip(), whenToUse = "", argHint = "";
+        java.util.List<String> allowed = java.util.List.of();
         if (t.stripLeading().startsWith("---")) {
             int first = t.indexOf("---");
             int second = t.indexOf("\n---", first + 3);
@@ -35,12 +42,18 @@ public final class SkillLibrary {
                         name = l.substring(5).strip();
                     } else if (lower.startsWith("description:")) {
                         desc = l.substring(12).strip();
+                    } else if (lower.startsWith("when_to_use:")) {
+                        whenToUse = l.substring(12).strip();
+                    } else if (lower.startsWith("argument-hint:")) {
+                        argHint = l.substring(14).strip();
+                    } else if (lower.startsWith("allowed_tools:") || lower.startsWith("allowed-tools:")) {
+                        allowed = parseList(l.substring(l.indexOf(':') + 1));
                     }
                 }
             }
         }
         if (name == null || name.isBlank()) name = fallbackName;
-        return new Skill(name, desc == null ? "" : desc, body == null ? "" : body);
+        return new Skill(name, desc == null ? "" : desc, body == null ? "" : body, whenToUse, argHint, allowed);
     }
 
     /** Short index of names + descriptions, for the always-in-context skill list. */
@@ -67,7 +80,22 @@ public final class SkillLibrary {
     }
 
     private static double score(List<String> queryTokens, Skill s) {
-        return RetrievalService.lexicalScore(queryTokens, s.name() + " " + s.description());
+        // when_to_use is the strongest auto-load signal, so include it alongside name + description
+        return RetrievalService.lexicalScore(queryTokens,
+                s.name() + " " + s.description() + " " + (s.whenToUse() == null ? "" : s.whenToUse()));
+    }
+
+    /** Split a comma/whitespace-separated frontmatter list (e.g. allowed_tools). Pure. */
+    public static List<String> parseList(String raw) {
+        List<String> out = new ArrayList<>();
+        if (raw == null) return out;
+        String r = raw.trim();
+        if (r.startsWith("[") && r.endsWith("]")) r = r.substring(1, r.length() - 1); // tolerate [a, b]
+        for (String part : r.split("[,\\s]+")) {
+            String v = part.trim().replaceAll("^[\"\\']|[\"\\']$", "");
+            if (!v.isEmpty()) out.add(v);
+        }
+        return out;
     }
 
     /** Wrap a skill body for injection into the prompt / a load_skill result (optionally capped). */

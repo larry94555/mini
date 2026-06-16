@@ -38,6 +38,16 @@ public class SubAgent {
         webTools.put(search.name, search);
         webTools.put(fetch.name, fetch);
         // AUTO mode: the sub-agent has only read-only tools, so nothing needs approval anyway.
-        return engine.run(SYSTEM_PROMPT, task, webTools, PermissionService.Mode.AUTO, "sub", sessionId, sink);
+        return run(sessionId, SYSTEM_PROMPT, task, webTools, sink);
+    }
+
+    /**
+     * General delegation: run a sub-agent loop with a given system prompt and an explicit (already
+     * scoped) tool set, returning only its final answer. Used by custom subagents (delegate_agent).
+     * AUTO mode is safe because callers scope the tools to read-only ones.
+     */
+    public String run(String sessionId, String systemPrompt, String task, Map<String, Tool> tools,
+                      RunSink sink) throws Exception {
+        return engine.run(systemPrompt, task, tools, PermissionService.Mode.AUTO, "sub", sessionId, sink);
     }
 }

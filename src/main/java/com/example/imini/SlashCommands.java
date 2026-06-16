@@ -57,6 +57,8 @@ public class SlashCommands {
         sb.append("  /init              scan the repo and draft/update CLAUDE.md\n");
         sb.append("  /skills            list available skills\n");
         sb.append("  /<skill-name>      invoke a skill directly ($ARGUMENTS = text after the name)\n");
+        sb.append("  /agents            list available subagents\n");
+        sb.append("  /agent <name> ...  delegate a task to a subagent\n");
         if (templates.isEmpty()) {
             sb.append("  (none -- add .md files to the commands/ folder)");
         } else {
