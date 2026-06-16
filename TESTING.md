@@ -1921,3 +1921,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   Unchecking a hunk and clicking **Apply selected** applies only the checked ones (and leaves the rest
   listed); **Apply all** applies everything; **Discard** drops the preview. `POST
   /preview/apply?...&hunks=0,2` and `POST /preview/discard?...&hunks=1` back these.
+
+---
+
+# LSP-style find_references
+
+## 206. SymbolRefs whole-identifier matching (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SymbolRefsTest` passes -- `references`/`count` match only whole identifiers (searching
+  `user` does not match `username` or `user_id`); `render` marks declaration sites `[def]`, counts the
+  declarations, handles the empty case, and notes truncation at the cap.
+
+## 207. find_references finds usages and marks the declaration (manual)
+
+- **Observe:** `find_references name=User` returns `path:line: text` for every usage of `User` across the
+  repo, with the class/declaration line flagged `[def]`. Searching a name that only appears as a
+  substring of others (e.g. `user` when the code has `username`) returns no matches -- whole-identifier
+  only. `find_symbol User` still returns just the declaration; the two are complementary.
+
+## 208. find_references scope + cap (manual)
+
+- **Observe:** `dir` limits the search to a subdirectory and `glob` (e.g. `**/*.java`) limits by file
+  type; `max_results` caps the output (default 50) and the result notes when it stopped early. A blank
+  `name` returns a helpful error.

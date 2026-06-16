@@ -60,7 +60,7 @@ public class CodebaseTools {
     }
 
     public List<Tool> all() {
-        return List.of(glob(), grep(), repoTree(), readMany(), outline(), findSymbol(),
+        return List.of(glob(), grep(), repoTree(), readMany(), outline(), findSymbol(), findReferences(),
                 gitStatus(), gitDiff(), gitLog(), gitBlame());
     }
 
@@ -541,6 +541,82 @@ public class CodebaseTools {
     }
 
     /** Walk the tree and report declarations whose name equals {@code name} ('path:line: kind name'). */
+    public Tool findReferences() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("name", strProp("Exact identifier to find USAGES of across the repo (whole-word)."));
+        props.put("dir", strProp("Optional sub-directory to search under (default: workspace root)."));
+        props.put("glob", strProp("Optional file filter, e.g. \"**/*.java\" (default: all files)."));
+        props.put("max_results", intProp("Optional cap on matches (default 50)."));
+        return new Tool("find_references",
+                "Find every USAGE of an identifier across the repo (whole-identifier matches, so 'user' "
+                        + "won't match 'username'), returning 'path:line: text' with declaration sites marked "
+                        + "[def]. Complements find_symbol (which finds only the declaration). Heuristic, not a "
+                        + "typed resolver: it can over-match a name reused elsewhere.",
+                schema(props, "name"), false, args -> {
+            try {
+                Path root = sandbox.root();
+                Path base = resolveDir(args);
+                String denied = sandbox.enforcePath("find_references", base.toString(), false);
+                if (denied != null) return denied;
+                String name = str(args, "name");
+                if (name.isBlank()) return "ERROR: provide an identifier 'name'.";
+                String globFilter = str(args, "glob");
+                int cap = Math.max(1, intArg(args, "max_results", 50));
+                return findReferences(root, base, name.trim(),
+                        globFilter.isBlank() ? null : globFilter, cap, grepMaxFileKb);
+            } catch (IOException e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    public static String findReferences(Path root, Path base, String name, String globFilter,
+                                        int maxMatches, int maxFileKb) throws IOException {
+        PathMatcher fileFilter = globFilter == null ? null
+                : FileSystems.getDefault().getPathMatcher("glob:" + globFilter);
+        long maxBytes = (long) maxFileKb * 1024L;
+        List<SymbolRefs.Ref> refs = new ArrayList<>();
+        boolean[] truncated = {false};
+        Files.walkFileTree(base, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes a) {
+                if (!dir.equals(base) && IGNORE_DIRS.contains(dir.getFileName().toString())) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes a) {
+                if (a.size() > maxBytes) return FileVisitResult.CONTINUE;
+                if (fileFilter != null && !fileFilter.matches(base.relativize(file))) return FileVisitResult.CONTINUE;
+                List<String> lines;
+                try {
+                    lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    return FileVisitResult.CONTINUE;
+                }
+                // declaration lines for this name in this file (to mark [def])
+                java.util.Set<Integer> defLines = new java.util.HashSet<>();
+                for (Symbol sym : extractSymbols(file.getFileName().toString(), lines)) {
+                    if (name.equals(sym.name())) defLines.add(sym.line());
+                }
+                for (int i = 0; i < lines.size(); i++) {
+                    if (SymbolRefs.references(lines.get(i), name)) {
+                        refs.add(new SymbolRefs.Ref(rel(root, file), i + 1, defLines.contains(i + 1),
+                                truncate(lines.get(i).strip(), 200)));
+                        if (refs.size() >= maxMatches) {
+                            truncated[0] = true;
+                            return FileVisitResult.TERMINATE;
+                        }
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFileFailed(Path file, IOException e) {
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return SymbolRefs.render(refs, name, maxMatches, truncated[0]);
+    }
+
     public static String findSymbol(Path root, Path base, String name, String globFilter,
                                     int maxMatches, int maxFileKb) throws IOException {
         PathMatcher fileFilter = globFilter == null ? null
