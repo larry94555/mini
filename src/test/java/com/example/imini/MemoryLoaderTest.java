@@ -52,4 +52,20 @@ class MemoryLoaderTest {
         MemoryLoader.expand("ROOT.md", "@deep.md", res, 0, diag, new HashSet<>(), 0);
         assertTrue(diag.get(0).reason().contains("max import depth"));
     }
+
+    @Test
+    void candidateOrderPlacesRulesBeforeLocalOverride() {
+        java.util.List<String> order = MemoryLoader.candidateOrder(
+                java.util.List.of(".claude/rules/01-style.md", ".claude/rules/02-tests.md"));
+        // project files first, then rules, then CLAUDE.local.md last (local overrides win)
+        assertTrue(order.indexOf("CLAUDE.md") < order.indexOf(".claude/rules/01-style.md"));
+        assertTrue(order.indexOf(".claude/rules/02-tests.md") < order.indexOf("CLAUDE.local.md"));
+        assertEquals("CLAUDE.local.md", order.get(order.size() - 1));
+        assertEquals(".claude/CLAUDE.md", order.get(0));
+    }
+
+    @Test
+    void candidateOrderWithoutRulesIsJustCandidates() {
+        assertEquals(MemoryLoader.CANDIDATES, MemoryLoader.candidateOrder(java.util.List.of()));
+    }
 }

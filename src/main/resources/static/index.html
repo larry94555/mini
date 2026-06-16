@@ -160,6 +160,11 @@
       <label style="font-size:11px;display:block;margin-top:4px"><input type="checkbox" id="importSharing"/> restore the bundle's shared-with list on import</label>
       <div id="bundleMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
     </div>
+    <div class="card" id="projectMemoryCard">
+      <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
+      <div class="muted" style="font-size:11px">Files loaded into the system prompt (load order; local overrides win). Run <code>/init</code> to scaffold <code>CLAUDE.md</code>.</div>
+      <div id="memFilesList" class="muted" style="margin-top:4px">(loading...)</div>
+    </div>
     <div class="card">
       <h3>Memory search</h3>
       <div class="row">
@@ -397,6 +402,22 @@ async function doSearch(){
 }
 
 // --- sidebars ---
+async function refreshMemoryFiles(){
+  const el = $("#memFilesList");
+  if (!el) return;
+  const j = await getJson("/memory/files");
+  if (!j || !Array.isArray(j.files) || !j.files.length){ el.innerHTML = "(no memory files found)"; return; }
+  const rows = j.files.map(f => {
+    const skipped = String(f.reason||"").startsWith("skipped");
+    const indent = (f.depth||0) > 0 ? ("&nbsp;&nbsp;").repeat(f.depth) + "↳ " : "";
+    return '<div style="font-size:11px;' + (skipped ? "opacity:.6" : "") + '">'
+      + indent + '<b>' + escapeHtml(String(f.path)) + '</b> '
+      + '<span class="muted">[' + escapeHtml(String(f.reason||"")) + (f.bytes ? ", " + f.bytes + "B" : "") + ']</span>'
+      + '</div>';
+  }).join("");
+  el.innerHTML = rows + '<div class="muted" style="font-size:11px;margin-top:4px">' + j.count + ' entr' + (j.count===1?"y":"ies") + ', ' + j.totalBytes + ' bytes loaded</div>';
+}
+$("#refreshMemLink") && ($("#refreshMemLink").onclick = refreshMemoryFiles);
 async function getJson(path){ try { const r = await fetch(path, {headers: headers(false)}); if(!r.ok) return null; return await r.json(); } catch { return null; } }
 
 async function refreshSessions(){
@@ -807,7 +828,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>

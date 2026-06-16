@@ -1945,3 +1945,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `dir` limits the search to a subdirectory and `glob` (e.g. `**/*.java`) limits by file
   type; `max_results` caps the output (default 50) and the result notes when it stopped early. A blank
   `name` returns a helpful error.
+
+---
+
+# Memory parity: /init merge + memory diagnostics
+
+## 209. candidateOrder precedence (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `MemoryLoaderTest` passes the new cases -- `candidateOrder` puts project files first
+  (`.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`, `AGENTS.md`), then `.claude/rules/*.md` (sorted), then
+  `CLAUDE.local.md` last so the local override wins; with no rules it equals `CANDIDATES`.
+
+## 210. /init merges into an existing CLAUDE.md without replacing content (deterministic)
+
+- **Run:** `mvn test`
+- **Observe:** `InitDraftTest` passes -- `headings`/`missingSections` identify scaffold sections a file
+  lacks; `sectionBlocks` splits a draft by `## ` heading; `augment` appends only the missing sections
+  under a marker while preserving the existing preamble and hand-written sections (no duplication), and
+  is a no-op when nothing is missing.
+
+## 211. /init in chat improves an existing file in place (manual)
+
+- **Setup:** a repo with a `CLAUDE.md` that has, say, only a `## Conventions` section.
+- **Observe:** `/init` reports it appended the missing sections (Project overview, Build and test,
+  Layout, Notes for the agent), your `## Conventions` is untouched, and a marker comment separates the
+  additions. Running `/init` again reports nothing to add. `POST /init?write=true&augment=true` does the
+  same over HTTP; `&overwrite=true` still fully replaces.
+
+## 212. Project memory card in the web UI (manual)
+
+- **Observe:** the *Project memory* card lists every memory file in load order with its reason/source and
+  size (skipped files dimmed, `@`-imports nested), matching `/memory` and `GET /memory/files`. It is
+  distinct from the *Memory search* (retrieval) card.

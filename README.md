@@ -212,7 +212,7 @@ http://localhost:8081
 | `POST /index` | Build or rebuild retrieval index |
 | `GET /memory?q=&k=` | Search indexed workspace memory (retrieval) |
 | `GET /memory/files` | Project-memory diagnostics: which memory files loaded, in order, and why |
-| `POST /init?write=&overwrite=` | Scan the repo and draft `CLAUDE.md` (optionally write it) |
+| `POST /init?write=&overwrite=&augment=` | Scan the repo and draft `CLAUDE.md`; create, replace, or merge-in missing sections |
 | `GET /preview?sessionId=` | Staged patch previews for the browser diff viewer |
 | `POST /preview/apply?sessionId=&id=` | Apply a staged preview (re-validates + snapshots) |
 | `POST /preview/discard?sessionId=&id=` | Drop a staged preview |
@@ -490,6 +490,11 @@ Loaded project memory (3 entries, 412 bytes):
 > `AGENTS.md`). All present layered files now load; a repo with just one of them behaves as before.
 > `GET /memory/files` is the memory-file view; `GET /memory?q=` remains the separate retrieval search.
 
+**In the web UI.** The **Project memory** card mirrors `/memory`: it lists every memory file in load
+order with its source/reason and size (skipped files dimmed, imports nested), so you can see at a glance
+what context the agent is actually running with. (The separate *Memory search* card is retrieval over
+the indexed workspace -- a different thing.)
+
 ### Bootstrapping memory with `/init`
 
 Don't have a `CLAUDE.md` yet? Type `/init` in chat. `imini` scans the repository -- detecting the build
@@ -499,16 +504,49 @@ model call), so it works reliably even with a weak local model.
 
 - If `CLAUDE.md` does **not** exist, `/init` writes it and reports what it found; it is immediately
   picked up as project memory (confirm with `/memory`). Fill in the Conventions/Notes sections.
-- If `CLAUDE.md` **already** exists, `/init` never overwrites it: it shows the proposed draft and lists
-  any scaffold sections your file is missing, so you can copy what you want.
+- If `CLAUDE.md` **already** exists, `/init` **improves it in place without replacing your content**: it
+  appends only the scaffold sections your file is missing (under a clear `<!-- Added by imini /init -->`
+  marker) and reports what it added. Existing sections -- including ones you hand-wrote -- are never
+  touched, and if nothing is missing it leaves the file unchanged. This is append-only and safe to re-run.
 
-For explicit control, `POST /init?write=true` creates the file (and `&overwrite=true` replaces an
-existing one); without `write` it returns a preview (build system, languages, missing sections, draft).
+For explicit control over the endpoint: `POST /init?write=true` creates the file when absent;
+`&augment=true` merges missing sections into an existing file (preserving content); `&overwrite=true`
+replaces it entirely. Without `write` it returns a preview (build system, languages, missing sections,
+draft).
 
 ```
-curl -X POST "localhost:8080/init"                       -H "X-API-Key: <key>"   # preview only
-curl -X POST "localhost:8080/init?write=true"            -H "X-API-Key: <key>"   # create if absent
+curl -X POST "localhost:8080/init"                          -H "X-API-Key: <key>"   # preview only
+curl -X POST "localhost:8080/init?write=true"               -H "X-API-Key: <key>"   # create if absent
+curl -X POST "localhost:8080/init?write=true&augment=true"  -H "X-API-Key: <key>"   # add missing sections, keep content
 ```
+
+### Why memory matters (and how it differs from skills and subagents)
+
+**What memory is.** "Memory" here is *persistent project context* -- a few Markdown files in the repo
+that are read on every turn and prepended to the model's system prompt. It is how the agent knows the
+things that are true for *this* project across *all* sessions: the build/test commands, the directory
+layout, the conventions to follow, and the gotchas to avoid.
+
+**Why it's useful in an agent system.** A language model starts each conversation with no memory of your
+repo. Without project context it re-derives the same facts every time (often wrongly on a weak local
+model) -- guessing the build command, inventing a directory, ignoring your style. Loading a small, fixed
+set of files turns those repeated guesses into *given* facts, which is exactly what makes an agent feel
+like it "knows" your codebase. Because the load is **deterministic** (a fixed order, no model call), the
+behavior is predictable and testable -- you can always run `/memory` to see precisely what the agent is
+operating with, and why each file was included or skipped.
+
+**How memory differs from skills and subagents** -- three distinct extension points:
+
+| Mechanism | What it is | When it applies | Who triggers it |
+|---|---|---|---|
+| **Memory** (`CLAUDE.md`, rules) | Always-on project facts/conventions | Every turn, automatically | The harness (loaded into the prompt) |
+| **Skills** (`skills/*.md`) | On-demand instruction bundles for a task | Only when invoked / auto-loaded | You (`/skill`) or the model (`load_skill`) |
+| **Subagents** (`agents/*.md`) | A separate, tool-scoped agent loop | Only when delegated to | You (`/agent`) or the model (`delegate_agent`) |
+
+In short: memory is *passive and ever-present* (context the agent always has), a skill is *a procedure
+you reach for* (instructions for a particular kind of task), and a subagent is *a worker you hand a job
+to* (an isolated loop that returns a summary). They compose -- e.g. a `code-review` skill can rely on the
+conventions your `CLAUDE.md` memory establishes.
 
 ## Context references (`@file` / `@directory`)
 
