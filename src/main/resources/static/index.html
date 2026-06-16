@@ -650,24 +650,43 @@ async function withdrawReq(id){
   if (state.me.admin) refreshSkillRequests();
 }
 const SESSACT_PAGE = 20;
+function previewHunkHtml(pid, h){
+  return '<label style="display:block;font-size:11px;margin-top:4px">'
+    + '<input type="checkbox" class="pvhunk" data-pid="' + pid + '" value="' + h.index + '" checked> '
+    + '<b>[' + h.index + ']</b> ' + escapeHtml(String(h.path || "")) + ' <span class="muted">+'
+    + (h.added||0) + ' -' + (h.removed||0) + '</span></label>'
+    + '<pre style="white-space:pre-wrap;font-size:11px;margin:2px 0 0 16px;max-height:160px;overflow:auto">'
+    + escapeHtml(String(h.diff || "")) + '</pre>';
+}
 async function refreshPreviews(){
   const el = $("#previewList");
   if (!el) return;
   const rows = await getJson("/preview?sessionId=" + encodeURIComponent(state.session));
   if (!Array.isArray(rows) || !rows.length){ el.innerHTML = "(no staged previews)"; return; }
-  el.innerHTML = rows.map(p =>
-    '<div style="border-top:1px solid var(--border);padding:6px 0">'
-    + '<div style="font-size:11px"><b>' + escapeHtml(String(p.id)) + '</b> <span class="muted">'
-    + escapeHtml(String(p.summary || "")) + '</span></div>'
-    + '<pre style="white-space:pre-wrap;font-size:11px;margin:4px 0;max-height:220px;overflow:auto">'
-    + escapeHtml(String(p.diff || "")) + '</pre>'
-    + '<div class="row" style="gap:6px">'
-    + '<button onclick="applyPreview(\'' + p.id + '\')">Apply</button>'
-    + '<button onclick="discardPreview(\'' + p.id + '\')">Discard</button>'
-    + '</div></div>').join("");
+  el.innerHTML = rows.map(p => {
+    const hunks = Array.isArray(p.hunks) ? p.hunks : [];
+    const body = hunks.length
+      ? hunks.map(h => previewHunkHtml(p.id, h)).join("")
+      : '<pre style="white-space:pre-wrap;font-size:11px">' + escapeHtml(String(p.diff || "")) + '</pre>';
+    return '<div style="border-top:1px solid var(--border);padding:6px 0">'
+      + '<div style="font-size:11px"><b>' + escapeHtml(String(p.id)) + '</b> <span class="muted">'
+      + escapeHtml(String(p.summary || "")) + '</span></div>'
+      + body
+      + '<div class="row" style="gap:6px;margin-top:6px">'
+      + '<button onclick="applyPreview(\'' + p.id + '\', true)">Apply selected</button>'
+      + '<button onclick="applyPreview(\'' + p.id + '\', false)">Apply all</button>'
+      + '<button onclick="discardPreview(\'' + p.id + '\')">Discard</button>'
+      + '</div></div>';
+  }).join("");
 }
-async function applyPreview(id){
-  const r = await post("/preview/apply?sessionId=" + encodeURIComponent(state.session) + "&id=" + encodeURIComponent(id), {});
+function selectedHunks(pid){
+  return Array.from(document.querySelectorAll('.pvhunk[data-pid="' + pid + '"]'))
+    .filter(c => c.checked).map(c => c.value).join(",");
+}
+async function applyPreview(id, onlySelected){
+  let qs = "/preview/apply?sessionId=" + encodeURIComponent(state.session) + "&id=" + encodeURIComponent(id);
+  if (onlySelected) qs += "&hunks=" + encodeURIComponent(selectedHunks(id));
+  const r = await post(qs, {});
   const j = r && r.ok ? await r.json() : null;
   appendLog("[preview] " + (j ? j.result : "apply failed"));
   refreshPreviews(); refreshCheckpoints();

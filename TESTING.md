@@ -1894,3 +1894,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** invoking `/<skill-name> <args>` runs the skill in an isolated sub-agent (scoped to its
   `allowed_tools`, or a read-only default) and returns only its final summary to the main thread; the
   trace shows `[skill] fork /<name>`. A skill without `context: fork` still runs inline.
+
+---
+
+# Hunk-level approval
+
+## 203. PreviewSelect parsing (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PreviewSelectTest` passes -- blank / `all` / `*` / null select all hunks; `0,2` and
+  `1-3` and space-separated lists select those indices; out-of-range and garbage indices are ignored;
+  `pick` returns the selected items in order.
+
+## 204. Apply a subset of hunks (manual)
+
+- **Setup:** `preview_patch` with several independent edits (it reports N hunk(s), e.g. `[0]`, `[1]`,
+  `[2]`).
+- **Observe:** `apply_previewed_patch hunks="0,2"` writes only those edits (snapshotted as one change
+  set) and reports that the remaining hunk stays staged; a follow-up `apply_previewed_patch` (no hunks)
+  applies the rest and clears the preview. `discard_previewed_patch hunks="1"` drops just that hunk.
+  Selecting nothing valid applies nothing.
+
+## 205. Per-hunk approval in the web UI (manual)
+
+- **Observe:** the *Patch preview* card shows each hunk with a checkbox, its path/±counts, and its diff.
+  Unchecking a hunk and clicking **Apply selected** applies only the checked ones (and leaves the rest
+  listed); **Apply all** applies everything; **Discard** drops the preview. `POST
+  /preview/apply?...&hunks=0,2` and `POST /preview/discard?...&hunks=1` back these.

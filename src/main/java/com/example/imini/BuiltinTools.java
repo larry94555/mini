@@ -420,15 +420,13 @@ public class BuiltinTools {
                 } catch (IllegalArgumentException bad) {
                     return "PREVIEW FAILED (no changes staged): " + bad.getMessage();
                 }
-                List<DiffRender.FileDiff> diffs = new ArrayList<>();
-                for (Map.Entry<String, String> en : result.entrySet()) {
-                    diffs.add(DiffRender.unified(en.getKey(), contents.get(en.getKey()), en.getValue()));
-                }
-                String diffText = String.join("\n", diffs.stream().map(DiffRender.FileDiff::diff).toList());
-                String summary = DiffRender.summary(diffs);
-                PreviewStore.Preview pv = previews.stage(SessionContext.sessionId(), summary, diffText, rawEdits(specs));
-                return "Staged preview " + pv.id() + " (" + summary + "). Nothing written yet.\n\n"
-                        + diffText + "\nApply with apply_previewed_patch, or discard with discard_previewed_patch.";
+                List<PreviewStore.Hunk> hunks = buildHunks(specs);
+                String diffText = hunkDiffText(hunks);
+                String summary = hunkSummary(hunks);
+                PreviewStore.Preview pv = previews.stage(SessionContext.sessionId(), summary, diffText, hunks);
+                return "Staged preview " + pv.id() + " (" + summary + ", " + hunks.size() + " hunk(s))."
+                        + " Nothing written yet.\n\n" + diffText
+                        + "\nApply with apply_previewed_patch (optionally hunks=\"0,2\"), or discard_previewed_patch.";
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
@@ -438,31 +436,36 @@ public class BuiltinTools {
     private Tool applyPreviewedPatch() {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("id", strProp("Preview id to apply (default: the most recent staged preview)."));
+        props.put("hunks", strProp("Which hunks to apply, e.g. \"0,2\" or \"1-3\" (default: all)."));
         return new Tool("apply_previewed_patch",
-                "Apply a previously staged preview (from preview_patch), re-validating against the current "
-                        + "files and snapshotting each change so it can be rewound. Mutating: requires approval.",
-                schema(props), true, args -> applyPreview(SessionContext.sessionId(), sval(args, "id")));
+                "Apply a staged preview (from preview_patch), re-validating against the current files and "
+                        + "snapshotting each change. Optionally apply only some hunks via 'hunks'; the rest "
+                        + "stay staged. Mutating: requires approval.",
+                schema(props), true, args -> applyPreview(SessionContext.sessionId(), sval(args, "id"), sval(args, "hunks")));
     }
 
     private Tool discardPreviewedPatch() {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("id", strProp("Preview id to discard (default: the most recent)."));
+        props.put("hunks", strProp("Which hunks to discard, e.g. \"0,2\" (default: the whole preview)."));
         return new Tool("discard_previewed_patch",
-                "Discard a staged patch preview without applying it. Not mutating.",
-                schema(props), false, args -> {
-            boolean ok = previews.discard(SessionContext.sessionId(), sval(args, "id"));
-            return ok ? "Discarded the staged preview." : "No staged preview to discard.";
-        });
+                "Discard a staged preview, or just some of its hunks via 'hunks'. Not mutating.",
+                schema(props), false, args ->
+                        discardPreview(SessionContext.sessionId(), sval(args, "id"), sval(args, "hunks")));
     }
 
     /** Apply a staged preview: re-read current files, re-apply the edits, snapshot + write. Public for the UI. */
-    public String applyPreview(String sessionId, String id) {
+    /** Apply selected hunks of a staged preview; remaining hunks stay staged. Public for the UI. */
+    public String applyPreview(String sessionId, String id, String hunksSpec) {
         try {
             PreviewStore.Preview pv = previews.get(sessionId, id);
             if (pv == null) return "No staged preview" + (id == null || id.isBlank() ? "." : " with id " + id + ".");
-            String[] err = {null};
-            List<EditSpec> specs = parseEdits(new ArrayList<Object>(pv.edits()), err);
-            if (specs == null) return err[0];
+            java.util.Set<Integer> sel = PreviewSelect.parse(hunksSpec, pv.hunks().size());
+            if (sel.isEmpty()) return "No matching hunks to apply.";
+            List<PreviewStore.Hunk> selected = PreviewSelect.pick(pv.hunks(), sel);
+
+            List<EditSpec> specs = parseEdits(new ArrayList<Object>(hunkEdits(selected)), new String[]{null});
+            if (specs == null) return "ERROR: could not read the staged hunks.";
             for (EditSpec e : specs) {
                 String denied = sandbox.enforcePath("apply_previewed_patch", e.path(), true);
                 if (denied != null) return denied;
@@ -495,14 +498,101 @@ public class BuiltinTools {
             } finally {
                 checkpoints.endBatch();
             }
-            previews.discard(sessionId, pv.id());
-            if (changed.isEmpty()) return "No changes (preview produced identical content).";
-            return "Applied preview " + pv.id() + " across " + changed.size() + " file(s): "
-                    + String.join(", ", changed) + ". Snapshots saved as one change set; review with git_diff.";
+            int remaining = restage(sessionId, pv, sel);
+            String tail = remaining == 0 ? " Preview cleared." : " " + remaining + " hunk(s) remain staged.";
+            if (changed.isEmpty()) return "No changes (selected hunks produced identical content)." + tail;
+            return "Applied " + selected.size() + " hunk(s) from " + pv.id() + " across "
+                    + changed.size() + " file(s): " + String.join(", ", changed)
+                    + ". Snapshots saved as one change set; review with git_diff." + tail;
         } catch (Exception e) {
             return "ERROR: " + e.getMessage();
         }
     }
+
+    /** Discard a whole preview, or just selected hunks (leaving the rest staged). */
+    public String discardPreview(String sessionId, String id, String hunksSpec) {
+        if (hunksSpec == null || hunksSpec.isBlank()) {
+            return previews.discard(sessionId, id) ? "Discarded the staged preview." : "No staged preview to discard.";
+        }
+        PreviewStore.Preview pv = previews.get(sessionId, id);
+        if (pv == null) return "No staged preview to discard.";
+        java.util.Set<Integer> sel = PreviewSelect.parse(hunksSpec, pv.hunks().size());
+        int remaining = restage(sessionId, pv, sel);
+        return "Discarded " + sel.size() + " hunk(s)." + (remaining == 0 ? " Preview cleared."
+                : " " + remaining + " hunk(s) remain staged.");
+    }
+
+    /** Re-stage a preview keeping only the hunks NOT in {@code applied} (re-indexed); returns remaining count. */
+    private int restage(String sessionId, PreviewStore.Preview pv, java.util.Set<Integer> applied) {
+        List<PreviewStore.Hunk> remaining = new ArrayList<>();
+        int i = 0;
+        for (PreviewStore.Hunk h : pv.hunks()) {
+            if (!applied.contains(h.index())) {
+                remaining.add(new PreviewStore.Hunk(i++, h.path(), h.kind(), h.added(), h.removed(), h.diff(), h.edit()));
+            }
+        }
+        previews.replaceHunks(sessionId, pv.id(), hunkSummary(remaining), hunkDiffText(remaining), remaining);
+        return remaining.size();
+    }
+
+    // ---- hunk helpers ----
+
+    private List<PreviewStore.Hunk> buildHunks(List<EditSpec> specs) throws Exception {
+        List<PreviewStore.Hunk> hunks = new ArrayList<>();
+        int idx = 0;
+        for (EditSpec e : specs) {
+            Path pa = Path.of(e.path());
+            String orig = Files.exists(pa) ? Files.readString(pa) : null;
+            DiffRender.FileDiff fd;
+            try {
+                Map<String, String> one = new LinkedHashMap<>();
+                if (orig != null) one.put(e.path(), orig);
+                Map<String, String> res = applyEdits(one, List.of(e));
+                fd = DiffRender.unified(e.path(), orig, res.get(e.path()));
+            } catch (IllegalArgumentException bad) {
+                fd = new DiffRender.FileDiff(e.path(), "modify", 0, 0,
+                        "(" + e.path() + ": depends on earlier hunks — " + bad.getMessage() + ")");
+            }
+            hunks.add(new PreviewStore.Hunk(idx++, e.path(), fd.kind(), fd.added(), fd.removed(), fd.diff(), rawEdit(e)));
+        }
+        return hunks;
+    }
+
+    private static Map<String, String> rawEdit(EditSpec e) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("path", e.path());
+        if (e.create() != null) m.put("create", e.create());
+        else {
+            m.put("find", e.find() == null ? "" : e.find());
+            m.put("replace", e.replace() == null ? "" : e.replace());
+        }
+        return m;
+    }
+
+    private static List<Map<String, String>> hunkEdits(List<PreviewStore.Hunk> hunks) {
+        List<Map<String, String>> out = new ArrayList<>();
+        for (PreviewStore.Hunk h : hunks) out.add(h.edit());
+        return out;
+    }
+
+    private static String hunkDiffText(List<PreviewStore.Hunk> hunks) {
+        StringBuilder sb = new StringBuilder();
+        for (PreviewStore.Hunk h : hunks) sb.append("[").append(h.index()).append("] ").append(h.diff());
+        return sb.toString();
+    }
+
+    private static String hunkSummary(List<PreviewStore.Hunk> hunks) {
+        int add = 0, rem = 0;
+        java.util.Set<String> files = new java.util.LinkedHashSet<>();
+        for (PreviewStore.Hunk h : hunks) {
+            if ("unchanged".equals(h.kind())) continue;
+            files.add(h.path());
+            add += h.added();
+            rem += h.removed();
+        }
+        return files.size() + " file(s), +" + add + " -" + rem;
+    }
+
 
     public static Map<String, String> applyEdits(Map<String, String> contents, List<EditSpec> edits) {
         Map<String, String> work = new LinkedHashMap<>(contents);
