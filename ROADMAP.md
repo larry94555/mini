@@ -84,13 +84,15 @@ Add user-controlled prompt references so the user can explicitly inject context.
 
 Implement:
 
-- `@file` prompt references,
-- `@directory` prompt references,
-- safe size and path caps,
-- UI / trace display of referenced context,
+- ~~`@file` prompt references~~ (done),
+- ~~`@directory` prompt references~~ (done),
+- ~~safe size and path caps~~ (done -- workspace-confined, file/total/dir-entry caps),
+- ~~UI / trace display of referenced context~~ (done -- `[context] attached ...` on the run trace),
 - MCP resource references later.
 
-Why this is second:
+Priority 2's core is now **complete** (see Recently completed); only MCP-resource references remain.
+
+Why this was second:
 
 - it is a very common workflow,
 - it complements existing deterministic navigation tools,
@@ -170,19 +172,23 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The highest-value next feature is now **explicit context references** (Priority 2),
-since Priority 1 (layered memory, `/memory`, and `/init`) is complete.
+The highest-value next feature is now **skills UX parity** (Priority 3), since
+Priorities 1 and 2 are complete: layered memory + `/memory` + `/init`, and
+`@file` / `@directory` prompt references (workspace-confined, capped, shown on
+the trace).
 
-Priority 1 recap: `imini` loads `.claude/CLAUDE.md`, `CLAUDE.md`, `IMINI.md`,
-`AGENTS.md`, `.claude/rules/*.md`, and `CLAUDE.local.md` (in order), inlines
-`@path` imports (depth/size/cycle guarded), shows what loaded via `/memory` and
-`GET /memory/files`, and `/init` scaffolds `CLAUDE.md` from a deterministic repo
-scan. What is next:
+The skills *backend* already exists (local/remote `SKILL.md`, registry,
+enable/disable, proposals, session overrides, bundle export); the remaining work
+is Claude-like UX:
 
-- `@file` and `@directory` prompt references (reuse `/init`/memory's
-  workspace-confined path resolution; add size caps + trace output).
+- `/skills` to list available skills,
+- direct `/skill-name` invocation,
+- bundled educational skills (`code-review`, `debug`, `batch`, `loop`),
+- `$ARGUMENTS` substitution and `when_to_use` / `argument-hint` / `allowed_tools`
+  frontmatter,
+- skill-invocation trace entries.
 
-After context references, improve skill
+After skill
 UX with `/skills` and direct `/skill-name` invocation.
 
 Do not prioritize activity-view polish, bundle metadata, monetization
@@ -216,14 +222,14 @@ Current top priorities:
 
 1. ~~Add `/memory` diagnostics.~~ (done -- layered loader + `@path` imports + `/memory` / `GET /memory/files`)
 2. ~~Add `/init` to draft or update `CLAUDE.md` from a repo scan.~~ (done -- `RepoScan`/`InitDraft`/`InitService`, `POST /init`)
-3. Add `@file` references.
-4. Add `@directory` references.
+3. ~~Add `@file` references.~~ (done -- `ContextRefs`/`ContextRefService`)
+4. ~~Add `@directory` references.~~ (done -- one-level listing, capped)
 5. Add `/skills` and direct `/skill-name` invocation.
 6. Add bundled `code-review`, `debug`, `batch`, and `loop` skills.
-7. Add `agents/*.md` registry and `/agents`.
-8. Add `delegate_agent(name, task)`.
-9. Add `preview_patch` and browser diff viewer.
-10. Add hunk-level approval to the patch-preview flow.
+7. Add `$ARGUMENTS` substitution + `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
+8. Add `agents/*.md` registry and `/agents`.
+9. Add `delegate_agent(name, task)`.
+10. Add `preview_patch` and browser diff viewer.
 
 ## 5. Educational completeness
 
@@ -327,6 +333,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- `@file` / `@directory` prompt references: mentioning `@path` in a prompt inlines that file's content
+  (or a directory's one-level listing) into what the model sees, inside a `<referenced-context>` block.
+  Resolution is workspace-confined with file/total/dir-entry caps; unresolved tokens (e.g. `@mentions`)
+  are left untouched; attachments are shown on the run trace (`ContextRefs` pure + unit-tested,
+  `ContextRefService`). Completes Priority 2's core.
 - `/init` (draft/update `CLAUDE.md`): a deterministic repository scan (build-system + language detection
   + layout) renders a `CLAUDE.md` scaffold and creates it if absent (never overwriting an existing file
   implicitly); `POST /init?write=&overwrite=` for explicit control (`RepoScan`/`InitDraft` pure +
