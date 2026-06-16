@@ -106,14 +106,16 @@ Claude-like UX parity, not “add skills from scratch.”
 
 Implement:
 
-- `/skills`,
-- direct `/skill-name` invocation,
+- ~~`/skills`~~ (done -- lists skills with descriptions + effective enabled-state),
+- ~~direct `/skill-name` invocation~~ (done -- enabled skills only; reserved commands protected),
 - bundled educational skills such as `code-review`, `debug`, `batch`, and
   `loop`,
-- `$ARGUMENTS` substitution,
+- ~~`$ARGUMENTS` substitution~~ (done -- `$ARGUMENTS`/`$ARGS`; args appended if no placeholder),
 - frontmatter support for `when_to_use`, `argument-hint`, and `allowed_tools`,
-- skill invocation trace entries,
+- ~~skill invocation trace entries~~ (done -- `[skill] invoked /<name>`),
 - `context: fork` later, after the subagent registry exists.
+
+Still open: bundled educational skills, and `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
 
 Why this is third:
 
@@ -177,16 +179,13 @@ Priorities 1 and 2 are complete: layered memory + `/memory` + `/init`, and
 `@file` / `@directory` prompt references (workspace-confined, capped, shown on
 the trace).
 
-The skills *backend* already exists (local/remote `SKILL.md`, registry,
-enable/disable, proposals, session overrides, bundle export); the remaining work
-is Claude-like UX:
+`/skills` (listing), direct `/skill-name` invocation, `$ARGUMENTS` substitution,
+and skill-invocation trace entries now exist. The remaining Priority 3 work is:
 
-- `/skills` to list available skills,
-- direct `/skill-name` invocation,
-- bundled educational skills (`code-review`, `debug`, `batch`, `loop`),
-- `$ARGUMENTS` substitution and `when_to_use` / `argument-hint` / `allowed_tools`
-  frontmatter,
-- skill-invocation trace entries.
+- bundled educational skills (`code-review`, `debug`, `batch`, `loop`) so the
+  harness ships useful skills out of the box,
+- frontmatter for `when_to_use` (auto-load hinting), `argument-hint` (shown in
+  `/skills`), and `allowed_tools` (per-skill tool scoping).
 
 After skill
 UX with `/skills` and direct `/skill-name` invocation.
@@ -224,9 +223,9 @@ Current top priorities:
 2. ~~Add `/init` to draft or update `CLAUDE.md` from a repo scan.~~ (done -- `RepoScan`/`InitDraft`/`InitService`, `POST /init`)
 3. ~~Add `@file` references.~~ (done -- `ContextRefs`/`ContextRefService`)
 4. ~~Add `@directory` references.~~ (done -- one-level listing, capped)
-5. Add `/skills` and direct `/skill-name` invocation.
+5. ~~Add `/skills` and direct `/skill-name` invocation.~~ (done -- `SkillInvocation`, `$ARGUMENTS`, trace)
 6. Add bundled `code-review`, `debug`, `batch`, and `loop` skills.
-7. Add `$ARGUMENTS` substitution + `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
+7. Add `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
 8. Add `agents/*.md` registry and `/agents`.
 9. Add `delegate_agent(name, task)`.
 10. Add `preview_patch` and browser diff viewer.
@@ -333,6 +332,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- `/skills` + direct `/<skill-name>` invocation: `/skills` lists available skills (descriptions +
+  effective enabled-state); `/<skill-name> [args]` runs an enabled skill's body as the prompt with
+  `$ARGUMENTS`/`$ARGS` substituted (args appended if no placeholder), logged as `[skill] invoked /<name>`
+  on the trace. Built-in commands are reserved (`SkillInvocation` pure + unit-tested).
 - `@file` / `@directory` prompt references: mentioning `@path` in a prompt inlines that file's content
   (or a directory's one-level listing) into what the model sees, inside a `<referenced-context>` block.
   Resolution is workspace-confined with file/total/dir-entry caps; unresolved tokens (e.g. `@mentions`)

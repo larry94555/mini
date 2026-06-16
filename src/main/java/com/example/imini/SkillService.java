@@ -369,6 +369,46 @@ public class SkillService {
         return null;
     }
 
+    // ---- /skills + direct /<skill-name> invocation --------------------------
+
+    /** True for the built-in {@code /skills} listing command. */
+    public synchronized boolean isSkillsCommand(String msg) {
+        return msg != null && msg.trim().equals("/skills");
+    }
+
+    /** Human-readable {@code /skills} listing for this session (effective enabled-state). */
+    public synchronized String skillsReport(String sessionId) {
+        if (!enabled) return "Skills are disabled (set skills.enabled=true).";
+        return SkillInvocation.renderList(listForUi(sessionId));
+    }
+
+    /** The name of the enabled skill a {@code /<name> ...} message invokes, or null. For the trace. */
+    public synchronized String invokedSkillName(String msg, String sessionId) {
+        if (!enabled) return null;
+        SkillInvocation.Parsed p = SkillInvocation.parse(msg);
+        if (p == null || SkillInvocation.isReserved(p.name())) return null;
+        for (SkillLibrary.Skill s : enabledSkillsFor(sessionId)) {
+            if (s.name().equalsIgnoreCase(p.name())) return s.name();
+        }
+        return null;
+    }
+
+    /**
+     * If {@code msg} is {@code /<skill-name> [args]} for an enabled skill, return its body with
+     * {@code $ARGUMENTS} substituted; otherwise null (so the caller falls back to normal handling).
+     */
+    public synchronized String expandInvocation(String msg, String sessionId) {
+        if (!enabled) return null;
+        SkillInvocation.Parsed p = SkillInvocation.parse(msg);
+        if (p == null || SkillInvocation.isReserved(p.name())) return null;
+        for (SkillLibrary.Skill s : enabledSkillsFor(sessionId)) {
+            if (s.name().equalsIgnoreCase(p.name())) {
+                return SkillInvocation.substitute(s.body(), p.args());
+            }
+        }
+        return null;
+    }
+
     // ---- tools --------------------------------------------------------------
 
     public Tool loadSkillTool() {

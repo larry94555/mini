@@ -1777,3 +1777,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `context.refs.enabled=false` disables inlining entirely.
 - **Note:** this is separate from memory `@path` imports inside `CLAUDE.md` (case 181); context
   references are resolved per chat message.
+
+---
+
+# /skills + direct /<skill-name> invocation
+
+## 189. SkillInvocation parsing/substitution/render (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SkillInvocationTest` passes -- `parse` splits `/<name> [args]` (null for non-commands and
+  a bare `/`); `isReserved` protects `help`/`commands`/`memory`/`init`/`skills`; `substitute` replaces
+  `$ARGUMENTS`/`$ARGS` (and appends an `Arguments:` line when the body has no placeholder); `renderList`
+  marks enabled vs `(disabled)` skills with descriptions.
+
+## 190. /skills lists the catalog (manual)
+
+- **Setup:** a `skills/` dir with a couple of `SKILL.md` files (e.g. `commit-message`, `debug`).
+- **Observe:** typing `/skills` returns the list with descriptions; a skill disabled globally or via a
+  per-session override shows as `(disabled)`. `GET /skills?sessionId=<id>` still returns the same data
+  for the UI.
+
+## 191. Direct invocation runs the skill body (manual)
+
+- **Observe:** `/commit-message fixed the parser NPE` runs the commit-message skill with `$ARGUMENTS`
+  set to "fixed the parser NPE"; the run trace shows `[skill] invoked /commit-message`. Invoking a
+  disabled skill, or a `/<name>` that matches no skill, falls through to the normal `commands/` template
+  or the model (no skill expansion). The reserved commands (`/help`, `/memory`, `/init`, `/skills`) are
+  never shadowed by a skill of the same name.

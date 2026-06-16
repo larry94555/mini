@@ -94,7 +94,8 @@ No cloud API key is required.
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
 | `SkillManifest.java` | Pure skill-registry manifest: parse, lexical search, SHA-256 verify |
 | `SkillRequests.java` | Queue of member skill proposals awaiting admin review (DB-backed) |
-| `SkillService.java` | Loads local + remote skills; index; `load_skill`/`save_skill`/`refresh_skills`/`search_skills`/`install_skill` |
+| `SkillService.java` | Loads local + remote skills; index; `load_skill`/`save_skill`/`refresh_skills`/`search_skills`/`install_skill`; `/skills` + `/<name>` |
+| `SkillInvocation.java` | Pure `/skills` listing + `/<skill-name>` parsing and `$ARGUMENTS` substitution |
 | `ProjectContext.java` | Loads layered memory files (`CLAUDE.md`, `.claude/rules/*.md`, ...) into the system prompt; backs `/memory` |
 | `MemoryLoader.java` | Pure memory helpers: candidate load order + `@path` import expansion |
 | `RepoScan.java` / `InitDraft.java` | Pure `/init` logic: build-system/language detection + `CLAUDE.md` draft |
@@ -545,6 +546,20 @@ The model then calls the **`load_skill`** tool (`{"name":"commit-message"}`) to 
 a task matches -- progressive disclosure, so a large skill library costs only its index until used. The
 **`save_skill`** tool (`{name, description, body}`) captures new knowledge as `skills/<name>/SKILL.md`
 and reloads, so the agent (or you) can grow the library during a session.
+
+**Listing and invoking skills directly.** Two Claude-like shortcuts let *you* drive skills from chat:
+
+- `/skills` lists the available skills with their descriptions and effective enabled-state (per-session
+  overrides respected), e.g. `/code-review - Review a diff`.
+- `/<skill-name> [args]` invokes a skill directly: its body becomes the prompt, with `$ARGUMENTS` (or
+  `$ARGS`) replaced by the text after the name. For example, `/commit-message fixed the parser NPE`
+  runs the commit-message skill with that change summary. If the skill body has no placeholder, your
+  arguments are appended as an `Arguments:` line so they aren't lost. The trace shows `[skill] invoked
+  /commit-message`.
+
+Only **enabled** skills are invokable, and the built-in commands (`/help`, `/memory`, `/init`,
+`/skills`) are reserved -- they're never shadowed by a skill of the same name. A `/<name>` that matches
+no enabled skill falls through to the normal `commands/` template (or the model) as before.
 
 **Auto-load (optional).** Weaker local models sometimes won't call `load_skill` on their own. Set
 `skills.auto-load=true` to also inject the single best-matching skill's body for `/ask` queries (picked

@@ -108,6 +108,16 @@ public class AgentLoop {
     }
 
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
+    /** Expand a /<skill-name> invocation to the skill body (logged on the trace), else slash.expand(). */
+    private String expandCommandOrSkill(String message, String sessionId, RunSink sink) {
+        String invoked = skills.invokedSkillName(message, sessionId);
+        if (invoked != null) {
+            sink.log("[skill] invoked /" + invoked);
+            return skills.expandInvocation(message, sessionId);
+        }
+        return slash.expand(message);
+    }
+
     /** Inline @file/@directory references into the message and note what was attached on the trace. */
     private String withRefs(String message, RunSink sink) {
         ContextRefService.Expansion ex = refs.expand(message);
@@ -120,7 +130,8 @@ public class AgentLoop {
         if (slash.isHelp(userQuestion)) return slash.help();
         if (project.isMemoryCommand(userQuestion)) return project.report();
         if (init.isInitCommand(userQuestion)) return init.runInit();
-        String question = withRefs(slash.expand(userQuestion), sink);
+        if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
+        String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
@@ -130,7 +141,8 @@ public class AgentLoop {
         if (slash.isHelp(userMessage)) return slash.help();
         if (project.isMemoryCommand(userMessage)) return project.report();
         if (init.isInitCommand(userMessage)) return init.runInit();
-        String expanded = withRefs(slash.expand(userMessage), sink);
+        if (skills.isSkillsCommand(userMessage)) return skills.skillsReport(sessionId);
+        String expanded = withRefs(expandCommandOrSkill(userMessage, sessionId, sink), sink);
 
         List<Map<String, Object>> history = sessions.get(sessionId);
         if (history == null) {
