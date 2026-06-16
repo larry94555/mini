@@ -125,6 +125,10 @@
         <span class="muted" id="sessActPage" style="font-size:11px"></span>
       </div>
     </div>
+    <div class="card" id="previewCard">
+      <h3>Patch preview <a class="linklike" id="refreshPreviewLink" title="Reload staged patch previews">refresh</a></h3>
+      <div id="previewList" class="muted">(no staged previews)</div>
+    </div>
     <div class="card">
       <h3>Sharing <a class="linklike" id="refreshShares" title="Reload who can see this session">refresh</a></h3>
       <div id="shareInfo" class="muted">(loading)</div>
@@ -411,7 +415,7 @@ $("#sessionSelect").onchange = async (e) => {
   });
   refreshTodos(); refreshCheckpoints();
   $("#planHistoryDetail").style.display = "none"; refreshPlanHistory(); refreshSharing();
-  state.sessActOffset = 0; refreshSessionActivity();
+  state.sessActOffset = 0; refreshSessionActivity(); refreshPreviews();
 };
 async function refreshTodos(){
   const j = await getJson("/todos?sessionId="+encodeURIComponent(state.session));
@@ -646,6 +650,33 @@ async function withdrawReq(id){
   if (state.me.admin) refreshSkillRequests();
 }
 const SESSACT_PAGE = 20;
+async function refreshPreviews(){
+  const el = $("#previewList");
+  if (!el) return;
+  const rows = await getJson("/preview?sessionId=" + encodeURIComponent(state.session));
+  if (!Array.isArray(rows) || !rows.length){ el.innerHTML = "(no staged previews)"; return; }
+  el.innerHTML = rows.map(p =>
+    '<div style="border-top:1px solid var(--border);padding:6px 0">'
+    + '<div style="font-size:11px"><b>' + escapeHtml(String(p.id)) + '</b> <span class="muted">'
+    + escapeHtml(String(p.summary || "")) + '</span></div>'
+    + '<pre style="white-space:pre-wrap;font-size:11px;margin:4px 0;max-height:220px;overflow:auto">'
+    + escapeHtml(String(p.diff || "")) + '</pre>'
+    + '<div class="row" style="gap:6px">'
+    + '<button onclick="applyPreview(\'' + p.id + '\')">Apply</button>'
+    + '<button onclick="discardPreview(\'' + p.id + '\')">Discard</button>'
+    + '</div></div>').join("");
+}
+async function applyPreview(id){
+  const r = await post("/preview/apply?sessionId=" + encodeURIComponent(state.session) + "&id=" + encodeURIComponent(id), {});
+  const j = r && r.ok ? await r.json() : null;
+  appendLog("[preview] " + (j ? j.result : "apply failed"));
+  refreshPreviews(); refreshCheckpoints();
+}
+async function discardPreview(id){
+  await post("/preview/discard?sessionId=" + encodeURIComponent(state.session) + "&id=" + encodeURIComponent(id), {});
+  refreshPreviews();
+}
+$("#refreshPreviewLink").onclick = refreshPreviews;
 async function refreshSessionActivity(){
   const el = $("#sessActList");
   if (!el) return;
@@ -757,7 +788,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>

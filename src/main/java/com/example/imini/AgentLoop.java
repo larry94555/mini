@@ -121,6 +121,18 @@ public class AgentLoop {
         return null;
     }
 
+    /** If the message invokes a context:fork skill, run it in a sub-agent and return its summary; else null. */
+    private String maybeForkedSkill(String message, String sessionId, RunSink sink) throws Exception {
+        SkillLibrary.Skill sk = skills.invokedSkill(message, sessionId);
+        if (sk != null && "fork".equalsIgnoreCase(sk.context())) {
+            sink.log("[skill] fork /" + sk.name());
+            SkillInvocation.Parsed parsed = SkillInvocation.parse(message);
+            String args = parsed == null ? "" : parsed.args();
+            return registry.delegateSkillFork(sessionId, sk, args, sink);
+        }
+        return null;
+    }
+
     /** Expand a /<skill-name> invocation to the skill body (logged on the trace), else slash.expand(). */
     private String expandCommandOrSkill(String message, String sessionId, RunSink sink) {
         String invoked = skills.invokedSkillName(message, sessionId);
@@ -146,6 +158,8 @@ public class AgentLoop {
         if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
         String agentReply = maybeAgentCommand(userQuestion, sink);
         if (agentReply != null) return agentReply;
+        String forked = maybeForkedSkill(userQuestion, sessionId, sink);
+        if (forked != null) return forked;
         String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
@@ -159,6 +173,8 @@ public class AgentLoop {
         if (skills.isSkillsCommand(userMessage)) return skills.skillsReport(sessionId);
         String agentReply = maybeAgentCommand(userMessage, sink);
         if (agentReply != null) return agentReply;
+        String forked = maybeForkedSkill(userMessage, sessionId, sink);
+        if (forked != null) return forked;
         String expanded = withRefs(expandCommandOrSkill(userMessage, sessionId, sink), sink);
 
         List<Map<String, Object>> history = sessions.get(sessionId);

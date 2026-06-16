@@ -121,4 +121,12 @@ class SkillLibraryTest {
         assertEquals(java.util.List.of("a", "b", "c"), SkillLibrary.parseList("[a, b c]"));
         assertEquals(java.util.List.of(), SkillLibrary.parseList(""));
     }
+
+    @Test
+    void parseReadsContextForFork() {
+        SkillLibrary.Skill s = SkillLibrary.parse(
+                "---\nname: deep-review\ndescription: d\ncontext: fork\n---\nbody", "x");
+        assertEquals("fork", s.context());
+        assertEquals("", new SkillLibrary.Skill("a", "b", "c").context());
+    }
 }

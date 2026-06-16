@@ -384,6 +384,17 @@ public class SkillService {
         return SkillInvocation.renderList(listForUi(sessionId));
     }
 
+    /** The enabled skill a {@code /<name> ...} message invokes, or null (lets callers see its context). */
+    public synchronized SkillLibrary.Skill invokedSkill(String msg, String sessionId) {
+        if (!enabled) return null;
+        SkillInvocation.Parsed p = SkillInvocation.parse(msg);
+        if (p == null || SkillInvocation.isReserved(p.name())) return null;
+        for (SkillLibrary.Skill s : enabledSkillsFor(sessionId)) {
+            if (s.name().equalsIgnoreCase(p.name())) return s;
+        }
+        return null;
+    }
+
     /** The name of the enabled skill a {@code /<name> ...} message invokes, or null. For the trace. */
     public synchronized String invokedSkillName(String msg, String sessionId) {
         if (!enabled) return null;

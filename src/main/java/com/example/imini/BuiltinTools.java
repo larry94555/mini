@@ -46,20 +46,23 @@ public class BuiltinTools {
     private final TodoStore todos;
     private final Sandbox sandbox;
     private final RetrievalService retrieval;
+    private final PreviewStore previews;
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
 
     public BuiltinTools(CheckpointStore checkpoints, TodoStore todos, Sandbox sandbox,
-                        RetrievalService retrieval) {
+                        RetrievalService retrieval, PreviewStore previews) {
         this.checkpoints = checkpoints;
         this.todos = todos;
         this.sandbox = sandbox;
         this.retrieval = retrieval;
+        this.previews = previews;
     }
 
     /** Tools available to the main agent. */
     public List<Tool> all() {
         return List.of(readFile(), view(), listDir(), writeFile(), editFile(), applyPatch(),
+                previewPatch(), applyPreviewedPatch(), discardPreviewedPatch(),
                 runCommand(), webFetch(), todoWrite());
     }
 
@@ -342,6 +345,165 @@ public class BuiltinTools {
      * in order, so a create followed by a find/replace on the same new path works. Static + dependency
      * free so it is unit-testable.
      */
+    // ---- patch preview / review (preview_patch, apply_previewed_patch, discard_previewed_patch) ----
+
+    /** Parse the raw {edits} arg into EditSpecs; returns null + sets err[0] on a problem. */
+    private List<EditSpec> parseEdits(Object raw, String[] err) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            err[0] = "ERROR: provide a non-empty 'edits' array.";
+            return null;
+        }
+        List<EditSpec> specs = new ArrayList<>();
+        for (Object o : list) {
+            if (!(o instanceof Map<?, ?> m)) { err[0] = "ERROR: each edit must be an object."; return null; }
+            String path = sval(m, "path");
+            if (path == null || path.isBlank()) { err[0] = "ERROR: each edit needs a 'path'."; return null; }
+            if (m.containsKey("create")) {
+                String c = sval(m, "create");
+                specs.add(new EditSpec(path, null, null, c == null ? "" : c));
+            } else {
+                specs.add(new EditSpec(path, sval(m, "find"),
+                        sval(m, "replace") == null ? "" : sval(m, "replace"), null));
+            }
+        }
+        return specs;
+    }
+
+    private static List<Map<String, String>> rawEdits(List<EditSpec> specs) {
+        List<Map<String, String>> out = new ArrayList<>();
+        for (EditSpec e : specs) {
+            Map<String, String> m = new LinkedHashMap<>();
+            m.put("path", e.path());
+            if (e.create() != null) m.put("create", e.create());
+            else { m.put("find", e.find() == null ? "" : e.find()); m.put("replace", e.replace() == null ? "" : e.replace()); }
+            out.add(m);
+        }
+        return out;
+    }
+
+    private Tool previewPatch() {
+        Map<String, Object> itemProps = new LinkedHashMap<>();
+        itemProps.put("path", strProp("File path to modify or create."));
+        itemProps.put("find", strProp("Exact, unique text to replace (omit when creating)."));
+        itemProps.put("replace", strProp("Replacement for 'find'."));
+        itemProps.put("create", strProp("Full content for a NEW file."));
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("type", "object");
+        item.put("properties", itemProps);
+        Map<String, Object> editsProp = new LinkedHashMap<>();
+        editsProp.put("type", "array");
+        editsProp.put("items", item);
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("edits", editsProp);
+        return new Tool("preview_patch",
+                "Stage edits WITHOUT writing them and return a unified diff to review first. Same edit "
+                        + "shape as apply_patch ({path,find,replace} or {path,create}). Follow up with "
+                        + "apply_previewed_patch to write, or discard_previewed_patch to drop it. Not mutating.",
+                schema(props, "edits"), false, args -> {
+            try {
+                String[] err = {null};
+                List<EditSpec> specs = parseEdits(args.get("edits"), err);
+                if (specs == null) return err[0];
+                for (EditSpec e : specs) {
+                    String denied = sandbox.enforcePath("preview_patch", e.path(), true);
+                    if (denied != null) return denied;
+                }
+                Map<String, String> contents = new LinkedHashMap<>();
+                for (EditSpec e : specs) {
+                    if (contents.containsKey(e.path())) continue;
+                    Path pa = Path.of(e.path());
+                    if (Files.exists(pa)) contents.put(e.path(), Files.readString(pa));
+                }
+                Map<String, String> result;
+                try {
+                    result = applyEdits(contents, specs);
+                } catch (IllegalArgumentException bad) {
+                    return "PREVIEW FAILED (no changes staged): " + bad.getMessage();
+                }
+                List<DiffRender.FileDiff> diffs = new ArrayList<>();
+                for (Map.Entry<String, String> en : result.entrySet()) {
+                    diffs.add(DiffRender.unified(en.getKey(), contents.get(en.getKey()), en.getValue()));
+                }
+                String diffText = String.join("\n", diffs.stream().map(DiffRender.FileDiff::diff).toList());
+                String summary = DiffRender.summary(diffs);
+                PreviewStore.Preview pv = previews.stage(SessionContext.sessionId(), summary, diffText, rawEdits(specs));
+                return "Staged preview " + pv.id() + " (" + summary + "). Nothing written yet.\n\n"
+                        + diffText + "\nApply with apply_previewed_patch, or discard with discard_previewed_patch.";
+            } catch (Exception e) {
+                return "ERROR: " + e.getMessage();
+            }
+        });
+    }
+
+    private Tool applyPreviewedPatch() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("id", strProp("Preview id to apply (default: the most recent staged preview)."));
+        return new Tool("apply_previewed_patch",
+                "Apply a previously staged preview (from preview_patch), re-validating against the current "
+                        + "files and snapshotting each change so it can be rewound. Mutating: requires approval.",
+                schema(props), true, args -> applyPreview(SessionContext.sessionId(), sval(args, "id")));
+    }
+
+    private Tool discardPreviewedPatch() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("id", strProp("Preview id to discard (default: the most recent)."));
+        return new Tool("discard_previewed_patch",
+                "Discard a staged patch preview without applying it. Not mutating.",
+                schema(props), false, args -> {
+            boolean ok = previews.discard(SessionContext.sessionId(), sval(args, "id"));
+            return ok ? "Discarded the staged preview." : "No staged preview to discard.";
+        });
+    }
+
+    /** Apply a staged preview: re-read current files, re-apply the edits, snapshot + write. Public for the UI. */
+    public String applyPreview(String sessionId, String id) {
+        try {
+            PreviewStore.Preview pv = previews.get(sessionId, id);
+            if (pv == null) return "No staged preview" + (id == null || id.isBlank() ? "." : " with id " + id + ".");
+            String[] err = {null};
+            List<EditSpec> specs = parseEdits(new ArrayList<Object>(pv.edits()), err);
+            if (specs == null) return err[0];
+            for (EditSpec e : specs) {
+                String denied = sandbox.enforcePath("apply_previewed_patch", e.path(), true);
+                if (denied != null) return denied;
+            }
+            Map<String, String> contents = new LinkedHashMap<>();
+            for (EditSpec e : specs) {
+                if (contents.containsKey(e.path())) continue;
+                Path pa = Path.of(e.path());
+                if (Files.exists(pa)) contents.put(e.path(), Files.readString(pa));
+            }
+            Map<String, String> result;
+            try {
+                result = applyEdits(contents, specs);
+            } catch (IllegalArgumentException bad) {
+                return "APPLY ABORTED (files changed since preview?): " + bad.getMessage();
+            }
+            List<String> changed = new ArrayList<>();
+            checkpoints.beginBatch();
+            try {
+                for (Map.Entry<String, String> en : result.entrySet()) {
+                    String original = contents.get(en.getKey());
+                    if (en.getValue().equals(original)) continue;
+                    Path pa = Path.of(en.getKey());
+                    checkpoints.snapshot(pa);
+                    if (pa.getParent() != null) Files.createDirectories(pa.getParent());
+                    Files.writeString(pa, en.getValue());
+                    retrieval.reindexFile(pa);
+                    changed.add(en.getKey());
+                }
+            } finally {
+                checkpoints.endBatch();
+            }
+            previews.discard(sessionId, pv.id());
+            if (changed.isEmpty()) return "No changes (preview produced identical content).";
+            return "Applied preview " + pv.id() + " across " + changed.size() + " file(s): "
+                    + String.join(", ", changed) + ". Snapshots saved as one change set; review with git_diff.";
+        } catch (Exception e) {
+            return "ERROR: " + e.getMessage();
+        }
+    }
+
     public static Map<String, String> applyEdits(Map<String, String> contents, List<EditSpec> edits) {
         Map<String, String> work = new LinkedHashMap<>(contents);
         for (int i = 0; i < edits.size(); i++) {

@@ -52,20 +52,43 @@ public class ToolRegistry {
     }
 
     /** Run a named subagent (from AgentRegistry) on a task, scoping it to that agent's tools. */
+    /** Read-only default tool set for a forked skill that declares no allowed_tools. */
+    private static final java.util.List<String> DEFAULT_FORK_TOOLS =
+            java.util.List.of("read_file", "view", "grep", "repo_tree", "read_many");
+
     public String delegateToAgent(String name, String task, RunSink sink) throws Exception {
         AgentLibrary.AgentDef def = agents.byName(name);
         if (def == null) {
             return "No subagent named \"" + name + "\". Use /agents to list them.";
         }
+        return delegate(SessionContext.sessionId(), def.body(), task, def.tools(), sink);
+    }
+
+    /** Run a skill with {@code context: fork} in an isolated sub-agent; only its summary returns. */
+    public String delegateSkillFork(String sessionId, SkillLibrary.Skill skill, String args, RunSink sink)
+            throws Exception {
+        String body = SkillInvocation.substitute(skill.body(), args);
+        java.util.List<String> toolNames =
+                (skill.allowedTools() == null || skill.allowedTools().isEmpty())
+                        ? DEFAULT_FORK_TOOLS : skill.allowedTools();
+        String task = (args == null || args.isBlank()) ? "Follow the instructions above." : args;
+        return delegate(sessionId, body, task, toolNames, sink);
+    }
+
+    /** General delegation: run a sub-agent with a system prompt, task, and an allow-list of tool names. */
+    public String delegate(String sessionId, String systemPrompt, String task,
+                           java.util.List<String> toolNames, RunSink sink) throws Exception {
         Map<String, Tool> scoped = new LinkedHashMap<>();
-        for (String tn : def.tools()) {
-            Tool t = tools.get(tn);
-            if (t != null) scoped.put(tn, t);
+        if (toolNames != null) {
+            for (String tn : toolNames) {
+                Tool t = tools.get(tn);
+                if (t != null) scoped.put(tn, t);
+            }
         }
-        String sys = def.body()
+        String sys = systemPrompt
                 + (scoped.isEmpty() ? "" : "\n\nYou may use only these tools: " + String.join(", ", scoped.keySet()) + ".")
                 + "\nReturn only your final answer in plain text.";
-        return subAgent.run(SessionContext.sessionId(), sys, task, scoped, sink);
+        return subAgent.run(sessionId, sys, task, scoped, sink);
     }
 
     private Tool delegateAgentTool() {

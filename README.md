@@ -107,7 +107,10 @@ No cloud API key is required.
 | `Approvals.java` | Pending remote approval registry |
 | `HookService.java` | Pre/post tool shell hooks from `hooks.json` |
 | `SlashCommands.java` | Prompt templates from `commands/*.md` |
-| `SubAgent.java` | Constrained research sub-agent |
+| `SubAgent.java` | Runs a delegated sub-agent loop (research, registry agent, or forked skill) in isolation |
+| `AgentLibrary.java` / `AgentRegistry.java` | Custom subagents: parsing + built-in/`agents/*.md` catalog |
+| `DiffRender.java` | Pure unified-diff rendering for patch previews |
+| `PreviewStore.java` | In-memory staged (not-yet-applied) patch previews, per session |
 | `McpManager.java` | Optional MCP stdio client |
 | `AgentController.java` | HTTP endpoints |
 | `RunService.java` | Slot-bounded job queue for concurrent runs |
@@ -208,6 +211,9 @@ http://localhost:8081
 | `GET /memory?q=&k=` | Search indexed workspace memory (retrieval) |
 | `GET /memory/files` | Project-memory diagnostics: which memory files loaded, in order, and why |
 | `POST /init?write=&overwrite=` | Scan the repo and draft `CLAUDE.md` (optionally write it) |
+| `GET /preview?sessionId=` | Staged patch previews for the browser diff viewer |
+| `POST /preview/apply?sessionId=&id=` | Apply a staged preview (re-validates + snapshots) |
+| `POST /preview/discard?sessionId=&id=` | Drop a staged preview |
 | `GET /health` | Health check |
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
@@ -527,12 +533,19 @@ skills/
   readme.md                   # flat form (name defaults to the file stem)
 ```
 
-**Format.** Optional `---` front-matter for the name and a one-line description, then the body:
+**Format.** Optional `---` front-matter, then the body. Beyond `name` and `description`, four optional
+keys tune behavior: `when_to_use` (extra text the auto-load scorer matches against, so the right skill
+gets injected for a weak model), `argument-hint` (shown next to the name in `/skills`), `allowed_tools`
+(a comma-separated list; on direct invocation the harness reminds the model to prefer just those tools),
+and `context: fork` (run the skill in an isolated sub-agent -- see "Forked skills" below). The simplest
+skills use only `name` + `description`:
 
 ```markdown
 ---
 name: commit-message
 description: Write a conventional-commits message from a diff or change summary.
+argument-hint: <@file or change summary>
+allowed_tools: git_diff, git_status
 ---
 When asked to write a commit message:
 1. Use `<type>(<scope>): <subject>` ...
@@ -579,6 +592,14 @@ each pairing naturally with `@file` references and the deterministic tools:
 
 They're ordinary `SKILL.md` files under `skills/`; edit or remove them like any other skill, or disable
 them per-session.
+
+**Forked skills (`context: fork`).** A skill whose front-matter sets `context: fork` does not run inline
+in the main conversation. Instead, invoking `/<skill-name> [args]` delegates it to a **sub-agent** (like
+the custom subagents below): the skill body becomes the sub-agent's instructions, scoped to the skill's
+`allowed_tools` (or a read-only default), and only its final answer returns to the main thread. Use it
+for noisy, multi-step skills (deep reviews, investigations) whose intermediate context you don't want
+cluttering the main window. The trace shows `[skill] fork /<name>`. Skills without `context: fork` keep
+running inline as before.
 
 **Auto-load (optional).** Weaker local models sometimes won't call `load_skill` on their own. Set
 `skills.auto-load=true` to also inject the single best-matching skill's body for `/ask` queries (picked
@@ -697,6 +718,28 @@ A disk agent overrides a built-in of the same name. Set `agents.enabled=false` t
 > lists a mutating tool would run it without a separate approval prompt inside the sub-loop -- prefer
 > read-only tool sets for delegated agents. The `model` key is advisory (a profile name), not a separate
 > endpoint.
+
+## Patch preview and review
+
+Sometimes you want to *see* a change before it touches the workspace. The **`preview_patch`** tool takes
+the same edits as `apply_patch` ({path, find, replace} or {path, create}) but writes nothing -- it stages
+the change and returns a unified diff. Review it, then **`apply_previewed_patch`** writes it (re-validating
+against the current files and snapshotting each change so it can be rewound), or **`discard_previewed_patch`**
+drops it. Both default to the most recent staged preview, or take an `id`.
+
+The web UI has a **Patch preview** card: it lists staged previews with their diffs and an **Apply** /
+**Discard** button each, so you can review-before-apply right in the browser. The same surface is
+available over HTTP:
+
+```
+curl "localhost:8080/preview?sessionId=default"                       -H "X-API-Key: <key>"
+curl -X POST "localhost:8080/preview/apply?sessionId=default&id=pv-1" -H "X-API-Key: <key>"
+```
+
+> Honest scope: the diff is a single-hunk render (common prefix/suffix trimmed), good for the small
+> targeted edits `apply_patch` makes -- not a full LCS diff. Previews are in-memory and per-session
+> (ephemeral, not durable). `apply_previewed_patch` re-applies against the *current* files, so if a file
+> changed since staging, the apply aborts rather than clobbering it. Hunk-level approval is a later item.
 
 ## Session export / import
 

@@ -1861,3 +1861,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   name that matches no agent returns a helpful "no subagent named ..." message. Built-ins are read-only,
   so the delegated loop runs in AUTO mode without escaping into writes. Per-skill `allowed_tools` adds a
   "prefer these tools only" reminder when a skill is invoked with `/<skill-name>`.
+
+---
+
+# Patch preview + review UX, and forked skills
+
+## 199. DiffRender unified diff (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `DiffRenderTest` passes -- a modify renders a trimmed single hunk with `+`/`-` lines and
+  correct counts (`@@ -2,1 +2,1 @@`); a create counts all lines and marks `(new file)`; an identical
+  file is `unchanged`; `summary` aggregates files/+adds/-removes and ignores unchanged files.
+
+## 200. preview_patch stages without writing; apply/discard (manual)
+
+- **Observe:** `preview_patch` with some edits returns a unified diff and a preview id and writes
+  **nothing** (the file on disk is unchanged; `git_diff` shows no change). `apply_previewed_patch`
+  (default = latest) then writes it, snapshots it (one rewindable change set), and clears the preview.
+  `discard_previewed_patch` drops a staged preview without writing. If a referenced file changed since
+  staging, `apply_previewed_patch` aborts rather than clobbering it.
+
+## 201. Patch preview card (manual, web UI)
+
+- **Observe:** after `preview_patch`, the *Patch preview* card lists the staged preview with its diff and
+  **Apply** / **Discard** buttons. Apply writes the change (and refreshes checkpoints); Discard removes
+  it. `GET /preview?sessionId=` returns the staged previews; `POST /preview/apply` / `POST
+  /preview/discard` back the buttons.
+
+## 202. Forked skill runs in a sub-agent (manual)
+
+- **Setup:** a skill with `context: fork` (and optionally `allowed_tools`).
+- **Observe:** invoking `/<skill-name> <args>` runs the skill in an isolated sub-agent (scoped to its
+  `allowed_tools`, or a read-only default) and returns only its final summary to the main thread; the
+  trace shows `[skill] fork /<name>`. A skill without `context: fork` still runs inline.

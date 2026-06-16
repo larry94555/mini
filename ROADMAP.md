@@ -113,9 +113,9 @@ Implement:
 - ~~`$ARGUMENTS` substitution~~ (done -- `$ARGUMENTS`/`$ARGS`; args appended if no placeholder),
 - ~~frontmatter support for `when_to_use`, `argument-hint`, and `allowed_tools`~~ (done),
 - ~~skill invocation trace entries~~ (done -- `[skill] invoked /<name>`),
-- `context: fork` later, after the subagent registry exists.
+- ~~`context: fork`~~ (done -- runs the skill in an isolated sub-agent).
 
-Priority 3 is now **complete** (only the later `context: fork` item remains, gated on subagents).
+Priority 3 is now **complete** (including `context: fork`, which delegates a skill to a sub-agent).
 
 Why this is third:
 
@@ -152,11 +152,13 @@ make review first-class.
 
 Implement:
 
-- `preview_patch`,
-- `apply_previewed_patch`,
-- `discard_previewed_patch`,
-- browser diff viewer,
+- ~~`preview_patch`~~ (done),
+- ~~`apply_previewed_patch`~~ (done -- re-validates + snapshots),
+- ~~`discard_previewed_patch`~~ (done),
+- ~~browser diff viewer~~ (done -- Patch preview card + `GET /preview`),
 - hunk-level approval later.
+
+Priority 5's core is now **complete** (only the later hunk-level approval remains).
 
 Why this is fifth:
 
@@ -176,21 +178,24 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-Priorities 1-4 are now complete: layered memory + `/memory` + `/init`; `@file` / `@directory`
-references; skills UX parity (`/skills`, direct `/skill-name`, `$ARGUMENTS`, bundled skills,
-`when_to_use`/`argument-hint`/`allowed_tools` frontmatter); and a custom subagent registry
-(`/agents`, `/agent <name> <task>`, `delegate_agent`, built-in explore/review/debug/research).
+Priorities 1-5 are now complete: layered memory + `/memory` + `/init`; `@file`/`@directory`
+references; skills UX parity (`/skills`, direct invocation, `$ARGUMENTS`, bundled skills,
+frontmatter, and `context: fork`); a custom subagent registry; and patch preview + review UX
+(`preview_patch` / `apply_previewed_patch` / `discard_previewed_patch` + a browser diff viewer).
 
-The highest-value next feature is **Priority 5 - patch preview and review UX**:
+With the numbered Claude Code feature priorities done, the next work comes from **Later
+priorities** -- pick by frequency and teaching value:
 
-- `preview_patch` to stage a diff without applying it,
-- `apply_previewed_patch` / `discard_previewed_patch`,
-- a browser diff viewer for the staged change,
-- hunk-level approval later.
+- **hunk-level approval** for the patch-preview flow (apply/skip individual hunks),
+- LSP-backed code intelligence (go-to-def, find-refs) to improve navigation,
+- session fork / rename / export UX polish,
+- `/loop` and scheduled local tasks,
+- image input,
+- plugin packaging.
 
-This builds on the existing `apply_patch` + edit-trust machinery and makes review-before-apply
-a first-class step. Do not prioritize trust/admin polish ahead of it unless the task is
-specifically about trust/security administration.
+Hunk-level approval is the smallest high-value next step: it extends the preview store and the
+diff render that just shipped, and deepens the review-before-apply story. Keep avoiding
+trust/admin polish ahead of these unless the task is specifically trust/security work.
 
 ## 3. Guidance for AI implementers
 
@@ -226,7 +231,7 @@ Current top priorities:
 7. ~~Add `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.~~ (done)
 8. ~~Add `agents/*.md` registry and `/agents`.~~ (done)
 9. ~~Add `delegate_agent(name, task)`.~~ (done -- with built-in explore/review/debug/research)
-10. Add `preview_patch` and a browser diff viewer.
+10. ~~Add `preview_patch` and a browser diff viewer.~~ (done -- + apply/discard, `context: fork` skills)
 11. Add hunk-level approval to the patch-preview flow.
 
 ## 5. Educational completeness
@@ -331,6 +336,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Patch preview + review UX (Priority 5): `preview_patch` stages edits and returns a unified diff without
+  writing; `apply_previewed_patch` re-validates against current files + snapshots; `discard_previewed_patch`
+  drops it; a web-UI *Patch preview* card (and `GET /preview`, `POST /preview/apply|discard`) reviews
+  before applying (`DiffRender` pure + unit-tested, `PreviewStore`).
+- Forked skills (`context: fork`): a skill can run in an isolated sub-agent (scoped to its `allowed_tools`),
+  returning only its final answer to the main thread -- the deferred Priority 3 item, now unblocked by
+  the subagent registry.
 - Custom subagent registry (Priority 4): named, tool-scoped subagents that run in their own isolated loop
   and return only a final answer -- built-in read-only `explore`/`review`/`debug`/`research`, plus
   `agents/*.md` (disk overrides built-ins). Surfaced via `/agents`, `/agent <name> <task>`, and a
