@@ -69,4 +69,49 @@ public final class InitDraft {
         for (String h : headings(draft)) if (!have.contains(h.toLowerCase())) missing.add(h);
         return missing;
     }
+
+    /**
+     * Split a markdown document into {@code ## } section blocks, keyed by heading text (in order). Each
+     * block is the {@code ## heading} line through to just before the next {@code ## } (or end). Content
+     * before the first {@code ## } (the title/preamble) is not returned. Pure.
+     */
+    public static java.util.LinkedHashMap<String, String> sectionBlocks(String md) {
+        java.util.LinkedHashMap<String, String> out = new java.util.LinkedHashMap<>();
+        if (md == null) return out;
+        String[] lines = md.split("\n", -1);
+        String current = null;
+        StringBuilder block = new StringBuilder();
+        for (String line : lines) {
+            String t = line.strip();
+            if (t.startsWith("## ")) {
+                if (current != null) out.put(current, block.toString());
+                current = t.substring(3).strip();
+                block = new StringBuilder(line).append("\n");
+            } else if (current != null) {
+                block.append(line).append("\n");
+            }
+        }
+        if (current != null) out.put(current, block.toString());
+        return out;
+    }
+
+    /**
+     * Improve an existing CLAUDE.md WITHOUT replacing user content: append only the draft sections whose
+     * headings are missing (case-insensitive), under a clear marker. Returns the merged text, or the
+     * original unchanged when nothing is missing. Pure -- the actual write lives in {@link InitService}.
+     */
+    public static String augment(String existing, String draft) {
+        if (existing == null) return draft;
+        List<String> missing = missingSections(existing, draft);
+        if (missing.isEmpty()) return existing;
+        java.util.LinkedHashMap<String, String> draftBlocks = sectionBlocks(draft);
+        StringBuilder sb = new StringBuilder(existing);
+        if (!existing.endsWith("\n")) sb.append("\n");
+        sb.append("\n<!-- Added by `imini /init`: sections missing from this file. Edit freely. -->\n\n");
+        for (String h : missing) {
+            String block = draftBlocks.get(h);
+            if (block != null) sb.append(block).append("\n");
+        }
+        return sb.toString().stripTrailing() + "\n";
+    }
 }

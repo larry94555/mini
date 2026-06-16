@@ -60,7 +60,7 @@ workflow depends on richer memory behavior.
 
 Implement:
 
-- `/init` to inspect the repository and draft or update `CLAUDE.md`,
+- ~~`/init` to inspect the repository and draft or update `CLAUDE.md`~~ (done -- creates if absent, and now **merges** missing sections into an existing file without replacing content),
 - ~~`/memory` to show loaded memory files and effective memory context~~ (done),
 - ~~`CLAUDE.local.md`~~ (done),
 - ~~`.claude/CLAUDE.md`~~ (done),
@@ -68,9 +68,10 @@ Implement:
 - ~~simple `@path` imports inside memory files~~ (done),
 - ~~diagnostics showing exactly which memory files loaded and why~~ (done via `/memory`).
 
-Priority 1 is now **complete**: the layered memory loader, `/memory` diagnostics, and `/init`
-(a deterministic repo scan that drafts/creates `CLAUDE.md`) all exist (see Recently completed). The next
-priority is **explicit context references** (Priority 2).
+Priority 1 is now **fully complete**: the layered memory loader, `/memory` diagnostics (CLI + a web-UI
+*Project memory* card), and `/init` (a deterministic repo scan that creates `CLAUDE.md` when absent and
+otherwise merges in only the missing sections, preserving your content) all exist (see Recently
+completed). The next priority is **explicit context references** (Priority 2, also complete).
 
 Why this is first:
 
@@ -218,7 +219,7 @@ Current top priorities:
 ## 4. Next 10 recommended PRs
 
 1. ~~Add `/memory` diagnostics.~~ (done -- layered loader + `@path` imports + `/memory` / `GET /memory/files`)
-2. ~~Add `/init` to draft or update `CLAUDE.md` from a repo scan.~~ (done -- `RepoScan`/`InitDraft`/`InitService`, `POST /init`)
+2. ~~Add `/init` to draft or update `CLAUDE.md` from a repo scan.~~ (done -- `RepoScan`/`InitDraft`/`InitService`, `POST /init`; now merges missing sections into an existing file + web-UI memory card)
 3. ~~Add `@file` references.~~ (done -- `ContextRefs`/`ContextRefService`)
 4. ~~Add `@directory` references.~~ (done -- one-level listing, capped)
 5. ~~Add `/skills` and direct `/skill-name` invocation.~~ (done -- `SkillInvocation`, `$ARGUMENTS`, trace)
@@ -331,6 +332,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Memory parity polish (Priority 1 finish): `/init` now **improves an existing `CLAUDE.md` in place** --
+  appending only the scaffold sections it is missing (append-only, content preserved; `InitDraft.augment`
+  pure + tested) via the chat command and `POST /init?augment=true`; a web-UI *Project memory* card
+  surfaces the `/memory` diagnostics (load order, source, reason, size); candidate ordering extracted to
+  a pure, unit-tested `MemoryLoader.candidateOrder`.
 - LSP-style code intelligence: `find_references` lists every whole-identifier *usage* of a symbol across
   the repo (declaration sites marked `[def]`), complementing `find_symbol` (definitions). Heuristic/regex
   identifier matching, not a typed resolver (`SymbolRefs` pure + unit-tested).

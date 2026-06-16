@@ -97,14 +97,7 @@ public class ProjectContext {
 
     /** Candidate files in load order: the fixed list, with .claude/rules/*.md (sorted) before the local file. */
     private List<String> candidateFiles() {
-        List<String> files = new ArrayList<>();
-        for (String name : MemoryLoader.CANDIDATES) {
-            if (name.equals("CLAUDE.local.md")) {
-                files.addAll(rules()); // rules load after project files, before the local override
-            }
-            files.add(name);
-        }
-        return files;
+        return MemoryLoader.candidateOrder(rules()); // pure ordering (see MemoryLoader.candidateOrder)
     }
 
     private List<String> rules() {

@@ -55,17 +55,37 @@ public class InitService {
                 return "Could not write " + TARGET + ": " + e.getMessage() + "\n\nProposed draft:\n\n" + draft;
             }
         }
-        List<String> missing = missingSections(target, draft);
-        String head = TARGET + " already exists; not overwriting. "
-                + (missing.isEmpty()
-                    ? "It already has the scaffolded section headings."
-                    : "Sections you might add: " + String.join(", ", missing) + ".")
-                + " To replace it, POST /init?write=true&overwrite=true.";
-        return head + "\n\nProposed draft:\n\n" + draft;
+        // CLAUDE.md exists: improve it in place WITHOUT replacing user content -- append only the
+        // scaffold sections it is missing (append-only is safe; existing content is never touched).
+        String existing;
+        try {
+            existing = Files.readString(target);
+        } catch (Exception e) {
+            return "Could not read " + TARGET + ": " + e.getMessage();
+        }
+        List<String> missing = InitDraft.missingSections(existing, draft);
+        if (missing.isEmpty()) {
+            return TARGET + " already exists and has all the scaffolded sections; leaving it unchanged. "
+                    + "Run /memory to see how it is loaded.";
+        }
+        String merged = InitDraft.augment(existing, draft);
+        try {
+            Files.writeString(target, merged);
+            return "Improved " + TARGET + " in place: appended " + missing.size() + " missing section(s): "
+                    + String.join(", ", missing) + ". Existing content was preserved. Run /memory to confirm.";
+        } catch (Exception e) {
+            return "Could not write " + TARGET + ": " + e.getMessage()
+                    + "\n\nMissing sections you could add: " + String.join(", ", missing);
+        }
     }
 
-    /** Endpoint behavior: optionally write (create if absent; replace only with overwrite=true). */
+    /** Back-compat overload (no augment). */
     public Map<String, Object> initInfo(boolean write, boolean overwrite) {
+        return initInfo(write, overwrite, false);
+    }
+
+    /** Endpoint behavior: optionally write (create if absent; replace with overwrite; merge with augment). */
+    public Map<String, Object> initInfo(boolean write, boolean overwrite, boolean augment) {
         RepoScan.Facts facts = scan();
         String draft = InitDraft.render(root.getFileName() == null ? "Project" : root.getFileName().toString(), facts);
         Path target = root.resolve(TARGET);
@@ -79,7 +99,23 @@ public class InitService {
         out.put("missingSections", exists ? missingSections(target, draft) : List.of());
         boolean wrote = false;
         String message;
-        if (write && (!exists || overwrite)) {
+        if (write && exists && augment && !overwrite) {
+            // improve in place: append only missing sections, preserving user content
+            try {
+                String existing = Files.readString(target);
+                List<String> missing = InitDraft.missingSections(existing, draft);
+                if (missing.isEmpty()) {
+                    message = TARGET + " already has all scaffolded sections; left unchanged";
+                } else {
+                    Files.writeString(target, InitDraft.augment(existing, draft));
+                    wrote = true;
+                    message = "augmented " + TARGET + " (+" + missing.size() + " section(s): "
+                            + String.join(", ", missing) + ")";
+                }
+            } catch (Exception e) {
+                message = "augment failed: " + e.getMessage();
+            }
+        } else if (write && (!exists || overwrite)) {
             try {
                 Files.writeString(target, draft);
                 wrote = true;
@@ -88,7 +124,7 @@ public class InitService {
                 message = "write failed: " + e.getMessage();
             }
         } else if (write) {
-            message = TARGET + " exists; pass overwrite=true to replace it";
+            message = TARGET + " exists; pass augment=true to add missing sections, or overwrite=true to replace it";
         } else {
             message = exists ? TARGET + " exists (preview only)" : "preview only (not written)";
         }

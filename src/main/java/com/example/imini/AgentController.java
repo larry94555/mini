@@ -841,8 +841,9 @@ public class AgentController {
     /** Scan the repo and draft CLAUDE.md. write=true creates it (or replaces, with overwrite=true). */
     @PostMapping("/init")
     public Map<String, Object> init(@RequestParam(name = "write", defaultValue = "false") boolean write,
-                                    @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite) {
-        Map<String, Object> r = init.initInfo(write, overwrite);
+                                    @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite,
+                                    @RequestParam(name = "augment", defaultValue = "false") boolean augment) {
+        Map<String, Object> r = init.initInfo(write, overwrite, augment);
         if (Boolean.TRUE.equals(r.get("wrote"))) {
             audit.record(currentUser(), "init", "CLAUDE.md", String.valueOf(r.get("message")));
         }

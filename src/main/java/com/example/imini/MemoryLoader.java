@@ -21,6 +21,20 @@ public final class MemoryLoader {
     public static final List<String> CANDIDATES = List.of(
             ".claude/CLAUDE.md", "CLAUDE.md", "IMINI.md", "AGENTS.md", "CLAUDE.local.md");
 
+    /**
+     * The full ordered load list: the fixed {@link #CANDIDATES}, with {@code .claude/rules/*.md} (already
+     * sorted, supplied by the caller) inserted right before {@code CLAUDE.local.md} -- so project files
+     * load first, then rules, then the local override wins last. Pure, so precedence is unit-testable.
+     */
+    public static List<String> candidateOrder(List<String> ruleFiles) {
+        List<String> files = new java.util.ArrayList<>();
+        for (String name : CANDIDATES) {
+            if (name.equals("CLAUDE.local.md") && ruleFiles != null) files.addAll(ruleFiles);
+            files.add(name);
+        }
+        return files;
+    }
+
     /** One entry in the memory diagnostics: which file, why it loaded (or was skipped), size, depth. */
     public record Source(String path, String reason, int bytes, int depth) {}
 
