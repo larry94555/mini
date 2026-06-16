@@ -144,6 +144,8 @@ public class SkillService {
             m.put("enabled", effectiveEnabled(global, override)); // effective for this session
             m.put("global", global);
             m.put("override", override); // null = no per-session override
+            m.put("argumentHint", sk.argumentHint());
+            m.put("allowedTools", sk.allowedTools());
             out.add(m);
         }
         return out;
@@ -403,7 +405,12 @@ public class SkillService {
         if (p == null || SkillInvocation.isReserved(p.name())) return null;
         for (SkillLibrary.Skill s : enabledSkillsFor(sessionId)) {
             if (s.name().equalsIgnoreCase(p.name())) {
-                return SkillInvocation.substitute(s.body(), p.args());
+                String out = SkillInvocation.substitute(s.body(), p.args());
+                if (s.allowedTools() != null && !s.allowedTools().isEmpty()) {
+                    out = out + "\n\n(For this skill, prefer these tools only: "
+                            + String.join(", ", s.allowedTools()) + ".)";
+                }
+                return out;
             }
         }
         return null;

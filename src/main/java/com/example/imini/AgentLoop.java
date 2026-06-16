@@ -63,12 +63,13 @@ public class AgentLoop {
     private final GitInspector git;
     private final PlanHistory history;
     private final SkillService skills;
+    private final AgentRegistry agents;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, InitService init, ContextRefService refs, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
-                     PlanHistory history, SkillService skills) {
+                     PlanHistory history, SkillService skills, AgentRegistry agents) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -84,6 +85,7 @@ public class AgentLoop {
         this.git = git;
         this.history = history;
         this.skills = skills;
+        this.agents = agents;
     }
 
     private String systemPrompt() {
@@ -108,6 +110,17 @@ public class AgentLoop {
     }
 
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
+    /** Handle /agents (list) and /agent <name> <task> (delegate); null if not an agent command. */
+    private String maybeAgentCommand(String message, RunSink sink) throws Exception {
+        if (agents.isAgentsCommand(message)) return agents.report();
+        AgentLibrary.Invocation inv = agents.parseCommand(message);
+        if (inv != null) {
+            sink.log("[agent] delegate /agent " + inv.name());
+            return registry.delegateToAgent(inv.name(), inv.task(), sink);
+        }
+        return null;
+    }
+
     /** Expand a /<skill-name> invocation to the skill body (logged on the trace), else slash.expand(). */
     private String expandCommandOrSkill(String message, String sessionId, RunSink sink) {
         String invoked = skills.invokedSkillName(message, sessionId);
@@ -131,6 +144,8 @@ public class AgentLoop {
         if (project.isMemoryCommand(userQuestion)) return project.report();
         if (init.isInitCommand(userQuestion)) return init.runInit();
         if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
+        String agentReply = maybeAgentCommand(userQuestion, sink);
+        if (agentReply != null) return agentReply;
         String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
@@ -142,6 +157,8 @@ public class AgentLoop {
         if (project.isMemoryCommand(userMessage)) return project.report();
         if (init.isInitCommand(userMessage)) return init.runInit();
         if (skills.isSkillsCommand(userMessage)) return skills.skillsReport(sessionId);
+        String agentReply = maybeAgentCommand(userMessage, sink);
+        if (agentReply != null) return agentReply;
         String expanded = withRefs(expandCommandOrSkill(userMessage, sessionId, sink), sink);
 
         List<Map<String, Object>> history = sessions.get(sessionId);

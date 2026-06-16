@@ -16,11 +16,18 @@ public class ToolRegistry {
 
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
+    private final SubAgent subAgent;
+    private final AgentRegistry agents;
+
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
-                        McpManager mcp, RetrievalService retrieval, SkillService skills) {
+                        McpManager mcp, RetrievalService retrieval, SkillService skills,
+                        AgentRegistry agents) {
+        this.subAgent = subAgent;
+        this.agents = agents;
         for (Tool t : builtins.all()) register(t);
         for (Tool t : codebase.all()) register(t);   // glob, grep, repo_tree, read_many, git_status, git_diff
         register(delegateTool(subAgent));
+        register(delegateAgentTool());
         register(retrieval.searchTool());          // search_memory (RAG over the workspace)
         register(retrieval.indexTool());            // index_workspace
         register(skills.loadSkillTool());          // load_skill (progressive disclosure)
@@ -42,6 +49,52 @@ public class ToolRegistry {
     /** name -> Tool, handed to the engine. */
     public Map<String, Tool> tools() {
         return tools;
+    }
+
+    /** Run a named subagent (from AgentRegistry) on a task, scoping it to that agent's tools. */
+    public String delegateToAgent(String name, String task, RunSink sink) throws Exception {
+        AgentLibrary.AgentDef def = agents.byName(name);
+        if (def == null) {
+            return "No subagent named \"" + name + "\". Use /agents to list them.";
+        }
+        Map<String, Tool> scoped = new LinkedHashMap<>();
+        for (String tn : def.tools()) {
+            Tool t = tools.get(tn);
+            if (t != null) scoped.put(tn, t);
+        }
+        String sys = def.body()
+                + (scoped.isEmpty() ? "" : "\n\nYou may use only these tools: " + String.join(", ", scoped.keySet()) + ".")
+                + "\nReturn only your final answer in plain text.";
+        return subAgent.run(SessionContext.sessionId(), sys, task, scoped, sink);
+    }
+
+    private Tool delegateAgentTool() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        Map<String, Object> nameP = new LinkedHashMap<>();
+        nameP.put("type", "string");
+        nameP.put("description", "The subagent name (see /agents): e.g. explore, review, debug, research.");
+        Map<String, Object> taskP = new LinkedHashMap<>();
+        taskP.put("type", "string");
+        taskP.put("description", "The task for the subagent, as a clear self-contained instruction.");
+        props.put("name", nameP);
+        props.put("task", taskP);
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", props);
+        schema.put("required", java.util.List.of("name", "task"));
+        return new Tool("delegate_agent",
+                "Delegate a task to a named, tool-scoped subagent that runs in its own isolated loop and "
+                + "returns only its final answer. Use for focused subtasks (explore the codebase, review a "
+                + "diff, debug, research). Names come from /agents.",
+                schema, false, args -> {
+                    try {
+                        String name = String.valueOf(args.getOrDefault("name", "")).trim();
+                        String task = String.valueOf(args.getOrDefault("task", "")).trim();
+                        return delegateToAgent(name, task, SessionContext.sink());
+                    } catch (Exception e) {
+                        return "ERROR: " + e.getMessage();
+                    }
+                });
     }
 
     private Tool delegateTool(SubAgent subAgent) {
