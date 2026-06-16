@@ -520,6 +520,10 @@ slash-command templates, and discovery reuses the same lexical scorer as retriev
 ```
 skills/
   commit-message/SKILL.md     # folder form (name defaults to the folder)
+  code-review/SKILL.md        # bundled
+  debug/SKILL.md              # bundled
+  batch/SKILL.md              # bundled
+  loop/SKILL.md               # bundled
   readme.md                   # flat form (name defaults to the file stem)
 ```
 
@@ -560,6 +564,21 @@ and reloads, so the agent (or you) can grow the library during a session.
 Only **enabled** skills are invokable, and the built-in commands (`/help`, `/memory`, `/init`,
 `/skills`) are reserved -- they're never shadowed by a skill of the same name. A `/<name>` that matches
 no enabled skill falls through to the normal `commands/` template (or the model) as before.
+
+**Bundled skills.** `imini` ships with a few educational skills so `/skills` is useful out of the box,
+each pairing naturally with `@file` references and the deterministic tools:
+
+- `/code-review @path` -- review a diff or files for correctness, safety, and clarity, returning
+  prioritized findings.
+- `/debug <error or symptom>` -- diagnose methodically: reproduce, localize, hypothesize, minimal fix,
+  verify.
+- `/batch <change across many files>` -- enumerate targets, do one as a template, apply consistently,
+  verify each.
+- `/loop <goal + stop condition>` -- a bounded improve-and-check loop (one change per iteration, capped
+  attempts).
+
+They're ordinary `SKILL.md` files under `skills/`; edit or remove them like any other skill, or disable
+them per-session.
 
 **Auto-load (optional).** Weaker local models sometimes won't call `load_skill` on their own. Set
 `skills.auto-load=true` to also inject the single best-matching skill's body for `/ask` queries (picked

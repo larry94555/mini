@@ -1804,3 +1804,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   disabled skill, or a `/<name>` that matches no skill, falls through to the normal `commands/` template
   or the model (no skill expansion). The reserved commands (`/help`, `/memory`, `/init`, `/skills`) are
   never shadowed by a skill of the same name.
+
+---
+
+# Bundled educational skills
+
+## 192. Bundled skills load and parse (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `BundledSkillsTest` passes -- each of `skills/code-review`, `skills/debug`,
+  `skills/batch`, `skills/loop` exists, parses with its front-matter name, has a non-empty description, a
+  substantial body, and an `$ARGUMENTS` placeholder; none collides with a reserved command name.
+
+## 193. Bundled skills are usable out of the box (manual)
+
+- **Observe:** on a fresh checkout, `/skills` lists `code-review`, `debug`, `batch`, and `loop` (plus
+  `commit-message`) with descriptions. Invoking one runs its body with your text substituted, e.g.
+  `/code-review @src/main/java/com/example/imini/AgentLoop.java` reviews that file (the `@file`
+  reference inlines its content), and the trace shows `[skill] invoked /code-review`.
+
+## 194. Bundled skills are ordinary, editable skills (manual)
+
+- **Observe:** the four skills are plain `SKILL.md` files under `skills/`; editing a body changes the
+  next invocation, disabling one (globally or per-session) removes it from `/skills` and makes
+  `/<name>` fall through, and `save_skill` / proposals still work alongside them. No code change is
+  needed to add or remove a bundled skill.
