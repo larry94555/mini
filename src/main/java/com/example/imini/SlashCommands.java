@@ -55,6 +55,8 @@ public class SlashCommands {
         StringBuilder sb = new StringBuilder("Available slash commands:\n");
         sb.append("  /memory            show which project-memory files are loaded\n");
         sb.append("  /init              scan the repo and draft/update CLAUDE.md\n");
+        sb.append("  /skills            list available skills\n");
+        sb.append("  /<skill-name>      invoke a skill directly ($ARGUMENTS = text after the name)\n");
         if (templates.isEmpty()) {
             sb.append("  (none -- add .md files to the commands/ folder)");
         } else {
