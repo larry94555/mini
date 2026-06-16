@@ -108,14 +108,14 @@ Implement:
 
 - ~~`/skills`~~ (done -- lists skills with descriptions + effective enabled-state),
 - ~~direct `/skill-name` invocation~~ (done -- enabled skills only; reserved commands protected),
-- bundled educational skills such as `code-review`, `debug`, `batch`, and
-  `loop`,
+- ~~bundled educational skills such as `code-review`, `debug`, `batch`, and
+  `loop`~~ (done -- shipped under `skills/`),
 - ~~`$ARGUMENTS` substitution~~ (done -- `$ARGUMENTS`/`$ARGS`; args appended if no placeholder),
 - frontmatter support for `when_to_use`, `argument-hint`, and `allowed_tools`,
 - ~~skill invocation trace entries~~ (done -- `[skill] invoked /<name>`),
 - `context: fork` later, after the subagent registry exists.
 
-Still open: bundled educational skills, and `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
+Still open: `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
 
 Why this is third:
 
@@ -180,10 +180,9 @@ Priorities 1 and 2 are complete: layered memory + `/memory` + `/init`, and
 the trace).
 
 `/skills` (listing), direct `/skill-name` invocation, `$ARGUMENTS` substitution,
-and skill-invocation trace entries now exist. The remaining Priority 3 work is:
+skill-invocation trace entries, and bundled educational skills (`code-review`,
+`debug`, `batch`, `loop`) now exist. The remaining Priority 3 work is:
 
-- bundled educational skills (`code-review`, `debug`, `batch`, `loop`) so the
-  harness ships useful skills out of the box,
 - frontmatter for `when_to_use` (auto-load hinting), `argument-hint` (shown in
   `/skills`), and `allowed_tools` (per-skill tool scoping).
 
@@ -224,11 +223,12 @@ Current top priorities:
 3. ~~Add `@file` references.~~ (done -- `ContextRefs`/`ContextRefService`)
 4. ~~Add `@directory` references.~~ (done -- one-level listing, capped)
 5. ~~Add `/skills` and direct `/skill-name` invocation.~~ (done -- `SkillInvocation`, `$ARGUMENTS`, trace)
-6. Add bundled `code-review`, `debug`, `batch`, and `loop` skills.
+6. ~~Add bundled `code-review`, `debug`, `batch`, and `loop` skills.~~ (done -- under `skills/`)
 7. Add `when_to_use`/`argument-hint`/`allowed_tools` frontmatter.
 8. Add `agents/*.md` registry and `/agents`.
 9. Add `delegate_agent(name, task)`.
 10. Add `preview_patch` and browser diff viewer.
+11. Add hunk-level approval to the patch-preview flow.
 
 ## 5. Educational completeness
 
@@ -332,6 +332,9 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Bundled educational skills: `code-review`, `debug`, `batch`, and `loop` ship as `SKILL.md` files under
+  `skills/`, each using `$ARGUMENTS` and pairing with `@file` references / the deterministic tools, so
+  `/skills` is useful out of the box (load/parse asserted by `BundledSkillsTest`).
 - `/skills` + direct `/<skill-name>` invocation: `/skills` lists available skills (descriptions +
   effective enabled-state); `/<skill-name> [args]` runs an enabled skill's body as the prompt with
   `$ARGUMENTS`/`$ARGS` substituted (args appended if no placeholder), logged as `[skill] invoked /<name>`
