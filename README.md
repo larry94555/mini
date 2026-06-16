@@ -48,7 +48,7 @@ No cloud API key is required.
 | Model serving | Config-driven `llama-server` launcher, model profiles, GPU/thread knobs, parallel slots, watchdog |
 | Agent loop | Think -> act -> observe loop with streaming, deadlines, duplicate-call guards, and interrupts |
 | File tools | `read_file`, `view`, `list_dir`, `write_file`, `edit_file`, `apply_patch` |
-| Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol` |
+| Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol`, `find_references` |
 | Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
 | Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), persist/resume, and per-session history, coding profile guidance |
@@ -82,7 +82,8 @@ No cloud API key is required.
 | `ToolRegistry.java` | Builds the available tool set |
 | `Tool.java` | Tool definition: name, description, schema, mutating flag, untrusted flag, executor |
 | `BuiltinTools.java` | File, shell, web, patch, and todo tools |
-| `CodebaseTools.java` | Deterministic repo navigation, git tools, and symbol search |
+| `CodebaseTools.java` | Deterministic repo navigation, git tools, and symbol search (defs + refs) |
+| `SymbolRefs.java` | Pure whole-identifier reference matching + rendering for `find_references` |
 | `PermissionService.java` | Permission modes, allow/deny rules, remembered decisions, plan mode, write confinement |
 | `Sandbox.java` | Command screening, read confinement, optional container execution wrapper |
 | `CheckpointStore.java` | Snapshot-before-edit and rewind |
@@ -425,9 +426,27 @@ Useful tools:
 - `glob` to find files by name,
 - `grep` to find text or usages,
 - `outline` to inspect declarations in one file,
-- `find_symbol` to find declarations across the repo,
+- `find_symbol` to find a symbol's **declaration** across the repo,
+- `find_references` to find every **usage** of an identifier (declaration sites marked `[def]`),
 - `read_many` to compare related files,
 - `git_status` and `git_diff` to verify changes.
+
+**Go-to-definition / find-references.** Two complementary tools give LSP-style code intelligence without
+an external language server:
+
+- **`find_symbol`** (`{name, dir?, glob?}`) -- where a symbol is *defined*: `path:line: kind name`.
+- **`find_references`** (`{name, dir?, glob?}`) -- every *usage* of an identifier across the repo as
+  `path:line: text`, with declaration sites marked `[def]`. Matching is whole-identifier, so searching
+  `user` won't match `username` or `user_id`.
+
+So `find_symbol fetchUser` jumps to the definition, and `find_references fetchUser` lists every call
+site (and the definition, flagged) -- handy before a rename or to gauge a change's blast radius.
+
+> Honest scope: this is heuristic, regex-based identifier matching, not a typed resolver -- it sees
+> names, not scopes or types, so it can over-match a name reused in an unrelated file (e.g. a local
+> variable and an unrelated method that share a name). Declaration detection reuses the same
+> per-language symbol heuristics as `find_symbol`/`outline`. Results are capped (`max_results`,
+> default 50).
 
 ## Persistence and retrieval
 

@@ -170,7 +170,7 @@ Why this is fifth:
 
 These are still valuable, but they come after the top five workflow features.
 
-- LSP-backed code intelligence.
+- ~~LSP-backed code intelligence~~ (go-to-def via `find_symbol`, find-refs via `find_references`).
 - Session fork / rename / export UX polish.
 - `/loop` and scheduled local tasks.
 - Image input.
@@ -178,24 +178,19 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-Priorities 1-5 are now complete: layered memory + `/memory` + `/init`; `@file`/`@directory`
-references; skills UX parity (`/skills`, direct invocation, `$ARGUMENTS`, bundled skills,
-frontmatter, and `context: fork`); a custom subagent registry; and patch preview + review UX
-(`preview_patch` / `apply_previewed_patch` / `discard_previewed_patch` + a browser diff viewer).
-
-All five numbered priorities and hunk-level approval are done. The remaining work comes from
+All five numbered priorities, hunk-level approval, and LSP-style code intelligence are done
+(`find_symbol` for definitions, `find_references` for usages). The remaining work comes from
 **Later priorities** -- pick by frequency and teaching value:
 
-- LSP-backed code intelligence (go-to-def, find-refs) to sharpen navigation and the explore/review
-  subagents,
-- session fork / rename / export UX polish,
-- `/loop` and scheduled local tasks,
+- session fork / rename / export UX polish (build on export/import bundles),
+- `/loop` and scheduled local tasks (bounded iterate-until-green as a first-class command),
 - image input,
 - plugin packaging.
 
-LSP-backed code intelligence is the highest-value next step: it deepens the harness's codebase
-understanding (a core Claude Code capability) and directly improves the navigation tools and subagents.
-Keep avoiding trust/admin polish ahead of these unless the task is specifically trust/security work.
+Session fork / rename / export UX polish is the recommended next step: it raises the daily
+ergonomics of the web UI on top of the session lifecycle and bundle work already shipped, and
+is mostly deterministic plumbing (good teaching value, low risk). Keep avoiding trust/admin
+polish ahead of these unless the task is specifically trust/security work.
 
 ## 3. Guidance for AI implementers
 
@@ -336,6 +331,9 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- LSP-style code intelligence: `find_references` lists every whole-identifier *usage* of a symbol across
+  the repo (declaration sites marked `[def]`), complementing `find_symbol` (definitions). Heuristic/regex
+  identifier matching, not a typed resolver (`SymbolRefs` pure + unit-tested).
 - Hunk-level approval: a staged preview is a list of per-edit hunks; `apply_previewed_patch` /
   `discard_previewed_patch` (and the web UI's per-hunk checkboxes + Apply selected/all) act on a chosen
   subset (`hunks="0,2"` / `"1-3"`), leaving the rest staged (`PreviewSelect` pure + unit-tested).
