@@ -53,6 +53,7 @@ public class AgentLoop {
     private final SessionStore sessions;
     private final ProjectContext project;
     private final InitService init;
+    private final ContextRefService refs;
     private final SlashCommands slash;
     private final TodoStore todos;
     private final CheckRunner checks;
@@ -65,7 +66,7 @@ public class AgentLoop {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
-                     ProjectContext project, InitService init, SlashCommands slash, TodoStore todos, CheckRunner checks,
+                     ProjectContext project, InitService init, ContextRefService refs, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
                      PlanHistory history, SkillService skills) {
         this.engine = engine;
@@ -73,6 +74,7 @@ public class AgentLoop {
         this.sessions = sessions;
         this.project = project;
         this.init = init;
+        this.refs = refs;
         this.slash = slash;
         this.todos = todos;
         this.checks = checks;
@@ -106,11 +108,19 @@ public class AgentLoop {
     }
 
     /** One-shot, ephemeral (caller supplies a sessionId for interrupt/steer/todos scoping). */
+    /** Inline @file/@directory references into the message and note what was attached on the trace. */
+    private String withRefs(String message, RunSink sink) {
+        ContextRefService.Expansion ex = refs.expand(message);
+        for (String a : ex.attached()) sink.log("[context] attached @" + a);
+        for (String sk : ex.skipped()) sink.log("[context] skipped @" + sk);
+        return ex.text();
+    }
+
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(userQuestion)) return slash.help();
         if (project.isMemoryCommand(userQuestion)) return project.report();
         if (init.isInitCommand(userQuestion)) return init.runInit();
-        String question = slash.expand(userQuestion);
+        String question = withRefs(slash.expand(userQuestion), sink);
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
@@ -120,7 +130,7 @@ public class AgentLoop {
         if (slash.isHelp(userMessage)) return slash.help();
         if (project.isMemoryCommand(userMessage)) return project.report();
         if (init.isInitCommand(userMessage)) return init.runInit();
-        String expanded = slash.expand(userMessage);
+        String expanded = withRefs(slash.expand(userMessage), sink);
 
         List<Map<String, Object>> history = sessions.get(sessionId);
         if (history == null) {

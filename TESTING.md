@@ -1747,3 +1747,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   sections missing from it, and shows the proposed draft. Only `POST /init?write=true&overwrite=true`
   replaces it; `POST /init` with no params returns a preview (`exists`, `buildSystem`, `languages`,
   `missingSections`, `draft`) without writing.
+
+---
+
+# @file / @directory prompt references
+
+## 186. ContextRefs parsing + block (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `ContextRefsTest` passes -- `parse` extracts `@path` tokens (ignoring mid-word `@mentions`
+  and `@@` escapes), de-dupes, and trims trailing punctuation; `block` renders a `<referenced-context>`
+  block with `--- @<ref> (file, N bytes) ---` / `(directory, N entries)` headers; an empty input yields
+  no block.
+
+## 187. References inline file + directory content (manual)
+
+- **Setup:** a workspace with `src/main/java/.../AgentLoop.java` and a `docs/` directory.
+- **Observe:** asking `Summarize @docs/ and explain @src/main/java/com/example/imini/AgentLoop.java`
+  inlines the directory listing and the file's content into the model's view; the run trace shows
+  `[context] attached @docs/ (directory, N entries)` and `[context] attached @...AgentLoop.java (file,
+  N bytes)`. The answer reflects the actual file content.
+
+## 188. Safety + caps (manual)
+
+- **Observe:** `@../etc/passwd` (or any path escaping the workspace) and a non-existent `@foo/bar` are
+  ignored and left as plain text in the message (trace shows nothing attached for them, and ordinary
+  `@mentions` are untouched). A file over `context.refs.max-file-kb`, or once the run exceeds
+  `context.refs.max-total-kb` / `context.refs.max-files`, is reported as skipped on the trace. Setting
+  `context.refs.enabled=false` disables inlining entirely.
+- **Note:** this is separate from memory `@path` imports inside `CLAUDE.md` (case 181); context
+  references are resolved per chat message.

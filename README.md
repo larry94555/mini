@@ -99,6 +99,8 @@ No cloud API key is required.
 | `MemoryLoader.java` | Pure memory helpers: candidate load order + `@path` import expansion |
 | `RepoScan.java` / `InitDraft.java` | Pure `/init` logic: build-system/language detection + `CLAUDE.md` draft |
 | `InitService.java` | Scans the repo and creates/drafts `CLAUDE.md`; backs `/init` |
+| `ContextRefs.java` | Pure `@file`/`@directory` reference parsing + context-block assembly |
+| `ContextRefService.java` | Resolves `@path` refs (workspace-confined, capped) and inlines them |
 | `TodoStore.java` | Per-session task checklists |
 | `InterruptService.java` | Per-session interrupt and steering |
 | `Approvals.java` | Pending remote approval registry |
@@ -480,6 +482,31 @@ existing one); without `write` it returns a preview (build system, languages, mi
 curl -X POST "localhost:8080/init"                       -H "X-API-Key: <key>"   # preview only
 curl -X POST "localhost:8080/init?write=true"            -H "X-API-Key: <key>"   # create if absent
 ```
+
+## Context references (`@file` / `@directory`)
+
+Mention a path with `@` in any prompt and `imini` inlines it into what the model sees -- like Claude
+Code. `@path/to/File.java` attaches that file's content; `@some/dir` (or `@some/dir/`) attaches a
+one-level listing of that directory. You can reference several at once:
+
+```
+Why does @src/main/java/com/example/imini/AgentLoop.java call into @src/main/java/com/example/imini/AgentEngine.java?
+Summarize what's in @docs/
+```
+
+The referenced content is appended to your message inside a `<referenced-context>` block, so the model
+reads the actual code rather than guessing. What was attached (or skipped, and why) is shown on the run
+trace, e.g. `[context] attached @src/.../AgentLoop.java (file, 5123 bytes)`.
+
+**Safety and caps.** References resolve **only inside the workspace** -- a token that escapes the root
+(`@../etc/passwd`) or doesn't exist is ignored and left as plain text, so ordinary `@mentions` are never
+mangled. Inlining is bounded by `context.refs.max-files` (10), `context.refs.max-file-kb` (64),
+`context.refs.max-total-kb` (256), and `context.refs.max-dir-entries` (100); set `context.refs.enabled=false`
+to turn the feature off. Directory references list names only (not nested file contents). `@@` is an
+escape for a literal at-sign.
+
+> This is distinct from memory `@path` imports (which live *inside* memory files like `CLAUDE.md`):
+> context references are resolved in your chat prompts, per message.
 
 ## Skills
 
