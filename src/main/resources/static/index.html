@@ -172,6 +172,11 @@
         <span class="muted" id="budgetInfo" style="font-size:11px"></span>
       </div>
     </div>
+    <div class="card" id="adminCard">
+      <h3>Admin overview <a class="linklike" id="refreshAdminLink" title="Reload the dashboard">refresh</a></h3>
+      <div class="muted" style="font-size:11px">Live observability (admin only): runs, latency, tools, tasks, and recent privileged actions.</div>
+      <div id="adminBody" class="muted" style="font-size:11px;margin-top:4px">(load with refresh)</div>
+    </div>
     <div class="card" id="scheduleCard">
       <h3>Scheduled tasks <a class="linklike" id="refreshSchedLink" title="Reload scheduled tasks">refresh</a></h3>
       <div class="muted" style="font-size:11px">Run a prompt later or on an interval (unattended, AUTO mode). In-memory: tasks don't survive a restart.</div>
@@ -494,6 +499,26 @@ async function installPluginUrl(){
   refreshPlugins(); refreshMemoryFiles();
 }
 $("#pluginInstallUrl") && ($("#pluginInstallUrl").onclick = installPluginUrl);
+async function refreshAdmin(){
+  const el = $("#adminBody"); if (!el) return;
+  const j = await getJson("/admin/overview");
+  if (!j){ el.textContent = "(admin only)"; return; }
+  const r = j.runs || {}, lat = r.latency || {}, conc = r.concurrency || {}, srv = j.server || {}, c = j.content || {}, st = j.scheduledTasks || {};
+  const tools = (j.topTools||[]).map(t => escapeHtml(t.name)+" "+t.count).join(", ") || "(none yet)";
+  const audit = (j.recentAudit||[]).slice(0,8).map(a =>
+    '<div style="border-top:1px solid var(--border);padding:2px 0">'
+    + escapeHtml(a.time||"") + " · <b>" + escapeHtml(a.user||"") + "</b> " + escapeHtml(a.action||"")
+    + " " + escapeHtml(a.target||"") + " <span class=\"muted\">" + escapeHtml(a.outcome||"") + "</span></div>").join("") || "(none)";
+  el.innerHTML =
+      '<div><b>uptime</b> ' + escapeHtml(j.uptime||"") + '</div>'
+    + '<div><b>runs</b> ok ' + (r.ok||0) + ' / failed ' + (r.failed||0) + ' (' + (r.successRate||0) + '% ok), started ' + (r.started||0) + '</div>'
+    + '<div><b>latency</b> avg ' + (lat.avg_ms||0) + 'ms, max ' + (lat.max_ms||0) + 'ms · <b>slots</b> ' + (conc.active||0) + '/' + (conc.limit||0) + ' active, ' + (conc.queued||0) + ' queued</div>'
+    + '<div><b>top tools</b> ' + tools + '</div>'
+    + '<div><b>tasks</b> ' + (st.enabled||0) + '/' + (st.total||0) + ' enabled · <b>content</b> ' + (c.skills||0) + ' skills, ' + (c.agents||0) + ' agents, ' + (c.commands||0) + ' commands</div>'
+    + '<div><b>server</b> ctx ' + (srv.contextTokens||0) + ', cap ' + (srv.promptCap||0) + ', budget ' + (srv.tokenBudget||0) + ', vision ' + (srv.vision?"yes":"no") + '</div>'
+    + '<div style="margin-top:4px"><b>recent admin actions</b></div>' + audit;
+}
+$("#refreshAdminLink") && ($("#refreshAdminLink").onclick = refreshAdmin);
 async function refreshSchedule(){
   const el = $("#schedList"); if (!el) return;
   const rows = await getJson("/schedule");
@@ -1010,7 +1035,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule(); refreshPlugins();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule(); refreshPlugins(); refreshAdmin();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>
