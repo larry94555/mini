@@ -155,6 +155,28 @@ public class PluginService {
         return r;
     }
 
+    /**
+     * Build a registry index entry for the current workspace pack: name/version/description/url + the
+     * SHA-256 of the exported pack JSON, so a registry can pin it. Pure-ish: reads workspace content and
+     * hashes it (no network).
+     */
+    public Map<String, Object> registryEntry(String name, String version, String description, String url) {
+        if (url == null || url.isBlank()) return Map.of("error", "url is required (where the pack will be hosted)");
+        String packJson;
+        try {
+            packJson = exportJson(name, version, description);
+        } catch (Exception e) {
+            return Map.of("error", "could not build pack: " + e.getMessage());
+        }
+        Map<String, Object> entry = new java.util.LinkedHashMap<>();
+        entry.put("name", name == null || name.isBlank() ? "workspace-pack" : name);
+        entry.put("version", version == null || version.isBlank() ? "1" : version);
+        entry.put("description", description == null ? "" : description);
+        entry.put("url", url.trim());
+        entry.put("sha256", PluginPack.sha256(packJson));
+        return entry;
+    }
+
     /** The configured default registry URL (may be blank). */
     public String defaultRegistryUrl() { return defaultRegistryUrl == null ? "" : defaultRegistryUrl.trim(); }
 

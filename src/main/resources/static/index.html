@@ -219,6 +219,12 @@
         <button id="pluginRegBrowse">Browse registry</button>
       </div>
       <div id="pluginRegList" class="muted" style="font-size:11px;margin-top:4px"></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Publish helper: build a registry entry (pin the hash of your exported pack):</div>
+      <div class="row" style="gap:6px;margin-top:2px;flex-wrap:wrap;align-items:center">
+        <input id="pluginEntryUrl" placeholder="hosted pack URL" style="min-width:170px;flex:1"/>
+        <button id="pluginEntryBuild">Build entry</button>
+      </div>
+      <textarea id="pluginEntryOut" placeholder="registry entry JSON appears here" style="width:100%;height:54px;margin-top:4px;font-size:11px" readonly></textarea>
     </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
@@ -539,6 +545,29 @@ async function installFromRegistry(nameEnc){
   refreshPlugins(); refreshMemoryFiles();
 }
 $("#pluginRegBrowse") && ($("#pluginRegBrowse").onclick = browseRegistry);
+async function buildRegistryEntry(){
+  const url = $("#pluginEntryUrl").value.trim();
+  if (!url){ appendLog("[plugin] enter the hosted pack URL"); return; }
+  const name = ($("#pluginName").value || "workspace-pack").trim();
+  const qs = "/plugin/registry/entry?name=" + encodeURIComponent(name) + "&url=" + encodeURIComponent(url);
+  const r = await fetch(qs, { method:"POST", headers: headers(false) });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ $("#pluginEntryOut").value = "(failed; admin only?)"; return; }
+  if (j.error){ $("#pluginEntryOut").value = j.error; return; }
+  $("#pluginEntryOut").value = JSON.stringify(j, null, 2);
+  appendLog("[plugin] built registry entry for " + (j.name||name));
+}
+$("#pluginEntryBuild") && ($("#pluginEntryBuild").onclick = buildRegistryEntry);
+function runsHtml(runs){
+  if (!Array.isArray(runs) || !runs.length) return "(none)";
+  return runs.slice(0,10).map(r => {
+    const t = r.ts ? new Date(r.ts).toLocaleTimeString() : "";
+    return '<div style="border-top:1px solid var(--border);padding:2px 0">'
+      + escapeHtml(t) + ' · ' + escapeHtml(String(r.endpoint||"")) + ' [' + escapeHtml(String(r.mode||"")) + '] '
+      + (r.ok ? 'ok' : '<span class="muted">failed</span>') + ' ' + (r.ms||0) + 'ms '
+      + '<span class="muted">' + escapeHtml(String(r.session||"")) + '</span></div>';
+  }).join("");
+}
 async function refreshAdmin(){
   const el = $("#adminBody"); if (!el) return;
   const j = await getJson("/admin/overview");
@@ -556,6 +585,7 @@ async function refreshAdmin(){
     + '<div><b>top tools</b> ' + tools + '</div>'
     + '<div><b>tasks</b> ' + (st.enabled||0) + '/' + (st.total||0) + ' enabled · <b>content</b> ' + (c.skills||0) + ' skills, ' + (c.agents||0) + ' agents, ' + (c.commands||0) + ' commands</div>'
     + '<div><b>server</b> ctx ' + (srv.contextTokens||0) + ', cap ' + (srv.promptCap||0) + ', budget ' + (srv.tokenBudget||0) + ', vision ' + (srv.vision?"yes":"no") + '</div>'
+    + '<div style="margin-top:4px"><b>recent runs</b></div>' + runsHtml(j.recentRuns)
     + '<div style="margin-top:4px"><b>recent admin actions</b></div>' + audit;
 }
 $("#refreshAdminLink") && ($("#refreshAdminLink").onclick = refreshAdmin);

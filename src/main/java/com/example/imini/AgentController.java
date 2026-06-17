@@ -128,11 +128,11 @@ public class AgentController {
                          : plan ? loop.runPlan(sessionId, q, mode, new ConsoleSink())
                          : loop.run(sessionId, q, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
-            metrics.recordRun(ms, true);
+            metrics.recordRun("/ask", sessionId, mode.name().toLowerCase(), ms, true);
             metrics.logRun("/ask", sessionId, null, ms, true);
             return Map.of("answer", answer);
         } catch (Exception e) {
-            metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
+            metrics.recordRun("/ask", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
             throw e;
         }
     }
@@ -155,11 +155,11 @@ public class AgentController {
                          : plan ? loop.runPlan(sessionId, message, mode, new ConsoleSink())
                          : loop.chat(sessionId, message, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
-            metrics.recordRun(ms, true);
+            metrics.recordRun("/chat", sessionId, mode.name().toLowerCase(), ms, true);
             metrics.logRun("/chat", sessionId, null, ms, true);
             return Map.of("sessionId", sessionId, "answer", answer);
         } catch (Exception e) {
-            metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
+            metrics.recordRun("/chat", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
             throw e;
         }
     }
@@ -188,13 +188,13 @@ public class AgentController {
                              : plan ? loop.runPlan(sessionId, message, mode, sink)
                              : loop.chat(sessionId, message, mode, sink));
                 long ms = (System.nanoTime() - t0) / 1_000_000L;
-                metrics.recordRun(ms, true);
+                metrics.recordRun("/chat/stream", sessionId, mode.name().toLowerCase(), ms, true);
                 metrics.logRun("/chat/stream", sessionId, null, ms, true);
                 send(emitter, "answer", answer);
                 send(emitter, "done", "");
                 emitter.complete();
             } catch (Exception e) {
-                metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
+                metrics.recordRun("/chat/stream", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
                 send(emitter, "error", String.valueOf(e.getMessage()));
                 emitter.complete();
             }
@@ -223,13 +223,13 @@ public class AgentController {
                              : plan ? loop.runPlan(sessionId, q, mode, sink)
                              : loop.run(sessionId, q, mode, sink));
                 long ms = (System.nanoTime() - t0) / 1_000_000L;
-                metrics.recordRun(ms, true);
+                metrics.recordRun("/ask/stream", sessionId, mode.name().toLowerCase(), ms, true);
                 metrics.logRun("/ask/stream", sessionId, null, ms, true);
                 send(emitter, "answer", answer);
                 send(emitter, "done", "");
                 emitter.complete();
             } catch (Exception e) {
-                metrics.recordRun((System.nanoTime() - t0) / 1_000_000L, false);
+                metrics.recordRun("/ask/stream", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
                 send(emitter, "error", String.valueOf(e.getMessage()));
                 emitter.complete();
             }
@@ -385,11 +385,19 @@ public class AgentController {
                 "promptCap", tokenBudget.promptCap(ctx),
                 "tokenBudget", tokenBudget.budget()));
 
+        out.put("recentRuns", metrics.recentRuns(10));
         out.put("recentAudit", audit.recent("", "", "", 0, Math.max(1, Math.min(50, auditLimit))));
         return out;
     }
 
-    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
+    /** Recent runs (newest first): endpoint, session, resolved mode, duration, outcome. Admin only. */
+    @GetMapping("/admin/runs")
+    public List<Map<String, Object>> adminRuns(@RequestParam(name = "limit", defaultValue = "25") int limit) {
+        requireAdmin();
+        return metrics.recentRuns(Math.max(1, Math.min(200, limit)));
+    }
+
+    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
     @GetMapping("/audit")
     public List<AuditLog.Entry> audit(@RequestParam(name = "user", defaultValue = "") String user,
                                       @RequestParam(name = "action", defaultValue = "") String action,
@@ -607,6 +615,23 @@ public class AgentController {
         Map<String, Object> r = plugins.installFromRegistry(url, name, overwrite);
         audit.record(currentUser(), "plugin-registry-install", name,
                 String.valueOf(r.getOrDefault("verification", r.getOrDefault("error", ""))));
+        return r;
+    }
+
+    /**
+     * Build a registry index entry for the current workspace's pack: {name, version, description, url,
+     * sha256}. Host the exported pack at {@code url}, then paste this entry into your registry index so
+     * others can discover and verify it. Admin (it reads workspace content).
+     */
+    @PostMapping("/plugin/registry/entry")
+    public Map<String, Object> registryEntry(
+            @RequestParam(name = "name", defaultValue = "workspace-pack") String name,
+            @RequestParam(name = "version", defaultValue = "1") String version,
+            @RequestParam(name = "description", defaultValue = "") String description,
+            @RequestParam(name = "url") String url) {
+        requireAdmin();
+        Map<String, Object> r = plugins.registryEntry(name, version, description, url);
+        audit.record(currentUser(), "plugin-registry-entry", name, String.valueOf(r.getOrDefault("sha256", "")));
         return r;
     }
 

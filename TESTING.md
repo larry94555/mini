@@ -2244,3 +2244,38 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `POST /session/settings` with an unknown key or an invalid mode returns an `error` and
   stores nothing; setting requires write access to the session (owner/admin/unowned), while
   `GET /session/settings` is readable by anyone who can read the session.
+
+---
+
+# Run history, resolved-mode-per-turn, and registry publish helper
+
+## 245. RunHistory bounded buffer (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RunHistoryTest` passes -- `add` beyond capacity drops the oldest; `recent(n)` is
+  newest-first and respects the limit (and a limit larger than the size); `recentMaps` exposes
+  endpoint/session/mode/ms/ok; empty/null/zero-capacity are handled without crashing.
+
+## 246. modeSource explains the resolved mode (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionSettingsResolverTest` passes the new case -- `modeSource` returns `explicit` when
+  the request set a valid mode, `session` when only the session default applies, and `global` otherwise
+  (including an invalid request with no session default).
+
+## 247. Run history in the dashboard (manual)
+
+- **Observe:** after a few asks/chats, `GET /admin/runs` (or the *Admin overview* card) lists recent runs
+  newest-first with endpoint, **resolved mode**, latency, outcome, and session; `/admin/overview` embeds
+  the last 10. The buffer is in-memory (resets on restart). Admin only.
+
+## 248. Resolved mode shown per turn (manual)
+
+- **Observe:** a streamed turn's trace shows `[mode] running in <mode>`; with a session default set, a
+  turn that omits `mode` logs that default (and the run-history entry records it).
+
+## 249. Build a registry publish entry (manual)
+
+- **Observe:** `POST /plugin/registry/entry?name=...&url=...` (or the *Plugins* card's **Build entry**)
+  returns `{name, version, description, url, sha256}` where `sha256` is the hash of the exported pack;
+  pasting it into a registry index lets others install-by-name with verification. Admin only.

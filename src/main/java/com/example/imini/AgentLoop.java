@@ -189,6 +189,7 @@ public class AgentLoop {
     }
 
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
+        if (sink != null) sink.log("[mode] running in " + mode.name().toLowerCase());
         if (slash.isHelp(userQuestion)) return slash.help();
         if (project.isMemoryCommand(userQuestion)) return project.report();
         if (init.isInitCommand(userQuestion)) return init.runInit();
@@ -208,6 +209,7 @@ public class AgentLoop {
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
     public String chat(String sessionId, String userMessage, Mode mode, RunSink sink) throws Exception {
+        if (sink != null) sink.log("[mode] running in " + mode.name().toLowerCase());
         if (slash.isHelp(userMessage)) return slash.help();
         if (project.isMemoryCommand(userMessage)) return project.report();
         if (init.isInitCommand(userMessage)) return init.runInit();

@@ -42,4 +42,13 @@ class SessionSettingsResolverTest {
         assertNull(SessionSettingsResolver.normalizeValue("foo", "x"));   // unknown key
         assertNull(SessionSettingsResolver.normalizeValue("mode", null));
     }
+
+    @Test
+    void modeSourceExplainsWhereTheModeCameFrom() {
+        assertEquals("explicit", SessionSettingsResolver.modeSource("auto", "plan"));
+        assertEquals("session", SessionSettingsResolver.modeSource(null, "plan"));
+        assertEquals("session", SessionSettingsResolver.modeSource("  ", "auto"));
+        assertEquals("global", SessionSettingsResolver.modeSource(null, null));
+        assertEquals("global", SessionSettingsResolver.modeSource("bogus", null)); // invalid request, no session
+    }
 }
