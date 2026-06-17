@@ -11,8 +11,12 @@ No cloud API key is required.
 
 ## Start here
 
+- **New here? Start with [`GettingStarted.md`](GettingStarted.md)** — the newbie front door (simple test +
+  recommended learning path + the docs to use).
 - First-time install: [`INSTALL.md`](INSTALL.md)
+- Core terms in plain language: [`docs/GLOSSARY.md`](docs/GLOSSARY.md)
 - Guided learning path: [`docs/LEARNING_PATH.md`](docs/LEARNING_PATH.md)
+- Guided 90-minute workshop (labs + test checkpoints): [`docs/WORKSHOP.md`](docs/WORKSHOP.md)
 - End-to-end edit trace: [`docs/TRACE_EDIT.md`](docs/TRACE_EDIT.md)
 - Claude Code concept map: [`docs/CONCEPT_MAP.md`](docs/CONCEPT_MAP.md)
 - Feature tests and manual scenarios: [`TESTING.md`](TESTING.md)
@@ -1193,15 +1197,15 @@ Identity comes from the API key (see RBAC: legacy `auth.keys` are admins; `auth.
 
 ## Recommended learning sequence
 
-1. Read `docs/LEARNING_PATH.md`.
-2. Run the app with `run.bat`.
-3. Try one simple `ask.bat` prompt.
-4. Try a repo-navigation prompt.
-5. Try plan mode.
-6. Try a scratch-file edit and rewind.
-7. Read `docs/TRACE_EDIT.md`.
-8. Run `mvn test`.
-9. Read `docs/CONCEPT_MAP.md`.
+Newcomers should start with **[`GettingStarted.md`](GettingStarted.md)**, which packages the path below
+(and a one-page document index) for a first-time reader. In short:
+
+1. Run the simple test in `GettingStarted.md` (`run.bat`, then one `ask.bat` prompt).
+2. Read `docs/GLOSSARY.md` (eight core terms).
+3. Skim `ARCHITECTURE.md` sections 1–2 for the mental model.
+4. Work through `docs/LEARNING_PATH.md` (14 modules) — or run `docs/WORKSHOP.md` as a guided ~90-minute
+   session with labs and `mvn test` checkpoints.
+5. Read `docs/TRACE_EDIT.md`, run `mvn test`, then read `docs/CONCEPT_MAP.md`.
 
 ## Current best next engineering step
 

@@ -179,20 +179,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The five numbered priorities and every Later-priority workflow item are now done, including
-capability-gated image input and a plugin registry (install-by-URL with SHA-256). The harness
-now covers the commonly-used Claude Code-style capabilities end to end. Remaining work is polish
-and the project's stated educational goal:
+Feature work for the harness's scope is complete, and the educational packaging now has a clear
+front door: **GettingStarted.md** (newbie setup + learning path + document index), a guided
+**docs/WORKSHOP.md** (90-minute labs with `mvn test` checkpoints), and a plain-language
+**docs/GLOSSARY.md**, on top of the existing LEARNING_PATH / ARCHITECTURE / TRACE_EDIT /
+CONCEPT_MAP. Remaining work is polish:
 
-- **educational packaging / workshop materials** -- a guided, tier-by-tier walkthrough (the repo
-  is a teaching harness), turning the existing tiers + TESTING cases into a course,
-- richer admin/observability views (metrics, run history) in the web UI,
-- a registry index (discover packs, not just install one by URL); durable per-session settings.
+- **richer admin/observability views** -- surface the existing metrics, run history, and the new
+  scheduled-task/plugin activity in the web UI (useful for demos and teaching),
+- a plugin **registry index** (discover packs, not just install one by URL),
+- durable per-session settings.
 
-The recommended next step is **educational packaging / workshop materials**: the codebase is now
-feature-complete for its scope, and its differentiator is being a readable, teachable
-build-your-own-agent harness. Packaging the tiers into a guided curriculum (with the deterministic
-tests as checkpoints) delivers the most value from here and needs no model dependency.
+The recommended next step is **richer admin/observability views**: the project is now
+feature- and docs-complete for its scope, and making the agent's internals *visible* in the UI
+(metrics, recent runs, scheduled tasks, audit) is the highest-value remaining polish for both
+demos and the workshop, and needs no model dependency.
 
 ## 3. Guidance for AI implementers
 
@@ -324,8 +325,8 @@ coverage roadmap.
 Possible future work:
 
 - ~~plugin packaging~~ (done),
-- educational packaging,
-- workshop/course materials,
+- ~~educational packaging~~ (done -- GettingStarted + Workshop + Glossary),
+- ~~workshop/course materials~~ (done -- docs/WORKSHOP.md),
 - consulting-oriented demos,
 - open-core packaging experiments.
 
@@ -333,6 +334,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Educational packaging / workshop materials: a newbie front-door `GettingStarted.md` (simple test +
+  recommended learning path + a one-page document index), a guided `docs/WORKSHOP.md` (~90-minute, five
+  labs, each with a `mvn test` checkpoint), and a plain-language `docs/GLOSSARY.md` (eight core terms);
+  README "Start here" and "Recommended learning sequence" now lead with these. Docs-only, no code change.
 - Image (multimodal) input, capability-gated: an image attached to a one-shot `ask` is sent to the model
   in the OpenAI `image_url` format when the model is vision-capable (`model.vision-enabled` or a `/props`
   probe); on a text-only model it is dropped with a note so the turn still runs. Pure `VisionContent`
