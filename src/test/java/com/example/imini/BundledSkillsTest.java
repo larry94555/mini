@@ -33,7 +33,15 @@ class BundledSkillsTest {
 
     @Test
     void bundledSkillNamesAreNotReservedCommands() {
+        // `loop` is intentionally reserved: the first-class `/loop` command supersedes the bundled loop
+        // skill (see SkillInvocation.RESERVED). Every OTHER bundled skill must remain directly invokable,
+        // i.e. not shadowed by a reserved command name.
         for (String name : BUNDLED) {
+            if (name.equals("loop")) {
+                assertTrue(SkillInvocation.isReserved(name),
+                        "loop should be reserved so the /loop command takes precedence over the loop skill");
+                continue;
+            }
             assertTrue(!SkillInvocation.isReserved(name), name + " collides with a reserved command");
         }
     }

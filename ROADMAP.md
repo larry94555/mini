@@ -173,23 +173,26 @@ These are still valuable, but they come after the top five workflow features.
 
 - ~~LSP-backed code intelligence~~ (go-to-def via `find_symbol`, find-refs via `find_references`).
 - ~~Session fork / rename / export UX polish~~ (done -- rename/fork/export + titles).
-- `/loop` and scheduled local tasks.
+- ~~`/loop` and scheduled local tasks~~ (done -- bounded iterate-until-green + local scheduler).
 - Image input.
 - Plugin packaging.
 
 ## 2. Current recommended priority
 
-All five numbered priorities, hunk-level approval, LSP-style code intelligence, and session
-fork/rename/export UX are now done. Remaining **Later priorities**:
+All five numbered priorities plus the Later-priority workflow items (hunk-level approval,
+LSP-style code intelligence, session fork/rename/export, configurable token budget + auto
+plan-mode fallback, and `/loop` + scheduled tasks) are done. Remaining **Later priorities**:
 
-- `/loop` and scheduled local tasks (a bounded, first-class iterate-until-green command),
+- **durable settings + scheduled tasks** -- persist the token budget and scheduled tasks (and
+  future toggles) so runtime changes and schedules survive a restart (a small settings/tasks
+  table + reload-on-start); this directly hardens the two most recent features,
 - image (multimodal) input, where the local model supports it,
 - plugin packaging.
 
-The recommended next step is **`/loop` + scheduled local tasks**: it makes the agentic
-iterate-until-green pattern a first-class, *bounded* command (complementing the existing `loop`
-skill and the verification/check tooling), has high everyday value, and is fully
-local-model-compatible. Image input is lower priority here because most local llama.cpp setups
+The recommended next step is **durable settings + scheduled tasks**: it is high-leverage (small,
+deterministic persistence on top of the existing SQLite migration runner), removes the main
+caveat of the last two PRs (in-memory budget + in-memory schedules), and is fully
+local-model-independent. Image input remains lower priority because most local llama.cpp setups
 are not vision-capable, so it would ship gated/optional.
 
 ## 3. Guidance for AI implementers
@@ -331,6 +334,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- `/loop` + scheduled local tasks: `/loop [check=<cmd>] [attempts=N] <goal>` is a bounded
+  iterate-until-green command (make a change, run the Sandbox-screened check, repeat until it passes or
+  the attempt budget is spent; supersedes the `loop` skill). Local **scheduled tasks** run a prompt after
+  a delay or on an interval, unattended in AUTO mode, as run/plan/loop (in-memory, single-node). Pure
+  `LoopCommand` + `Schedule` unit-tested; `ScheduledTasks` owns the ticker.
 - Automatic plan-mode fallback: when a normal turn's assembled prompt would exceed the enforced token cap,
   the harness auto-runs it in plan mode (decompose into steps, each within budget) instead of trimming to
   force a one-shot answer -- on by default (`agent.plan.auto-fallback`), never re-triggers an explicit

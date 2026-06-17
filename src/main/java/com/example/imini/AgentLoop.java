@@ -39,6 +39,8 @@ public class AgentLoop {
     @Value("${agent.profile:general}")
     private String profile;          // general (default) | coding
     @Value("${agent.plan.auto-fallback:true}") private boolean planAutoFallback;
+    @Value("${agent.loop.max-attempts:5}") private int loopMaxAttempts;
+    @Value("${agent.loop.hard-max-attempts:20}") private int loopHardMax;
     @Value("${agent.plan.step-retries:1}") private int planStepRetries;
     @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
     @Value("${agent.plan.verify:true}") private boolean planVerify;
@@ -174,6 +176,7 @@ public class AgentLoop {
         if (project.isMemoryCommand(userQuestion)) return project.report();
         if (init.isInitCommand(userQuestion)) return init.runInit();
         if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
+        if (LoopCommand.isLoop(userQuestion)) return runLoop(sessionId, userQuestion, mode, sink);
         String agentReply = maybeAgentCommand(userQuestion, sink);
         if (agentReply != null) return agentReply;
         String forked = maybeForkedSkill(userQuestion, sessionId, sink);
@@ -192,6 +195,7 @@ public class AgentLoop {
         if (project.isMemoryCommand(userMessage)) return project.report();
         if (init.isInitCommand(userMessage)) return init.runInit();
         if (skills.isSkillsCommand(userMessage)) return skills.skillsReport(sessionId);
+        if (LoopCommand.isLoop(userMessage)) return runLoop(sessionId, userMessage, mode, sink);
         String agentReply = maybeAgentCommand(userMessage, sink);
         if (agentReply != null) return agentReply;
         String forked = maybeForkedSkill(userMessage, sessionId, sink);
@@ -219,6 +223,58 @@ public class AgentLoop {
      * turn (checking it off), then synthesize a final answer. Falls back to a normal run if no plan
      * could be parsed. Each step is a focused one-shot run so a small model stays on task.
      */
+    /**
+     * Bounded "iterate until green": make a focused change toward the goal, run the check, and repeat
+     * until it passes or the attempt budget is spent. {@code /loop [check=<cmd>] [attempts=N] <goal>}.
+     * Each attempt is a normal turn (so it benefits from the token budget + auto plan fallback); the
+     * check is screened by the same Sandbox as run_command.
+     */
+    public String runLoop(String sessionId, String message, Mode mode, RunSink sink) throws Exception {
+        LoopCommand.Spec spec = LoopCommand.parse(message, loopMaxAttempts, loopHardMax);
+        if (spec.goal().isBlank()) {
+            return "Usage: /loop [check=<command>] [attempts=N] <goal>. "
+                    + "Example: /loop check=\"mvn -q test\" attempts=4 make the failing test pass.";
+        }
+        boolean hasCheck = spec.check() != null && !spec.check().isBlank();
+        sink.log("[loop] goal=\"" + spec.goal() + "\""
+                + (hasCheck ? " check=\"" + spec.check() + "\"" : " (no check -> single pass)")
+                + " maxAttempts=" + spec.maxAttempts());
+
+        String lastFailure = null;
+        boolean passed = false;
+        int attempt = 0;
+        StringBuilder summary = new StringBuilder();
+        while (true) {
+            attempt++;
+            sink.log("[loop] attempt " + attempt + "/" + spec.maxAttempts());
+            String prompt = LoopCommand.nextPrompt(spec.goal(), attempt, lastFailure);
+            String answer = run(sessionId, prompt, mode, sink);
+            summary.append("Attempt ").append(attempt).append(": ")
+                   .append(oneLine(answer)).append("\n");
+
+            if (!hasCheck) { passed = true; break; }     // no check -> one pass, report
+            Planner.CheckResult r = checks.run(spec.check());
+            sink.log("[loop] check " + (r.passed() ? "PASSED" : "failed") + " (" + spec.check() + "): " + r.detail());
+            summary.append("  check: ").append(r.passed() ? "passed" : "failed -> " + oneLine(r.detail())).append("\n");
+            if (r.passed()) { passed = true; break; }
+            lastFailure = r.detail();
+            if (!LoopCommand.shouldContinue(attempt, spec.maxAttempts(), false, true)) break;
+        }
+
+        String head = passed
+                ? (hasCheck ? "Loop succeeded: the check passed on attempt " + attempt + "."
+                            : "Ran the goal once (no check was provided).")
+                : "Loop stopped after " + attempt + " attempt(s) without passing the check. "
+                        + "Last failure: " + oneLine(lastFailure) + ". Consider a different approach or a higher attempts= budget.";
+        return head + "\n\n" + summary.toString().stripTrailing();
+    }
+
+    private static String oneLine(String s) {
+        if (s == null) return "";
+        String t = s.replace("\n", " ").strip();
+        return t.length() > 200 ? t.substring(0, 200) + "..." : t;
+    }
+
     public String runPlan(String sessionId, String goal, Mode mode, RunSink sink) throws Exception {
         if (slash.isHelp(goal)) return slash.help();
         final String g = slash.expand(goal);
