@@ -63,6 +63,8 @@ public class AgentController {
     private final SkillRequests skillRequests;
     private final ProjectContext project;
     private final InitService init;
+    private final TokenBudgetService tokenBudget;
+    private final LlamaClient llama;
     private final PreviewStore previews;
     private final BuiltinTools builtins;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -72,7 +74,8 @@ public class AgentController {
                            RetrievalService retrieval, Metrics metrics, Approvals approvals,
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
                            SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init,
-                           PreviewStore previews, BuiltinTools builtins) {
+                           PreviewStore previews, BuiltinTools builtins,
+                           TokenBudgetService tokenBudget, LlamaClient llama) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -90,6 +93,8 @@ public class AgentController {
         this.skillRequests = skillRequests;
         this.project = project;
         this.init = init;
+        this.tokenBudget = tokenBudget;
+        this.llama = llama;
         this.previews = previews;
         this.builtins = builtins;
     }
@@ -495,6 +500,28 @@ public class AgentController {
 
     /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
     /** Project what an import would do (counts before/incoming/after) without applying it. */
+    /** Current token budget for llama-server calls (configured budget, enforced prompt cap, server n_ctx). */
+    @GetMapping("/settings/token-budget")
+    public Map<String, Object> getTokenBudget() {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("budget", tokenBudget.budget());
+        out.put("reservedResponse", tokenBudget.reservedResponse());
+        int ctx = llama.serverContext();
+        out.put("serverContext", ctx);          // 0 = unknown
+        out.put("promptCap", tokenBudget.promptCap(ctx));
+        out.put("min", TokenBudgetService.MIN_BUDGET);
+        return out;
+    }
+
+    /** Set the token budget at runtime (admin). Floored at the minimum; returns the effective settings. */
+    @PostMapping("/settings/token-budget")
+    public Map<String, Object> setTokenBudget(@RequestParam(name = "tokens") int tokens) {
+        requireAdmin();
+        int set = tokenBudget.setBudget(tokens);
+        audit.record(currentUser(), "settings", "token-budget", "set=" + set);
+        return getTokenBudget();
+    }
+
     /** Friendly titles for the readable sessions (id -> title); powers the session list labels. */
     @GetMapping("/session/titles")
     public Map<String, String> sessionTitles() {

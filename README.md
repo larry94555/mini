@@ -92,6 +92,8 @@ No cloud API key is required.
 | `SessionBundle.java` | Pure build/validate/extract/migrate of a portable session export bundle |
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
+| `TokenBudget.java` | Pure token estimate + fit-the-prompt-to-a-budget logic |
+| `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
 | `SkillManifest.java` | Pure skill-registry manifest: parse, lexical search, SHA-256 verify |
@@ -183,6 +185,8 @@ http://localhost:8081
 | `GET /session/titles` | Friendly titles for readable sessions (`id -> title`) |
 | `POST /session/rename?sessionId=&title=` | Set/clear a session's title (owner/admin) |
 | `POST /session/fork?sessionId=&title=` | Copy a session (conversation + plans + todos) into a new one you own |
+| `GET /settings/token-budget` | Current token budget, enforced prompt cap, and server `n_ctx` |
+| `POST /settings/token-budget?tokens=` | Set the per-call token budget at runtime (admin) |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -551,6 +555,56 @@ In short: memory is *passive and ever-present* (context the agent always has), a
 you reach for* (instructions for a particular kind of task), and a subagent is *a worker you hand a job
 to* (an isolated loop that returns a summary). They compose -- e.g. a `code-review` skill can rely on the
 conventions your `CLAUDE.md` memory establishes.
+
+## Token budget and context limits
+
+A local model has a fixed **context window** (`n_ctx`). If a request's prompt exceeds it, llama-server
+rejects the whole call:
+
+```
+llama-server error 400: request (8509 tokens) exceeds the available context size (8192 tokens)
+```
+
+`imini` prevents this with a **configurable per-call token budget**. Before every model call the harness
+measures the prompt (llama-server's real `/tokenize` count, with a `chars/4` fallback) and, if it would
+exceed the enforced cap, **shrinks the message list to fit** -- deterministically and structure-aware:
+
+1. oversized individual messages (a big tool result or pasted file) are **condensed/truncated** to a fair
+   share, with a `...[trimmed to fit the token budget]...` marker;
+2. if still over, the **oldest middle messages are dropped** (the system message and the latest message
+   -- which carries your actual request -- are always kept);
+3. as a last resort the latest (then system) message is truncated, so the call *always* fits.
+
+This complements the existing higher-level compaction (`ContextManager`, which folds old turns into a
+durable `[MEMORY]` note); the budget is the **hard backstop** that guarantees the request never 400s.
+
+**The budget.** `agent.max-prompt-tokens` (default **8500**) is the maximum tokens for one call (prompt +
+the reserved response). The enforced **prompt cap** is `budget − agent.max-tokens`, and is additionally
+**clamped to the server's detected `n_ctx`** -- so even a budget larger than the model's window cannot
+overflow it. On an 8192-context server with the defaults, the prompt is capped at `min(8500, 8192) − 1024
+= 7168` tokens, which fixes the error above out of the box.
+
+**Changing it.** Set it in the config file:
+
+```
+agent.max-prompt-tokens=8500
+```
+
+or at runtime in the web UI's **Token budget** card, or over HTTP:
+
+```
+curl "localhost:8080/settings/token-budget"                 -H "X-API-Key: <key>"   # view
+curl -X POST "localhost:8080/settings/token-budget?tokens=7000" -H "X-API-Key: <admin-key>"  # set
+```
+
+> Tip: set the budget at or below your server's context size. Lower it if you still see context errors
+> (e.g. a very large system prompt or memory file); raise it if your model has a bigger window.
+>
+> Honest scope: when a *single* request is genuinely larger than the window, trimming preserves the
+> request but condenses surrounding context; for work that truly needs more than one window, use **plan
+> mode** (`plan=true`) to split it into steps, each of which runs within the budget. Token measurement is
+> exact when `/tokenize` is reachable and an estimate otherwise, so a small safety margin (the response
+> reservation + the `n_ctx` clamp) absorbs estimation error.
 
 ## Context references (`@file` / `@directory`)
 

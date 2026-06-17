@@ -2007,3 +2007,35 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** the **export** button downloads `<id>.imini-session.json` (the same bundle as
   `GET /session/export`), which can be re-imported via the bundle import flow.
+
+---
+
+# Configurable token budget (context-overflow fix)
+
+## 217. TokenBudget estimate + fit (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `TokenBudgetTest` passes -- `estimate` is ~chars/4 (min 1 for non-empty); `fit` leaves a
+  fitting list unchanged, otherwise reduces it to at/under the cap while always keeping the system message
+  and the (intact) last message; an oversized single message is truncated with a "trimmed to fit" marker;
+  `truncateToTokens` respects the target.
+
+## 218. Budget is enforced before a call (manual)
+
+- **Setup:** a server with a small context (e.g. `n_ctx=8192`); send a turn whose prompt would exceed it.
+- **Observe:** instead of a `400 exceeds the available context size`, the call succeeds; the log shows a
+  `[token-budget] prompt ~N tok > cap C ... trimmed/dropped` line. With defaults on an 8192 server the
+  enforced prompt cap is `min(8500,8192) − 1024 = 7168`.
+
+## 219. View/set the budget in the UI and config (manual)
+
+- **Observe:** the *Token budget* card shows the current budget and the enforced prompt cap (with the
+  server `n_ctx`); editing the value and clicking **Save** updates it (admin), and `GET/POST
+  /settings/token-budget` reflect the change. Setting `agent.max-prompt-tokens` in the config file changes
+  the startup default; values below the minimum are floored.
+
+## 220. Plan mode for genuinely oversized work (manual)
+
+- **Observe:** for a request that cannot fit in one window even after trimming, running with `plan=true`
+  splits it into steps, each executed within the budget, so the overall task completes without a context
+  error.
