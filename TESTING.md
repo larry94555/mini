@@ -1,5 +1,8 @@
 # Testing imini, feature by feature
 
+> Teaching with these tests? `docs/WORKSHOP.md` packages a subset into lab checkpoints, e.g.
+> `mvn test -Dtest=CodebaseToolsTest`, `BadModelBehaviorTest`, `TokenBudgetTest,PlanFallbackTest`.
+
 Each test lists the **setup** you need, the **command/prompt** to run, and **what to observe**.
 
 ## Before you start
