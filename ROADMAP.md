@@ -179,19 +179,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope and the persistence story is now complete: global
-settings, scheduled tasks, per-session skill toggles, and now a durable **per-session default
-mode** all survive a restart. Remaining work is small polish:
+The harness is feature-complete for its scope; observability, the plugin lifecycle
+(export -> install-by-URL -> discover -> publish), and the persistence story are all done, and
+each turn now reports its resolved mode. The codebase is a polished, teachable
+build-your-own-agent harness. Remaining ideas are genuinely optional:
 
-- a lightweight **run history** view (recent runs with status/latency/session) surfaced in the
-  admin dashboard, building on the existing metrics,
-- a **registry publish helper** -- generate a registry index entry (name/version/url/sha256) for
-  a pack you exported, making it easy to host a registry,
-- minor UX: show the active resolved mode per turn in the trace/UI.
+- **persist run history** -- keep the recent-runs list across restarts (a small table), so the
+  dashboard survives a restart like settings and scheduled tasks already do,
+- **export/scrape-friendly metrics** -- a Prometheus-style `/metrics` text format for external
+  monitoring,
+- **a guided in-app tour** that ties the web UI cards to the GettingStarted/Workshop docs.
 
-The recommended next step is the **run history view**: it builds directly on the metrics + admin
-dashboard already shipped, is fully local/text-only, and is the most useful remaining observability
-addition for demos and the workshop (seeing recent runs, their status, and latency at a glance).
+The recommended next step is **persist run history**: it is the last in-memory-only piece of the
+now-durable observability/state story, is small (reuses the SQLite/migration pattern), and keeps
+the dashboard useful across restarts. If you would rather face outward, **scrape-friendly
+metrics** is the strongest alternative for real monitoring.
 
 ## 3. Guidance for AI implementers
 
@@ -332,6 +334,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Run history view + resolved-mode-per-turn + registry publish helper: the admin dashboard now lists
+  recent runs (endpoint, resolved mode, latency, outcome) via a bounded `RunHistory` buffer
+  (`GET /admin/runs`, embedded in `/admin/overview`); every turn logs `[mode] running in <mode>` to its
+  trace and records the resolved mode; and `POST /plugin/registry/entry` builds a registry index entry
+  (with the pack's SHA-256) so you can host your own registry. Pure `RunHistory` + `modeSource` unit-tested.
 - Durable per-session settings: a session remembers its default permission mode across restarts
   (`session_settings` table), layered as request mode > session default > global `ask`; `GET/POST
   /session/settings`, `POST /session/settings/clear`, and a toolbar dropdown. Pure

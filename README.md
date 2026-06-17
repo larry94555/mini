@@ -107,6 +107,7 @@ No cloud API key is required.
 | `PluginRegistry.java` | Pure registry-index model + parse/search/lookup |
 | `VisionContent.java` / `VisionSupport.java` | Pure multimodal content building + vision capability gate |
 | `AdminFormat.java` | Pure dashboard formatting (uptime, top-N tallies, success rate) |
+| `RunHistory.java` | Pure bounded ring buffer of recent runs (for the dashboard) |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -213,6 +214,7 @@ http://localhost:8081
 | `POST /plugin/install-url?url=&sha256=` | Install a pack from a URL, verified by SHA-256 (admin) |
 | `GET /plugin/registry?url=` | Browse a registry index (list advertised packs) |
 | `POST /plugin/registry/install?url=&name=` | Install a pack by name from a registry, pinned to its hash (admin) |
+| `POST /plugin/registry/entry?name=&version=&url=` | Build a registry index entry (with SHA-256) for your pack (admin) |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -253,7 +255,8 @@ http://localhost:8081
 | `GET /health` | Health check |
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
-| `GET /admin/overview` | Consolidated admin dashboard snapshot (admin only) |
+| `GET /admin/overview` | Consolidated admin dashboard snapshot, incl. recent runs (admin only) |
+| `GET /admin/runs?limit=` | Recent runs: endpoint, session, resolved mode, latency, outcome (admin) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
 | `GET /audit/export?format=csv\|json&since=&until=&...` | Download the (filtered, windowed) audit trail (admin) |
 | `GET /session/activity?sessionId=&offset=&limit=` | This session's events (anyone with session access) |
@@ -663,9 +666,23 @@ the bytes the registry advertises (refused on mismatch; `unpinned` if the regist
 default registry with `plugins.registry-url=` so you can browse without passing `url=` each time. The
 *Plugins* card has a **Browse registry** button that lists packs with per-pack install links.
 
+**Publishing a pack to a registry.** To host your own registry, export a pack, put it at a URL, and add
+an entry to your index. The harness builds the entry for you -- including the pack's SHA-256 -- with
+`POST /plugin/registry/entry?name=&version=&url=` (the *Plugins* card has a **Build entry** field):
+
+```
+curl -X POST "localhost:8080/plugin/registry/entry?name=web-tools&version=2&url=https://example.com/web-tools.imini-plugin.json" \
+     -H "X-API-Key: <admin-key>"
+# -> {"name":"web-tools","version":"2","description":"","url":"https://...","sha256":"<hex>"}
+```
+
+Paste the returned object into your registry index's `packs` array. The `sha256` matches what the pack
+will hash to, so anyone installing it gets the verified bytes.
+
 > Honest scope: the registry is just a fetched JSON list -- there is no central/official index, no
 > signing or trust-root, and no dependency resolution. Trust a registry as much as you trust the site
-> hosting it; the SHA-256 pin protects integrity (you get the advertised bytes), not provenance.
+> hosting it; the SHA-256 pin protects integrity (you get the advertised bytes), not provenance. The
+> publish helper hashes the pack as it would be exported now; re-run it if the workspace changes.
 
 > Honest scope: install **validates and sanitizes every entry** -- the `type` must be one of
 > skill/agent/command and the `name` is reduced to a safe bare id (no path separators or `..` traversal),
@@ -1055,6 +1072,11 @@ Setting the default mode applies to the persistent `chat` paths (the one-shot `a
 session, so pass `mode` there). Values are validated (`mode` must be `ask`/`auto`/`plan`); setting
 requires write access to the session.
 
+**Seeing which mode a turn used.** Because the mode can now come from a session default, each run logs
+the resolved mode to its trace -- a `[mode] running in auto` line appears in the live activity/stream --
+and the admin **run history** records the resolved mode per run. So you can always tell whether a turn
+ran in ask, auto, or plan and why.
+
 > Honest scope: the only per-session key today is `mode` (the validation/precedence is a small pure
 > resolver). The store is generic (`session_settings`), so adding keys later is a one-line whitelist
 > change. A fork starts without inherited settings; clearing a key reverts to the global default.
@@ -1222,6 +1244,15 @@ curl "localhost:8080/admin/overview" -H "X-API-Key: <admin-key>"
 ```
 
 Click **refresh** on the card to re-poll. It's a read-only view; non-admins simply see "(admin only)".
+
+**Run history.** The dashboard also lists the most **recent runs** -- each with its endpoint, the
+**resolved mode** that turn ran in, duration, outcome, and session. The overview embeds the last 10;
+`GET /admin/runs?limit=N` returns more (newest first, up to 200). It is a bounded in-memory ring buffer,
+so it shows recent activity at a glance (it resets on restart).
+
+```
+curl "localhost:8080/admin/runs?limit=25" -H "X-API-Key: <admin-key>"
+```
 
 > Honest scope: metrics are **in-process** -- they reset when the app restarts and are not aggregated
 > across nodes. Latency/throughput are simple counters (no histograms/percentiles). The dashboard is a

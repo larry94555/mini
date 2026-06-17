@@ -49,4 +49,15 @@ public final class SessionSettingsResolver {
         }
         return isValidMode(globalDefault) ? globalDefault.trim().toLowerCase(Locale.ROOT) : "ask";
     }
+
+    /**
+     * Where the effective mode came from, for showing the user why a turn ran as it did:
+     * "explicit" (the request set a valid mode), "session" (the session's stored default applied), or
+     * "global" (neither, so the global default was used).
+     */
+    public static String modeSource(String requestMode, String sessionMode) {
+        if (requestMode != null && !requestMode.isBlank() && isValidMode(requestMode)) return "explicit";
+        if (sessionMode != null && isValidMode(sessionMode)) return "session";
+        return "global";
+    }
 }

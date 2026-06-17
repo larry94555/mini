@@ -31,6 +31,7 @@ public class Metrics {
     private final AtomicLong runLatencyTotalMs = new AtomicLong();
     private final AtomicLong runLatencyMaxMs = new AtomicLong();
     private final AtomicLong approxOutputChars = new AtomicLong();
+    private final RunHistory history = new RunHistory(200);
 
     public Metrics(RunService runService) {
         this.runService = runService;
@@ -58,6 +59,17 @@ public class Metrics {
         runLatencyCount.incrementAndGet();
         runLatencyTotalMs.addAndGet(ms);
         runLatencyMaxMs.accumulateAndGet(ms, Math::max);
+    }
+
+    /** Record a run AND append it to the run-history ring buffer (endpoint/session/mode for the dashboard). */
+    public void recordRun(String endpoint, String session, String mode, long ms, boolean ok) {
+        recordRun(ms, ok);
+        history.add(new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok));
+    }
+
+    /** Most recent runs (newest first) as plain maps, for the admin run-history view. */
+    public java.util.List<java.util.Map<String, Object>> recentRuns(int n) {
+        return history.recentMaps(n);
     }
 
     /** Structured one-line run log for tailing/grep. */
