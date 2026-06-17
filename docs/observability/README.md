@@ -56,4 +56,12 @@ the thresholds to your traffic. Because imini's counters reset on restart, the f
 The counters are **in-process**: they reset when imini restarts and are not aggregated across nodes, and
 there are no histograms/percentiles. Scraping into Prometheus is exactly how you get retention and
 history on top of those instantaneous counters. Built-in alerting is not part of imini itself; the bundled `alert-rules.yml` shows how to add it at the
-Prometheus layer.
+Prometheus layer, and [`alertmanager.yml`](alertmanager.yml) shows how to route the resulting alerts.
+
+### Routing alerts with Alertmanager
+
+`prometheus.yml` points Prometheus at an Alertmanager (`alerting.alertmanagers`, default `localhost:9093`).
+[`alertmanager.yml`](alertmanager.yml) is a minimal routing config: a default receiver, a `severity=critical`
+route that notifies sooner, and an inhibit rule so a critical alert mutes matching warnings. Replace the
+webhook URLs with your real webhook/email/Slack integration, then run
+`alertmanager --config.file=alertmanager.yml` (validate with `amtool check-config alertmanager.yml`).

@@ -179,21 +179,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is complete for its educational scope. This iteration closed the last coherent gaps:
-scheduled tasks now have per-run history, bundles can be signed/verified (shared-secret HMAC),
-and the Grafana sample has runs-by-endpoint and requests-by-key panels. The observability,
-plugin, persistence, onboarding, and import-safety stories are all done.
+The harness is complete for its educational scope, and this iteration hardened the last edges:
+bundles can be signed with **public-key (Ed25519)** signatures (true third-party provenance),
+scheduled-task run history is now **durable**, and the observability sample includes an
+**Alertmanager** routing config. Every story -- agent loop, tools, safety, persistence,
+observability, plugin lifecycle, onboarding, import safety, signing -- is closed out.
 
-There is no remaining high-leverage feature; the project is effectively finished for its stated
-goals. Genuinely optional extras, if the project continues:
+There is no remaining high-leverage work; the project is finished for its stated goals. Anything
+further would be scope expansion rather than completion, for example:
 
-- **public-key bundle signatures** -- upgrade the shared-secret HMAC to asymmetric signing so
-  verification needs only a public key (true third-party provenance),
-- **persist scheduled-task run history** -- keep per-task executions across restarts (small table),
-- **alerting docs expansion** -- a worked Alertmanager routing example for the bundled rules.
+- a **multi-key / keyring** verifier (trust several publisher public keys, with key ids),
+- **signed plugin packs** (extend signing from workspace bundles to individual packs/registry),
+- a **hosted demo / container image** to make first-run even easier.
 
-If continuing, **public-key bundle signatures** is the most valuable hardening; otherwise this is
-a reasonable place to consider the harness done.
+Recommendation: consider the harness done. If continuing, a **verifier keyring** (multiple trusted
+public keys) is the most natural extension of the public-key signing just shipped.
 
 ## 3. Guidance for AI implementers
 
@@ -334,6 +334,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Public-key bundle signatures + durable scheduled-task run history + Alertmanager routing: bundles can be
+  signed/verified with Ed25519 (mint keys via `POST /workspace/keygen`; signer sets the private key,
+  verifiers only the public key), preferred over the existing HMAC; per-task run history now persists
+  (`scheduled_task_runs` table, reloaded on startup); and `docs/observability/alertmanager.yml` plus a
+  Prometheus `alerting` block route the bundled alert rules. Pure `BundleSignature` Ed25519 unit-tested.
 - Scheduled-task run history + bundle signing + richer Grafana panels: each scheduled task keeps a short
   in-memory run log (`GET /schedule/runs`, plus a global `/schedule:<kind>` run-history/metrics feed);
   workspace/plugin bundles can be signed and verified with a shared-secret HMAC (`bundle.signing-secret`,

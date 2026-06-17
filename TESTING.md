@@ -2423,3 +2423,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the updated `docs/observability/grafana-dashboard.json` imports cleanly and adds **Runs by
   endpoint** (`imini_runs_by_endpoint`) and **Requests by API key** (`imini_requests_by_key`) panels
   alongside the existing ones.
+
+---
+
+# Public-key signatures, durable task history, and Alertmanager routing
+
+## 269. Ed25519 keygen / sign / verify (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `BundleSignatureTest` passes the new cases -- `generateKeyPair` returns an `ed25519`
+  public/private pair; `signEd25519` + `verifyEd25519` round-trip; a tampered payload, the wrong public
+  key, a blank key, or a blank signature is rejected. (Ed25519 resolves via the JDK 21 runtime.)
+
+## 270. Sign a bundle with a key pair (manual)
+
+- **Setup:** `POST /workspace/keygen` (or the *Plugins* card's **keygen**); put `privateKey` in
+  `bundle.signing-private-key` on the signer and `publicKey` in `bundle.signing-public-key` on the verifier.
+- **Observe:** `GET /workspace/export` produces a bundle with `signatureAlg: ed25519` and a signature;
+  `POST /workspace/import/preview` and `/workspace/import` report `signature: verified`. Tamper with the
+  pack -> import is **refused** (`invalid`). With only a public key (no private), export is unsigned; with
+  no key for the bundle's scheme, verification reports `no-key`. HMAC mode (`bundle.signing-secret`) still
+  works for older bundles.
+
+## 271. Scheduled-task run history survives a restart (manual)
+
+- **Observe:** after a task fires a few times, `GET /schedule/runs?id=<taskId>` lists executions. Restart
+  the app -> the history is still present (reloaded from `scheduled_task_runs`), pruned to
+  `agent.schedule.run-history.persist-max` (default 50 per task). Without a DB it remains in-memory.
+
+## 272. Alertmanager routing example (manual)
+
+- **Observe:** `docs/observability/prometheus.yml` now has an `alerting.alertmanagers` block pointing at
+  `localhost:9093`; `docs/observability/alertmanager.yml` defines a default receiver, a `severity=critical`
+  route, and an inhibit rule. `amtool check-config alertmanager.yml` validates it; running Alertmanager
+  with it routes alerts fired by `alert-rules.yml`.

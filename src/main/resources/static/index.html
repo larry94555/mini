@@ -253,7 +253,9 @@
         <label class="muted" style="font-size:11px"><input type="checkbox" id="wsOverwrite"/> overwrite on import</label>
         <button id="wsPreview">Preview import</button>
         <button id="wsImport">Import workspace</button>
+        <button id="wsKeygen" title="Generate an Ed25519 key pair for bundle signing">keygen</button>
       </div>
+      <textarea id="wsKeysOut" placeholder="generated key pair (set the keys in application.properties)" style="width:100%;height:54px;margin-top:4px;font-size:11px" readonly></textarea>
       <textarea id="wsJson" placeholder="paste a workspace bundle JSON to import" style="width:100%;height:60px;margin-top:4px;font-size:11px"></textarea>
       <div id="wsPreviewOut" class="muted" style="font-size:11px;margin-top:4px"></div>
     </div>
@@ -664,10 +666,20 @@ async function previewWorkspace(){
     + "pack: create " + (p.create||0) + ", overwrite " + (p.overwrite||0) + ", blocked " + (p.blocked||0) + "<br>"
     + "settings: new " + (st["new"]||0) + ", changed " + (st.changed||0) + ", unchanged " + (st.unchanged||0)
     + ((j.packDetail && (j.packDetail.overwrite||[]).length) ? "<br>would overwrite: " + escapeHtml((j.packDetail.overwrite||[]).join(", ")) : "")
-    + (j.signature ? "<br>signature: " + escapeHtml(String(j.signature)) : "");
+    + (j.signature ? "<br>signature: " + escapeHtml(String(j.signature)) + (j.signatureAlg ? " (" + escapeHtml(String(j.signatureAlg)) + ")" : "") : "");
 }
 $("#wsPreview") && ($("#wsPreview").onclick = previewWorkspace);
 $("#wsImport") && ($("#wsImport").onclick = importWorkspace);
+async function keygenWorkspace(){
+  const r = await fetch("/workspace/keygen", { method:"POST", headers: headers(false) });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ $("#wsKeysOut").value = "(failed; admin only?)"; return; }
+  if (j.error){ $("#wsKeysOut").value = j.error; return; }
+  $("#wsKeysOut").value = "alg=" + j.alg + "\n# signer: bundle.signing-private-key=" + j.privateKey
+    + "\n# verifier: bundle.signing-public-key=" + j.publicKey;
+  appendLog("[workspace] generated Ed25519 key pair (set the keys in application.properties)");
+}
+$("#wsKeygen") && ($("#wsKeygen").onclick = keygenWorkspace);
 function runsHtml(runs){
   if (!Array.isArray(runs) || !runs.length) return "(none)";
   return runs.slice(0,10).map(r => {
