@@ -55,13 +55,15 @@ public class ScheduledTasks {
     @Value("${agent.schedule.tick-seconds:5}") private int tickSeconds;
 
     private final AgentLoop loop;
+    private final Database db;
     private final Map<String, Task> tasks = new ConcurrentHashMap<>();
     private final AtomicLong seq = new AtomicLong(1);
     private ScheduledExecutorService ticker;
     private ExecutorService pool;
 
-    public ScheduledTasks(AgentLoop loop) {
+    public ScheduledTasks(AgentLoop loop, Database db) {
         this.loop = loop;
+        this.db = db;
     }
 
     @PostConstruct
@@ -77,8 +79,9 @@ public class ScheduledTasks {
             t.setDaemon(true);
             return t;
         });
+        reload();
         ticker.scheduleAtFixedRate(this::tick, tickSeconds, tickSeconds, TimeUnit.SECONDS);
-        log.info("[schedule] ticker started (every " + tickSeconds + "s)");
+        log.info("[schedule] ticker started (every " + tickSeconds + "s); " + tasks.size() + " task(s) loaded");
     }
 
     @PreDestroy
@@ -100,6 +103,7 @@ public class ScheduledTasks {
         String id = "task-" + seq.getAndIncrement();
         Task t = new Task(id, sessionId, prompt, k, Schedule.clampSeconds(intervalSeconds), oneShot, first, owner);
         tasks.put(id, t);
+        persist(t);
         log.info("[schedule] added " + id + " kind=" + k + " oneShot=" + oneShot
                 + " first=+" + Schedule.clampSeconds(delaySeconds) + "s");
         return t;
@@ -110,13 +114,16 @@ public class ScheduledTasks {
     }
 
     public boolean cancel(String id) {
-        return tasks.remove(id) != null;
+        boolean removed = tasks.remove(id) != null;
+        if (removed && db.available()) db.update("DELETE FROM scheduled_tasks WHERE id=?", id);
+        return removed;
     }
 
     public boolean setEnabled(String id, boolean on) {
         Task t = tasks.get(id);
         if (t == null) return false;
         t.enabled = on;
+        persist(t);
         return true;
     }
 
@@ -127,6 +134,7 @@ public class ScheduledTasks {
             // reschedule BEFORE running so a long run can't double-fire
             if (t.oneShot) { t.enabled = false; t.nextRunEpochMs = 0; }
             else t.nextRunEpochMs = Schedule.nextRun(now, t.intervalSeconds, false);
+            persist(t);
             pool.submit(() -> runTask(t));
         }
     }
@@ -148,7 +156,43 @@ public class ScheduledTasks {
             t.lastDetail = "error: " + e.getMessage();
             log.warn("[schedule] " + t.id + " failed: " + e.getMessage());
         }
-        if (t.oneShot) tasks.remove(t.id);  // completed one-shot drops off the list
+        if (t.oneShot) {
+            tasks.remove(t.id);                                  // completed one-shot drops off the list
+            if (db.available()) db.update("DELETE FROM scheduled_tasks WHERE id=?", t.id);
+        } else {
+            persist(t);                                          // record runs / lastDetail
+        }
+    }
+
+    private void persist(Task t) {
+        if (!db.available()) return;
+        db.update("INSERT INTO scheduled_tasks(id, session_id, prompt, kind, interval_seconds, one_shot, "
+                + "next_run, enabled, owner, runs, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) "
+                + "ON CONFLICT(id) DO UPDATE SET next_run=excluded.next_run, enabled=excluded.enabled, "
+                + "runs=excluded.runs",
+                t.id, t.sessionId, t.prompt, t.kind, t.intervalSeconds, t.oneShot ? 1 : 0,
+                t.nextRunEpochMs, t.enabled ? 1 : 0, t.owner, t.runs, System.currentTimeMillis());
+    }
+
+    private void reload() {
+        if (!db.available()) return;
+        long now = System.currentTimeMillis();
+        long maxSeq = 0;
+        for (Task t : db.query("SELECT id, session_id, prompt, kind, interval_seconds, one_shot, next_run, "
+                + "enabled, owner, runs FROM scheduled_tasks", rs -> {
+                    Task x = new Task(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                            rs.getLong(5), rs.getInt(6) == 1, Schedule.reloadNextRun(rs.getLong(7), System.currentTimeMillis()),
+                            rs.getString(9));
+                    x.enabled = rs.getInt(8) == 1;
+                    x.runs = rs.getInt(10);
+                    return x;
+                })) {
+            // drop completed one-shots (next_run==0) rather than reloading them
+            if (t.oneShot && t.nextRunEpochMs <= 0) { db.update("DELETE FROM scheduled_tasks WHERE id=?", t.id); continue; }
+            tasks.put(t.id, t);
+            try { maxSeq = Math.max(maxSeq, Long.parseLong(t.id.replace("task-", ""))); } catch (Exception ignore) {}
+        }
+        if (maxSeq > 0) seq.set(maxSeq + 1); // avoid id collisions with reloaded tasks
     }
 
     private static String truncate(String s, int max) {

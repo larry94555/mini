@@ -175,25 +175,26 @@ These are still valuable, but they come after the top five workflow features.
 - ~~Session fork / rename / export UX polish~~ (done -- rename/fork/export + titles).
 - ~~`/loop` and scheduled local tasks~~ (done -- bounded iterate-until-green + local scheduler).
 - Image input.
-- Plugin packaging.
+- ~~Plugin packaging~~ (done -- export/install packs of skills + agents + commands).
 
 ## 2. Current recommended priority
 
-All five numbered priorities plus the Later-priority workflow items (hunk-level approval,
-LSP-style code intelligence, session fork/rename/export, configurable token budget + auto
-plan-mode fallback, and `/loop` + scheduled tasks) are done. Remaining **Later priorities**:
+All five numbered priorities and the Later-priority workflow items are now done, including
+durable settings + scheduled tasks and plugin packaging. What remains:
 
-- **durable settings + scheduled tasks** -- persist the token budget and scheduled tasks (and
-  future toggles) so runtime changes and schedules survive a restart (a small settings/tasks
-  table + reload-on-start); this directly hardens the two most recent features,
-- image (multimodal) input, where the local model supports it,
-- plugin packaging.
+- **image (multimodal) input** -- accept an image alongside a prompt (e.g. a screenshot of an
+  error) and pass it to the model where the local server supports vision; gated/optional since
+  many local llama.cpp builds are text-only,
+- broader hardening/polish: a plugin **registry** (install packs by URL with a SHA-256, like the
+  existing remote-skill install), durable per-session settings, and richer admin views.
 
-The recommended next step is **durable settings + scheduled tasks**: it is high-leverage (small,
-deterministic persistence on top of the existing SQLite migration runner), removes the main
-caveat of the last two PRs (in-memory budget + in-memory schedules), and is fully
-local-model-independent. Image input remains lower priority because most local llama.cpp setups
-are not vision-capable, so it would ship gated/optional.
+The recommended next step is **image (multimodal) input**, implemented behind a capability check:
+detect whether the configured model accepts images (llama-server multimodal / a vision GGUF) and,
+if so, accept an attached image in `ask`/`chat` and forward it in the OpenAI `image_url` content
+format; otherwise degrade gracefully with a clear message. It is the last commonly-used Claude
+Code-style capability missing, and the capability-gated design keeps it honest on text-only local
+models. If you would rather avoid the vision dependency, a **plugin registry** (install-by-URL
+with integrity check) is the strongest text-only alternative, building directly on this PR.
 
 ## 3. Guidance for AI implementers
 
@@ -324,7 +325,7 @@ coverage roadmap.
 
 Possible future work:
 
-- plugin packaging,
+- ~~plugin packaging~~ (done),
 - educational packaging,
 - workshop/course materials,
 - consulting-oriented demos,
@@ -334,6 +335,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Durable settings + scheduled tasks: the token budget is persisted (`app_settings` via `SettingsStore`)
+  and scheduled tasks are persisted to `scheduled_tasks` and reloaded on startup (overdue tasks fire
+  shortly after restart, not instantly) -- runtime changes now survive a restart.
+- Plugin packaging: export the workspace's skills + agents + commands as a portable JSON pack and install
+  one back (`GET /plugin/export`, `POST /plugin/install`, web-UI *Plugins* card). Pure `PluginPack`
+  (type/name validation + path sanitization, so installs can't escape `skills/`/`agents/`/`commands/`)
+  is unit-tested; `PluginService` does the file I/O.
 - `/loop` + scheduled local tasks: `/loop [check=<cmd>] [attempts=N] <goal>` is a bounded
   iterate-until-green command (make a change, run the Sandbox-screened check, repeat until it passes or
   the attempt budget is spent; supersedes the `loop` skill). Local **scheduled tasks** run a prompt after

@@ -2096,3 +2096,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   after the delay the task runs (AUTO mode) and the list shows `runs` incrementing and `last:` output;
   a repeating task re-runs every interval; **cancel** removes it. Tasks are in-memory (cleared on
   restart) and bounded by a 10s minimum interval and the max-tasks limit.
+
+---
+
+# Durable settings + scheduled tasks, and plugin packaging
+
+## 228. Schedule reload defers overdue tasks (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `ScheduleTest` passes the new case -- `reloadNextRun` keeps a future task's time, schedules
+  an overdue task a grace period from now (so reloaded tasks don't all fire at once), and leaves a
+  completed one-shot at 0.
+
+## 229. PluginPack validation + path safety (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PluginPackTest` passes -- `sanitizeName` strips directories/`.md`/traversal; `validType`
+  accepts only skill/agent/command; `targetPath` maps each type to its folder and reduces a traversal
+  name to a safe leaf inside that folder (never escaping); `summarize` counts by type and flags invalid
+  entries.
+
+## 230. Token budget + scheduled tasks survive a restart (manual)
+
+- **Observe:** set the token budget in the UI, restart the app -> the new value is still in effect
+  (persisted in `app_settings`). Schedule a repeating task, restart -> it reappears in the *Scheduled
+  tasks* card and resumes (an overdue run fires shortly after startup, not instantly).
+
+## 231. Export and install a plugin pack (manual)
+
+- **Observe:** the *Plugins* card's **Export pack** downloads `<name>.imini-plugin.json` with the
+  workspace's skills/agents/commands; pasting it into another workspace and clicking **Install pack**
+  writes them under `skills/`/`agents/`/`commands/` (existing files skipped unless *overwrite*). A pack
+  whose entry name contains `../` is sanitized to a safe leaf -- it cannot write outside those folders.
+  Install is admin-only.

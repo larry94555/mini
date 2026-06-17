@@ -34,4 +34,15 @@ public final class Schedule {
     public static long clampSeconds(long seconds) {
         return Math.max(MIN_SECONDS, seconds);
     }
+
+    /**
+     * The next-run time to use when reloading a persisted task after a restart. An overdue task (its
+     * stored time is in the past) is scheduled a short grace period from now rather than firing instantly
+     * (and all at once); a future task keeps its stored time.
+     */
+    public static long reloadNextRun(long storedNextRunMs, long nowMs) {
+        if (storedNextRunMs <= 0) return 0L;                 // one-shot already done
+        if (storedNextRunMs <= nowMs) return nowMs + MIN_SECONDS * 1000L; // overdue -> soon
+        return storedNextRunMs;
+    }
 }

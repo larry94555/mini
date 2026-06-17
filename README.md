@@ -95,7 +95,9 @@ No cloud API key is required.
 | `TokenBudget.java` | Pure token estimate + fit-the-prompt-to-a-budget logic |
 | `PlanFallback.java` | Pure decision: auto-switch an over-budget turn to plan mode |
 | `LoopCommand.java` | Pure `/loop` parsing + iterate-until-green prompt/continue logic |
-| `Schedule.java` / `ScheduledTasks.java` | Pure scheduling math + the local task scheduler |
+| `Schedule.java` / `ScheduledTasks.java` | Pure scheduling math + the durable local task scheduler |
+| `SettingsStore.java` | Durable key/value app settings (`app_settings` table) |
+| `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation + export/install |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -193,6 +195,9 @@ http://localhost:8081
 | `GET /schedule` | List scheduled local tasks |
 | `POST /schedule?...` | Schedule a prompt (delay, optional repeat interval, kind run/plan/loop) |
 | `POST /schedule/cancel?id=` | Cancel a scheduled task |
+| `GET /plugin` | Counts of installable content (skills/agents/commands) |
+| `GET /plugin/export` | Download a plugin pack (skills + agents + commands) as JSON |
+| `POST /plugin/install` | Install a plugin pack into the workspace (admin) |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -562,6 +567,33 @@ you reach for* (instructions for a particular kind of task), and a subagent is *
 to* (an isolated loop that returns a summary). They compose -- e.g. a `code-review` skill can rely on the
 conventions your `CLAUDE.md` memory establishes.
 
+## Plugins -- shareable packs of skills, agents, and commands
+
+`imini`'s extensibility lives in plain Markdown: `skills/`, `agents/`, and `commands/`. A **plugin pack**
+bundles those into one portable JSON file you can share or move between workspaces.
+
+- **Export:** the **Plugins** card's *Export pack* button (or `GET /plugin/export?name=...`) downloads a
+  `<name>.imini-plugin.json` containing every skill, agent, and command in the workspace.
+- **Install:** paste a pack into the card and click *Install pack* (or `POST /plugin/install` with the
+  JSON body; admin only). Each entry is written to its folder (`skills/<name>/SKILL.md`,
+  `agents/<name>.md`, `commands/<name>.md`); existing files are skipped unless you check *overwrite*.
+
+```
+curl "localhost:8080/plugin/export?name=my-pack" -H "X-API-Key: <key>" > my-pack.imini-plugin.json
+curl -X POST "localhost:8080/plugin/install?overwrite=false" -H "X-API-Key: <admin-key>" \
+     -H "Content-Type: application/json" --data @my-pack.imini-plugin.json
+```
+
+A pack is a small manifest: `{ "format": "imini-plugin/1", "name", "version", "description", "entries":
+[ { "type": "skill|agent|command", "name", "content" } ] }`.
+
+> Honest scope: install **validates and sanitizes every entry** -- the `type` must be one of
+> skill/agent/command and the `name` is reduced to a safe bare id (no path separators or `..` traversal),
+> so a pack can never write outside `skills/`, `agents/`, or `commands/`. Packs are content only (Markdown
+> instructions), not executable code; installing one is exactly like adding those files yourself. There is
+> no version/dependency resolution or signing yet -- treat third-party packs as you would any files you
+> drop into your repo.
+
 ## `/loop` -- iterate until green
 
 `/loop` makes the agentic *iterate-until-green* pattern a first-class, **bounded** command: make a focused
@@ -601,10 +633,11 @@ curl "localhost:8080/schedule" -H "X-API-Key: <key>"                       # lis
 curl -X POST "localhost:8080/schedule/cancel?id=task-1" -H "X-API-Key: <key>" # cancel
 ```
 
-> Honest scope: scheduling is **in-memory and single-node** -- tasks do not survive a restart (durable
-> scheduling is a roadmap item). A minimum interval/delay (10s) and a max task count bound local load.
-> Scheduled runs use the same sandbox/permission rules; because they run in AUTO mode, only enable them
-> for sessions/workspaces where unattended tool use is acceptable.
+> Honest scope: scheduling is **durable** (tasks are persisted to SQLite and reloaded on startup -- an
+> overdue task fires shortly after restart rather than instantly) but **single-node**. A minimum
+> interval/delay (10s) and a max task count bound local load. Scheduled runs use the same sandbox/
+> permission rules; because they run in AUTO mode, only enable them for sessions/workspaces where
+> unattended tool use is acceptable.
 
 ## Token budget and context limits
 
@@ -640,7 +673,8 @@ overflow it. On an 8192-context server with the defaults, the prompt is capped a
 agent.max-prompt-tokens=8500
 ```
 
-or at runtime in the web UI's **Token budget** card, or over HTTP:
+or at runtime in the web UI's **Token budget** card, or over HTTP. Runtime changes are now **persisted**
+(to the `app_settings` table) and reloaded on restart, so a budget you set in the UI sticks:
 
 ```
 curl "localhost:8080/settings/token-budget"                 -H "X-API-Key: <key>"   # view
