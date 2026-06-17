@@ -2279,3 +2279,34 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `POST /plugin/registry/entry?name=...&url=...` (or the *Plugins* card's **Build entry**)
   returns `{name, version, description, url, sha256}` where `sha256` is the hash of the exported pack;
   pasting it into a registry index lets others install-by-name with verification. Admin only.
+
+---
+
+# Persist run history, scrape-friendly metrics, and the guided tour
+
+## 250. PromFormat renders Prometheus text (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PromFormatTest` passes -- the snapshot renders to Prometheus exposition text with
+  `# TYPE` lines and labeled series (`imini_counter{name="runs_ok"} 5`, `imini_tool_calls{tool="read_file"} 3`,
+  `imini_uptime_seconds`, latency/concurrency gauges); keys are sorted for stable output; null/empty render
+  to "" ; label quotes are escaped.
+
+## 251. Run history survives a restart (manual)
+
+- **Observe:** after some asks/chats, `GET /admin/runs` lists them. Restart the app -> a tail of recent
+  runs is still present (reloaded from the `run_history` table); the list is pruned to
+  `agent.run-history.persist-max` (default 500). With persistence disabled (no DB) it still works
+  in-memory and resets on restart.
+
+## 252. Scrape metrics in Prometheus format (manual)
+
+- **Observe:** `GET /metrics/prom` (admin) returns `text/plain; version=0.0.4` with `imini_*` series that a
+  Prometheus scraper accepts; values match the JSON `/metrics` snapshot. Non-admins are rejected.
+
+## 253. Guided in-app tour (manual)
+
+- **Observe:** clicking **? tour** opens an overlay that highlights each card in turn (sessions, prompt,
+  token budget, scheduled tasks, plugins, admin overview) with a short description, **next**/**skip**
+  controls, and a final step pointing to `docs/GLOSSARY.md` / `docs/LEARNING_PATH.md`. It changes no state
+  and can be reopened anytime.

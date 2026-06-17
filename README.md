@@ -108,6 +108,8 @@ No cloud API key is required.
 | `VisionContent.java` / `VisionSupport.java` | Pure multimodal content building + vision capability gate |
 | `AdminFormat.java` | Pure dashboard formatting (uptime, top-N tallies, success rate) |
 | `RunHistory.java` | Pure bounded ring buffer of recent runs (for the dashboard) |
+| `RunHistoryStore.java` | Durable run history (`run_history` table) + startup reload |
+| `PromFormat.java` | Pure Metrics snapshot -> Prometheus text exposition format |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -257,6 +259,7 @@ http://localhost:8081
 | `GET /metrics` | Metrics snapshot (admin only) |
 | `GET /admin/overview` | Consolidated admin dashboard snapshot, incl. recent runs (admin only) |
 | `GET /admin/runs?limit=` | Recent runs: endpoint, session, resolved mode, latency, outcome (admin) |
+| `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
 | `GET /audit/export?format=csv\|json&since=&until=&...` | Download the (filtered, windowed) audit trail (admin) |
 | `GET /session/activity?sessionId=&offset=&limit=` | This session's events (anyone with session access) |
@@ -1247,16 +1250,36 @@ Click **refresh** on the card to re-poll. It's a read-only view; non-admins simp
 
 **Run history.** The dashboard also lists the most **recent runs** -- each with its endpoint, the
 **resolved mode** that turn ran in, duration, outcome, and session. The overview embeds the last 10;
-`GET /admin/runs?limit=N` returns more (newest first, up to 200). It is a bounded in-memory ring buffer,
-so it shows recent activity at a glance (it resets on restart).
+`GET /admin/runs?limit=N` returns more (newest first, up to 200). It is a bounded ring buffer that is also **persisted** (the `run_history` table) and a tail is reloaded on
+startup, so recent runs survive a restart. `agent.run-history.persist-max` (default 500) bounds how many
+rows are kept.
 
 ```
 curl "localhost:8080/admin/runs?limit=25" -H "X-API-Key: <admin-key>"
 ```
 
-> Honest scope: metrics are **in-process** -- they reset when the app restarts and are not aggregated
-> across nodes. Latency/throughput are simple counters (no histograms/percentiles). The dashboard is a
-> snapshot on demand, not a live stream. For long-term metrics, scrape `/metrics` into an external system.
+**Scrape-friendly metrics.** `GET /metrics/prom` (admin) returns the same counters in the **Prometheus
+text exposition format**, so an external Prometheus/Grafana stack can scrape them:
+
+```
+curl "localhost:8080/metrics/prom" -H "X-API-Key: <admin-key>"
+# imini_counter{name="runs_ok"} 5
+# imini_tool_calls{tool="read_file"} 3
+# imini_run_latency_avg_ms 120
+```
+
+> Honest scope: the counters themselves are still **in-process** (they reset on restart and aren't
+> aggregated across nodes), and there are no histograms/percentiles -- but the `/metrics/prom` format lets
+> an external system scrape and retain them over time. Run history is now durable; the live snapshot is
+> still on demand, not a push/stream.
+
+## A guided tour of the interface
+
+New to the web UI? Click **? tour** (next to the session controls) for a short, dependency-free walkthrough
+that highlights each card in turn -- sessions, the prompt box, token budget, scheduled tasks, plugins, and
+the admin overview -- with a sentence on what each does and where to read more. It ends by pointing at
+`docs/GLOSSARY.md` and `docs/LEARNING_PATH.md` (or `docs/WORKSHOP.md`). Re-open it anytime; it changes
+nothing, it just guides.
 
 ## Audit log
 

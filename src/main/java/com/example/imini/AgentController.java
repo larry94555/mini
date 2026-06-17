@@ -336,6 +336,15 @@ public class AgentController {
         return metrics.snapshot();
     }
 
+    /** Metrics in Prometheus text exposition format, for external scraping (admin only). */
+    @GetMapping("/metrics/prom")
+    public ResponseEntity<String> metricsProm() {
+        requireAdmin();
+        return ResponseEntity.ok()
+                .header("Content-Type", PromFormat.CONTENT_TYPE)
+                .body(PromFormat.render(metrics.snapshot()));
+    }
+
     /**
      * Consolidated admin/observability snapshot: uptime, run counts + success rate, latency, concurrency,
      * top tool calls, scheduled-task and plugin/skill summaries, recent audit, and server capability flags.

@@ -52,6 +52,7 @@
   .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
   .err { color:var(--bad); }
   a.linklike { color:var(--accent); cursor:pointer; }
+  .tour-hi{outline:3px solid #f5a623 !important;outline-offset:2px;border-radius:6px}
 </style>
 </head>
 <body>
@@ -65,10 +66,21 @@
   <label class="muted" title="Draft a plan, then execute each step (todos update live)" style="margin:0 6px">
     <input id="planMode" type="checkbox"/> plan&amp;execute
   </label>
+  <div id="tourOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000">
+    <div id="tourBox" style="position:absolute;max-width:340px;background:var(--bg,#fff);color:var(--fg,#111);border:1px solid var(--border,#ccc);border-radius:8px;padding:14px;box-shadow:0 6px 24px rgba(0,0,0,.3)">
+      <div id="tourTitle" style="font-weight:600;margin-bottom:6px"></div>
+      <div id="tourBody" style="font-size:13px;line-height:1.4"></div>
+      <div class="row" style="justify-content:space-between;margin-top:10px;align-items:center">
+        <span id="tourStep" class="muted" style="font-size:11px"></span>
+        <span><button id="tourSkip">skip</button> <button id="tourNext">next</button></span>
+      </div>
+    </div>
+  </div>
   <span class="row">
     <span class="muted">session</span>
     <select id="sessionSelect" style="min-width:140px"></select>
     <button id="newSession" title="Start a fresh session">new</button>
+    <button id="startTour" title="A short guided tour of the interface">? tour</button>
     <button id="renameSession" title="Rename this session">rename</button>
     <button id="forkSession" title="Copy this session into a new one">fork</button>
     <button id="exportSession" title="Download this session as a JSON bundle">export</button>
@@ -327,6 +339,46 @@ function addActivity(turn, line){
   turn.activity.appendChild(d);
   $("#messages").scrollTop = $("#messages").scrollHeight;
 }
+
+// ---- guided in-app tour (dependency-free) ----
+const TOUR_STEPS = [
+  { sel: "#sessionSelect", title: "Sessions", body: "Each conversation is a session. Pick or create one here; rename, fork, or export it, and set a per-session default mode. New to imini? See GettingStarted.md." },
+  { sel: "#input", title: "Ask the agent", body: "Type a question or task here. The agent calls the local model, runs tools, and (in ask mode) asks before changing files. Try: \"Use repo_tree to inspect this project.\"" },
+  { sel: "#tokenBudgetCard", title: "Token budget", body: "Caps the tokens per model call so a prompt never exceeds the model's context. Over-budget prompts are trimmed or auto-routed to plan mode." },
+  { sel: "#scheduleCard", title: "Scheduled tasks", body: "Run a prompt later or on an interval, unattended. Durable across restarts." },
+  { sel: "#pluginCard", title: "Plugins", body: "Bundle skills, agents, and commands into portable packs \u2014 export, install by URL/registry (SHA-256 verified), or publish your own." },
+  { sel: "#adminCard", title: "Admin overview", body: "Live observability (admin): runs, latency, top tools, recent run history, and recent admin actions. Metrics also scrape at /metrics/prom." },
+  { sel: null, title: "That's the tour!", body: "Next: read docs/GLOSSARY.md, then docs/LEARNING_PATH.md (or run docs/WORKSHOP.md). Re-open this anytime with the \"? tour\" button." }
+];
+let _tourI = 0;
+function tourEl(sel){ if(!sel) return null; for(const s of sel.split(",")){ const el=document.querySelector(s.trim()); if(el) return el; } return null; }
+function showTourStep(){
+  const ov=$("#tourOverlay"), box=$("#tourBox"); if(!ov||!box) return;
+  const step=TOUR_STEPS[_tourI];
+  $("#tourTitle").textContent=step.title;
+  $("#tourBody").textContent=step.body;
+  $("#tourStep").textContent=(_tourI+1)+" / "+TOUR_STEPS.length;
+  $("#tourNext").textContent=(_tourI===TOUR_STEPS.length-1)?"done":"next";
+  ov.style.display="block";
+  document.querySelectorAll(".tour-hi").forEach(e=>e.classList.remove("tour-hi"));
+  const el=tourEl(step.sel);
+  if(el){
+    el.classList.add("tour-hi");
+    el.scrollIntoView({behavior:"smooth",block:"center"});
+    const r=el.getBoundingClientRect();
+    let top=r.bottom+8; if(top>window.innerHeight-160) top=Math.max(8,r.top-170);
+    box.style.top=top+"px"; box.style.left=Math.max(8,Math.min(r.left,window.innerWidth-360))+"px";
+  } else {
+    box.style.top="50%"; box.style.left="50%"; box.style.transform="translate(-50%,-50%)";
+    return;
+  }
+  box.style.transform="none";
+}
+function endTour(){ const ov=$("#tourOverlay"); if(ov) ov.style.display="none"; document.querySelectorAll(".tour-hi").forEach(e=>e.classList.remove("tour-hi")); }
+$("#startTour") && ($("#startTour").onclick=()=>{ _tourI=0; showTourStep(); });
+$("#tourSkip") && ($("#tourSkip").onclick=endTour);
+$("#tourNext") && ($("#tourNext").onclick=()=>{ if(_tourI>=TOUR_STEPS.length-1){ endTour(); } else { _tourI++; showTourStep(); } });
+
 function appendLog(line){
   const el = $("#log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
 }

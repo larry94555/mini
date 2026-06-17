@@ -33,8 +33,17 @@ public class Metrics {
     private final AtomicLong approxOutputChars = new AtomicLong();
     private final RunHistory history = new RunHistory(200);
 
-    public Metrics(RunService runService) {
+    private final RunHistoryStore historyStore; // may be null in unit tests
+
+    public Metrics(RunService runService, RunHistoryStore historyStore) {
         this.runService = runService;
+        this.historyStore = historyStore;
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void loadHistory() {
+        if (historyStore == null) return;
+        for (RunHistory.Record r : historyStore.loadRecent(200)) history.add(r); // oldest-first -> newest last
     }
 
     public void inc(String name) {
@@ -64,7 +73,9 @@ public class Metrics {
     /** Record a run AND append it to the run-history ring buffer (endpoint/session/mode for the dashboard). */
     public void recordRun(String endpoint, String session, String mode, long ms, boolean ok) {
         recordRun(ms, ok);
-        history.add(new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok));
+        RunHistory.Record r = new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok);
+        history.add(r);
+        if (historyStore != null) historyStore.append(r); // durable across restarts
     }
 
     /** Most recent runs (newest first) as plain maps, for the admin run-history view. */
