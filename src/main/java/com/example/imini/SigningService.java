@@ -103,6 +103,24 @@ public class SigningService {
         }
     }
 
+    /**
+     * A snapshot of the verifier keyring for display: whether signing is enabled, this signer's key id,
+     * and the trusted keys with their expiry/expired/revoked/isSigner flags. Read-only.
+     */
+    public Map<String, Object> keysInfo() {
+        long now = System.currentTimeMillis();
+        String signer = signerKeyId();
+        java.util.List<Map<String, Object>> keys = keyring().describe(revoked(), now);
+        for (Map<String, Object> k : keys) {
+            k.put("isSigner", !signer.isEmpty() && signer.equalsIgnoreCase(String.valueOf(k.get("keyId"))));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("signingEnabled", canSign());
+        out.put("signerKeyId", signer);
+        out.put("keys", keys);
+        return out;
+    }
+
     public Map<String, String> generateKeyPair() {
         return BundleSignature.generateKeyPair();
     }

@@ -15,7 +15,7 @@ No cloud API key is required.
   recommended learning path + the docs to use).
 - First-time install: [`INSTALL.md`](INSTALL.md)
 - One-command demo (Docker, full stack incl. metrics dashboards): see [`docs/observability/`](docs/observability/) -- `docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build`
-- No-build demo from a **published image**: `docker compose -f docker-compose.published.yml up` (pulls `ghcr.io/larry94555/imini`, published by the release workflow)
+- No-build demo from a **published image**: `docker compose -f docker-compose.published.yml up` (pulls `ghcr.io/larry94555/imini`, published by the release workflow as a **multi-arch** image -- runs natively on Intel/AMD and ARM/Apple Silicon)
 - Core terms in plain language: [`docs/GLOSSARY.md`](docs/GLOSSARY.md)
 - Guided learning path: [`docs/LEARNING_PATH.md`](docs/LEARNING_PATH.md)
 - Guided 90-minute workshop (labs + test checkpoints): [`docs/WORKSHOP.md`](docs/WORKSHOP.md)
@@ -271,6 +271,7 @@ http://localhost:8081
 | `GET /schedule/runs?id=&limit=` | Recent executions of one scheduled task (session read access) |
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
 | `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
+| `GET /workspace/keys` | Inspect the verifier keyring: trusted keys, expiry, revoked/signer flags (admin) |
 | `POST /workspace/keygen` | Mint an Ed25519 key pair for bundle signing (admin) |
 | `POST /plugin/registry/sign` | Sign a registry index over its canonical listing digest (admin) |
 | `POST /workspace/import/preview` | Dry-run an import: what would change, writes nothing (admin) |
@@ -709,7 +710,9 @@ the index came from a known publisher (not just that each pack hashes correctly)
 (admin) takes an index JSON and returns it with a `signature` embedded over a canonical digest of its
 listings (sorted, order-independent). When you fetch a registry, the result includes a `signature` status
 for the index; with `plugins.require-signature=true`, installing from a registry whose index does not
-verify is refused (its status is reported as `indexSignature`).
+verify is refused (its status is reported as `indexSignature`). The **Browse registry** view in the
+*Plugins* card shows this index-signature status as a banner above the pack list (green when `verified`),
+with a reminder that individual packs remain SHA-256 pinned regardless.
 
 > Honest scope: the registry is just a fetched JSON list -- there is no central/official index, no
 > signing or trust-root in the registry itself, and no dependency resolution. The SHA-256 pin protects
@@ -1198,6 +1201,12 @@ a compromised key immediately, add its id to `bundle.revoked-key-ids` (comma/new
 signature matching a revoked key verifies as `revoked`. Imports refuse `expired`/`revoked`/`invalid`
 signatures. Together these let trust change over time without rewriting every bundle: rotate by adding a
 new key (new `keyId`) and expiring the old, or revoke on compromise.
+
+**Key management in the UI.** The *Plugins* card has a **keys** button (next to **keygen**) that lists the
+verifier keyring via `GET /workspace/keys`: each trusted key's id, whether signing is enabled, which key is
+this signer's, and per-key **trusted / expires &lt;date&gt; / expired / revoked** status. It is the
+read-only view of the `bundle.verify-public-keys` / `bundle.revoked-key-ids` config, so you can see at a
+glance what would verify before importing a bundle or installing a pack.
 
 ```
 # public-key: signer has the private key, verifier has the public key

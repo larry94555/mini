@@ -665,6 +665,13 @@ public class AgentController {
         return workspace.summary();
     }
 
+    /** Inspect the verifier keyring: trusted keys, expiry, revoked/expired/signer flags (admin, read-only). */
+    @GetMapping("/workspace/keys")
+    public Map<String, Object> workspaceKeys() {
+        requireAdmin();
+        return workspace.keysInfo();
+    }
+
     /** Mint a fresh Ed25519 key pair (base64) for bundle signing. Keep the private key secret (admin). */
     @PostMapping("/workspace/keygen")
     public Map<String, String> workspaceKeygen() {

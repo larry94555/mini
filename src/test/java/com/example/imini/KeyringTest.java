@@ -2,6 +2,7 @@ package com.example.imini;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -91,5 +92,20 @@ class KeyringTest {
         assertNull(ring.verify("digest", sig, "k1", Set.of("k1"), now));        // revoked
         assertEquals("k1", ring.verify("digest", sig, "k1", Set.of("other"), now)); // not revoked
         assertEquals("k1", ring.matchIgnoringStatus("digest", sig));            // match ignores revocation
+    }
+
+    @Test
+    void describeReportsExpiryRevokedFlags() {
+        String pubA = BundleSignature.generateKeyPair().get("publicKey");
+        String pubB = BundleSignature.generateKeyPair().get("publicKey");
+        long now = 1_000_000_000_000L;
+        Keyring ring = Keyring.parse("k1:" + pubA + "@" + (now - 1) + ", k2:" + pubB + "@" + (now + 100000), null);
+        List<Map<String, Object>> d = ring.describe(Set.of("k2"), now);
+        assertEquals(2, d.size());
+        assertEquals(true, d.get(0).get("expired"));
+        assertEquals(false, d.get(0).get("revoked"));
+        assertEquals(false, d.get(1).get("expired"));
+        assertEquals(true, d.get(1).get("revoked"));
+        assertEquals(0L, Keyring.parse("k3:" + pubA, null).describe(Set.of(), now).get(0).get("expiryEpochMs"));
     }
 }

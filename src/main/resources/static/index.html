@@ -254,7 +254,9 @@
         <button id="wsPreview">Preview import</button>
         <button id="wsImport">Import workspace</button>
         <button id="wsKeygen" title="Generate an Ed25519 key pair for bundle signing">keygen</button>
+        <button id="wsKeys" title="Show the verifier keyring (trusted keys, expiry, revoked)">keys</button>
       </div>
+      <div id="wsKeysList" class="muted" style="font-size:11px;margin-top:4px"></div>
       <textarea id="wsKeysOut" placeholder="generated key pair (set the keys in application.properties)" style="width:100%;height:54px;margin-top:4px;font-size:11px" readonly></textarea>
       <textarea id="wsJson" placeholder="paste a workspace bundle JSON to import" style="width:100%;height:60px;margin-top:4px;font-size:11px"></textarea>
       <div id="wsPreviewOut" class="muted" style="font-size:11px;margin-top:4px"></div>
@@ -597,7 +599,13 @@ async function browseRegistry(){
   const packs = j.packs || [];
   if (!packs.length){ el.textContent = "(no packs in registry)"; return; }
   window._pluginRegUrl = j.url || url || "";
-  el.innerHTML = packs.map(p =>
+  const sig = j.signature || "unsigned";
+  const ok = sig === "verified";
+  const sigColor = ok ? "var(--ok,#2a7)" : (sig === "unsigned" || sig === "no-key" ? "var(--muted,#888)" : "var(--danger,#c00)");
+  const banner = '<div style="font-size:11px;margin-bottom:4px">index signature: '
+    + '<b style="color:' + sigColor + '">' + escapeHtml(sig) + '</b>'
+    + (ok ? '' : ' <span class="muted">(packs are still SHA-256 pinned)</span>') + '</div>';
+  el.innerHTML = banner + packs.map(p =>
     '<div style="border-top:1px solid var(--border);padding:3px 0">'
     + '<b>' + escapeHtml(p.name) + '</b>' + (p.version ? ' v' + escapeHtml(String(p.version)) : '')
     + (p.pinned ? ' <span class="muted">[pinned]</span>' : ' <span class="muted">[unpinned]</span>')
@@ -680,6 +688,28 @@ async function keygenWorkspace(){
   appendLog("[workspace] generated Ed25519 key pair (set the keys in application.properties)");
 }
 $("#wsKeygen") && ($("#wsKeygen").onclick = keygenWorkspace);
+async function showKeys(){
+  const el = $("#wsKeysList"); if (!el) return;
+  if (el.innerHTML){ el.innerHTML = ""; return; } // toggle off
+  const j = await getJson("/workspace/keys");
+  if (!j){ el.textContent = "(failed; admin only?)"; return; }
+  if (j.error){ el.textContent = j.error; return; }
+  const keys = j.keys || [];
+  const head = "<b>verifier keyring</b> \u2014 signing " + (j.signingEnabled ? "enabled" : "off")
+    + (j.signerKeyId ? ", this signer: <code>" + escapeHtml(j.signerKeyId) + "</code>" : "");
+  if (!keys.length){ el.innerHTML = head + "<br>(no trusted keys configured)"; return; }
+  el.innerHTML = head + keys.map(function(k){
+    var tags = [];
+    if (k.isSigner) tags.push("signer");
+    if (k.revoked) tags.push("<span style=\"color:var(--danger,#c00)\">revoked</span>");
+    if (k.expired) tags.push("<span style=\"color:var(--danger,#c00)\">expired</span>");
+    if (k.expiryEpochMs && !k.expired) tags.push("expires " + new Date(k.expiryEpochMs).toLocaleDateString());
+    if (!k.revoked && !k.expired) tags.push("trusted");
+    return "<div style=\"border-top:1px solid var(--border);padding:2px 0\"><code>"
+      + escapeHtml(String(k.keyId)) + "</code> \u2014 " + tags.join(", ") + "</div>";
+  }).join("");
+}
+$("#wsKeys") && ($("#wsKeys").onclick = showKeys);
 function runsHtml(runs){
   if (!Array.isArray(runs) || !runs.length) return "(none)";
   return runs.slice(0,10).map(r => {

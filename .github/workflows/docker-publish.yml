@@ -1,7 +1,9 @@
 name: Publish image
 
 # Build and push the imini image to GitHub Container Registry (GHCR) on every release and version tag,
-# so the demo can run from a prebuilt image (docker-compose.published.yml) with no local build.
+# so the demo can run from a prebuilt image (docker-compose.published.yml) with no local build. Builds a
+# multi-arch manifest (linux/amd64 + linux/arm64) so it runs natively on Intel/AMD and on ARM (Apple
+# Silicon, ARM servers).
 on:
   push:
     tags: [ "v*" ]
@@ -20,6 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU (enables arm64 emulation for cross-build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -37,10 +45,12 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
 
-      - name: Build and push
+      - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: false

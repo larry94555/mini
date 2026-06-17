@@ -128,6 +128,24 @@ public final class Keyring {
         return null;
     }
 
+    /**
+     * Describe every key for display: id, expiry (epoch-ms, 0 = none), whether it has expired at
+     * {@code now}, and whether its id is revoked. Pure; order preserved.
+     */
+    public List<Map<String, Object>> describe(Set<String> revoked, long now) {
+        Set<String> rev = revoked == null ? Set.of() : revoked;
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Key k : keys) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("keyId", k.keyId());
+            m.put("expiryEpochMs", k.expiryEpochMs());
+            m.put("expired", isExpired(k, now));
+            m.put("revoked", rev.contains(k.keyId()) || rev.contains(k.keyId().toLowerCase(Locale.ROOT)));
+            out.add(m);
+        }
+        return out;
+    }
+
     private static boolean trusted(Key k, Set<String> revoked, long now) {
         return !revoked.contains(k.keyId().toLowerCase(Locale.ROOT))
                 && !revoked.contains(k.keyId())

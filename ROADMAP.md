@@ -179,22 +179,20 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is complete for its educational scope, and this iteration rounded out the signing and
-deployment story to its natural end: keys can **expire and be revoked** (trust changes over time),
-the **registry index itself is signable** (provenance for the listing, not just each pack), and a
-**published image** plus release workflow let the demo run with no local build.
+The harness is complete for its educational scope, and this iteration was the final polish:
+signing/trust state is now **visible in the UI** (a key-management panel and an index-signature
+banner in the registry browser), and the published demo image is **multi-arch** (amd64 + arm64).
+There is no remaining backend capability to add and no remaining surface left unsurfaced.
 
-Every layer -- agent loop, tools, safety, persistence, observability, the full plugin/signing
-lifecycle, onboarding, and one-command deployment -- is closed out. There is no remaining
-high-leverage feature; the project is genuinely done for its stated goals. Any further work would
-be scope expansion rather than completion, for example:
+The project is genuinely finished for its stated goals. Any further work would be net-new scope
+well beyond a teaching-grade Claude Code clone, e.g.:
 
-- a small **key-management UI** (list trusted keys, mark revoked, show expiry) instead of config,
-- **multi-arch images** (arm64 + amd64) from the publish workflow,
-- a **signed-index registry browser** that surfaces the index signature in the Plugins card.
+- a **hardware-backed / OS keystore** signing option (PKCS#11, platform keychains),
+- **multi-node** persistence (Postgres) to drop the single-node SQLite assumption,
+- a **plugin dependency resolver** so packs can declare and pull prerequisites.
 
-Recommendation: consider the project finished. The most natural remaining polish, if continuing,
-is surfacing key/signature status in the UI rather than any new backend capability.
+Recommendation: call the project complete. These ideas are listed only for completeness; none is
+needed to finish the educational story, which is now closed end to end.
 
 ## 3. Guidance for AI implementers
 
@@ -335,6 +333,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Key-management UI + multi-arch images + signed-index registry browser: a read-only `GET /workspace/keys`
+  endpoint plus a Plugins-card **keys** panel show the verifier keyring (ids, expiry, revoked/expired/signer
+  flags); the publish workflow now builds a linux/amd64 + linux/arm64 manifest; and the Browse-registry view
+  shows the index-signature status as a banner. Pure `Keyring.describe` unit-tested.
 - Key rotation/revocation + signed registry index + published demo image: keyring entries can carry an
   expiry (`key@<epochMillis>`) and ids can be revoked (`bundle.revoked-key-ids`), with `expired`/`revoked`
   verification statuses that imports refuse; the registry listing document is signable
