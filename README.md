@@ -93,6 +93,7 @@ No cloud API key is required.
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
 | `TokenBudget.java` | Pure token estimate + fit-the-prompt-to-a-budget logic |
+| `PlanFallback.java` | Pure decision: auto-switch an over-budget turn to plan mode |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -600,11 +601,19 @@ curl -X POST "localhost:8080/settings/token-budget?tokens=7000" -H "X-API-Key: <
 > Tip: set the budget at or below your server's context size. Lower it if you still see context errors
 > (e.g. a very large system prompt or memory file); raise it if your model has a bigger window.
 >
-> Honest scope: when a *single* request is genuinely larger than the window, trimming preserves the
-> request but condenses surrounding context; for work that truly needs more than one window, use **plan
-> mode** (`plan=true`) to split it into steps, each of which runs within the budget. Token measurement is
-> exact when `/tokenize` is reachable and an estimate otherwise, so a small safety margin (the response
-> reservation + the `n_ctx` clamp) absorbs estimation error.
+**Automatic plan-mode fallback.** You don't have to remember to pass `plan=true`. When a *normal* turn's
+assembled prompt would exceed the enforced cap, `imini` automatically runs it in **plan mode** instead of
+trimming context to force a one-shot answer -- it decomposes the work into steps, each sent within the
+budget. The trace shows `[budget] first prompt ~N tok > cap C; auto-switching to plan mode ...`. This is
+on by default; disable it with `agent.plan.auto-fallback=false` (then over-budget prompts are simply
+trimmed to fit, as before). A turn that explicitly requested plan mode is never re-triggered.
+
+> Honest scope: token measurement is exact when `/tokenize` is reachable and an estimate otherwise, so a
+> small safety margin (the response reservation + the `n_ctx` clamp) absorbs estimation error. Plan-mode
+> fallback helps when the *task* is large/multi-part (each step sends a focused prompt); it does not help
+> when a single huge artifact -- e.g. one enormous `@file` or a very large `CLAUDE.md` -- dominates the
+> system prompt, since every plan step still carries it. In that case reduce the input or raise the
+> budget. The budget bounds the prompt we send; it does not change the model's actual context window.
 
 ## Context references (`@file` / `@directory`)
 

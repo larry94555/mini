@@ -2039,3 +2039,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** for a request that cannot fit in one window even after trimming, running with `plan=true`
   splits it into steps, each executed within the budget, so the overall task completes without a context
   error.
+
+---
+
+# Automatic plan-mode fallback
+
+## 221. PlanFallback decision (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PlanFallbackTest` passes -- `shouldFallback` returns true only when enabled, not already
+  planning, the cap is known (>0), and the measured prompt is strictly over the cap; it is false when
+  disabled, already planning, the cap is unknown, or the prompt is at/under the cap.
+
+## 222. A normal over-budget turn auto-switches to plan mode (manual)
+
+- **Setup:** send a normal (non-plan) request whose assembled prompt exceeds the enforced cap (e.g. a
+  large `@file` reference, or lower `agent.max-prompt-tokens` to force it).
+- **Observe:** the trace shows `[budget] first prompt ~N tok > cap C; auto-switching to plan mode ...`,
+  and the turn runs as a plan (steps in the todo list / plan history) instead of a single trimmed call.
+  With `agent.plan.auto-fallback=false` the same turn runs normally (prompt trimmed to fit).
+
+## 223. Explicit plan runs are not re-triggered (manual)
+
+- **Observe:** a request already sent with `plan=true` runs as plan mode directly (no fallback decision),
+  and plan steps themselves never recurse into another fallback.

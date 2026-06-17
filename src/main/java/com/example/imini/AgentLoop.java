@@ -38,6 +38,7 @@ public class AgentLoop {
 
     @Value("${agent.profile:general}")
     private String profile;          // general (default) | coding
+    @Value("${agent.plan.auto-fallback:true}") private boolean planAutoFallback;
     @Value("${agent.plan.step-retries:1}") private int planStepRetries;
     @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
     @Value("${agent.plan.verify:true}") private boolean planVerify;
@@ -121,6 +122,23 @@ public class AgentLoop {
         return null;
     }
 
+    /** Decide whether to auto-switch a normal turn to plan mode because the prompt is over budget. */
+    private boolean shouldAutoPlan(String systemPrompt, String question, RunSink sink) {
+        return shouldAutoPlan(engine.firstTurn(systemPrompt, question), sink);
+    }
+
+    private boolean shouldAutoPlan(List<Map<String, Object>> messages, RunSink sink) {
+        if (!planAutoFallback) return false;
+        int tokens = engine.countPromptTokens(messages);
+        int cap = engine.promptCap();
+        if (!PlanFallback.shouldFallback(tokens, cap, planAutoFallback, false)) return false;
+        if (sink != null) {
+            sink.log("[budget] first prompt ~" + tokens + " tok > cap " + cap
+                    + "; auto-switching to plan mode to split the request (set agent.plan.auto-fallback=false to disable).");
+        }
+        return true;
+    }
+
     /** If the message invokes a context:fork skill, run it in a sub-agent and return its summary; else null. */
     private String maybeForkedSkill(String message, String sessionId, RunSink sink) throws Exception {
         SkillLibrary.Skill sk = skills.invokedSkill(message, sessionId);
@@ -161,6 +179,9 @@ public class AgentLoop {
         String forked = maybeForkedSkill(userQuestion, sessionId, sink);
         if (forked != null) return forked;
         String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
+        if (shouldAutoPlan(systemPromptFor(question, sessionId), question, sink)) {
+            return runPlan(sessionId, question, mode, sink);
+        }
         recorder.beginEdits(sessionId);
         return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
@@ -184,6 +205,9 @@ public class AgentLoop {
         }
         history.add(message("user", expanded));
 
+        if (shouldAutoPlan(history, sink)) {
+            return runPlan(sessionId, expanded, mode, sink);
+        }
         recorder.beginEdits(sessionId);
         AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());

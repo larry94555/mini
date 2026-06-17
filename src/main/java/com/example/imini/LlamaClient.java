@@ -133,6 +133,9 @@ public class LlamaClient {
         return fitted.messages();
     }
 
+    /** Public: real token count of a message list via /tokenize; -1 if unavailable. */
+    public int countMessagesTokens(List<Map<String, Object>> messages) { return countMessages(messages); }
+
     /** Real token count of a message list via /tokenize (sum of per-message content); -1 if unavailable. */
     private int countMessages(List<Map<String, Object>> messages) {
         StringBuilder sb = new StringBuilder();
