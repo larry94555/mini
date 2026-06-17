@@ -66,9 +66,82 @@ public class LlamaClient {
     @Value("${llama.retry-backoff-ms:400}")
     private long retryBackoffMs;
 
+    private final TokenBudgetService budget;
+    private volatile int serverCtxCache = 0; // 0 = unknown / not yet fetched
+
+    public LlamaClient(TokenBudgetService budget) {
+        this.budget = budget;
+    }
+
     private String base() { return "http://" + clientHost + ":" + port; }
     private String endpoint() { return base() + "/v1/chat/completions"; }
     private String tokenizeEndpoint() { return base() + "/tokenize"; }
+    private String propsEndpoint() { return base() + "/props"; }
+
+    /** Best-effort server context window (n_ctx) via /props; cached. 0 if unknown. */
+    @SuppressWarnings("unchecked")
+    public int serverContext() {
+        if (serverCtxCache != 0) return serverCtxCache;
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(propsEndpoint()))
+                    .timeout(Duration.ofSeconds(10)).GET().build();
+            HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() / 100 == 2) {
+                Map<String, Object> json = mapper.readValue(r.body(), Map.class);
+                int ctx = readCtx(json);
+                serverCtxCache = ctx > 0 ? ctx : -1;
+                return serverCtxCache > 0 ? serverCtxCache : 0;
+            }
+        } catch (Exception ignore) {
+            // best-effort; fall back to budget-only enforcement
+        }
+        serverCtxCache = -1;
+        return 0;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int readCtx(Map<String, Object> props) {
+        Object n = props.get("n_ctx");
+        if (n instanceof Number num) return num.intValue();
+        Object dgs = props.get("default_generation_settings");
+        if (dgs instanceof Map<?, ?> m && m.get("n_ctx") instanceof Number num) return num.intValue();
+        return -1;
+    }
+
+    /** The hard prompt cap currently enforced (for diagnostics / the settings endpoint). */
+    public int promptCap() {
+        int ctx = serverContext();
+        return budget.promptCap(ctx);
+    }
+
+    /**
+     * Guarantee the outgoing prompt fits the budget: count the real tokens; if over the cap, shrink the
+     * message list deterministically (truncate oversized messages, drop oldest middle ones). The real
+     * /tokenize count is used for the over-budget check; the fast estimate drives the shrink so we don't
+     * issue a tokenize call per step.
+     */
+    private List<Map<String, Object>> enforceBudget(List<Map<String, Object>> messages) {
+        int cap = promptCap();
+        int real = countMessages(messages);
+        int measured = real >= 0 ? real : TokenBudget.estimateMessages(messages);
+        if (measured <= cap) return messages;
+        TokenBudget.Fitted fitted = TokenBudget.fit(messages, cap, TokenBudget::estimate);
+        log.warn("[token-budget] prompt ~" + measured + " tok > cap " + cap
+                + " (budget " + budget.budget() + ", server n_ctx " + serverContext()
+                + "); trimmed " + fitted.truncated() + " message(s), dropped " + fitted.dropped()
+                + " -> ~" + fitted.afterTokens() + " tok. Consider plan mode to split a large request.");
+        return fitted.messages();
+    }
+
+    /** Real token count of a message list via /tokenize (sum of per-message content); -1 if unavailable. */
+    private int countMessages(List<Map<String, Object>> messages) {
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> m : messages) {
+            Object c = m.get("content");
+            if (c != null) sb.append(c).append("\n");
+        }
+        return countTokens(sb.toString());
+    }
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -81,7 +154,7 @@ public class LlamaClient {
 
     public Map<String, Object> chat(List<Map<String, Object>> messages,
                                     List<Map<String, Object>> tools) throws Exception {
-        return chatAt(endpoint(), model, messages, tools);
+        return chatAt(endpoint(), model, enforceBudget(messages), tools);
     }
 
     /** Summarization/compaction call, routed to the (optionally cheaper) summary model. */
@@ -130,6 +203,7 @@ public class LlamaClient {
                                           List<Map<String, Object>> tools,
                                           Consumer<String> onToken,
                                           BooleanSupplier cancelled) throws Exception {
+        messages = enforceBudget(messages);
         HttpRequest req = buildRequest(endpoint(), model, messages, tools, true);
         HttpResponse<Stream<String>> resp = http.send(req, HttpResponse.BodyHandlers.ofLines());
         if (resp.statusCode() / 100 != 2) {

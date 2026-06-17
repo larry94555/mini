@@ -331,6 +331,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Configurable token budget (context-overflow fix): a per-call token budget (default 8500, set in the
+  config file, the web UI's *Token budget* card, or `POST /settings/token-budget`) is enforced before
+  every llama-server call -- the prompt is measured (real `/tokenize`, `chars/4` fallback) and, if over
+  the cap (`budget − reserved`, clamped to the server's `n_ctx`), the message list is shrunk to fit
+  (condense oversized messages, drop oldest middle turns, last-resort truncate). Prevents the
+  "exceeds the available context size" 400. Pure `TokenBudget` (fit/estimate) unit-tested;
+  `TokenBudgetService` holds the runtime value.
 - Session fork / rename / export UX: friendly session titles (`/session/rename`, shown in the picker),
   one-click **fork** that copies conversation + plan history + todos into a new owned session
   (`/session/fork`), and a one-click **export** download; pure title/fork-name logic in `SessionNaming`
