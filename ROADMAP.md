@@ -179,21 +179,20 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope and now ships concrete observability tooling (a
-Grafana dashboard + Prometheus scrape config in `docs/observability/`), filterable run history,
-and a whole-workspace export/import bundle. It is a polished, teachable, self-explaining
-build-your-own-agent harness with durable state and external-monitoring hooks. Remaining ideas
-are genuinely optional refinements:
+The harness is feature-complete for its scope and now safe-by-default for imports (dry-run
+preview), ships example alerting rules alongside the Grafana dashboard, and scopes run history to
+a single session. The observability, plugin, persistence, and onboarding stories are all
+complete. Remaining ideas are minor refinements and can be picked up opportunistically:
 
-- **workspace import preview (dry-run)** -- show what a bundle would install/overwrite before
-  applying it,
-- **alert rules sample** -- ship example Prometheus alert rules (e.g. failure-rate, queue depth)
-  alongside the Grafana dashboard,
-- **per-session run history** -- scope the run list to one session in the session view.
+- **scheduled-task run history** -- surface past runs of a scheduled task next to its definition,
+- **bundle signing** -- optionally sign a workspace/plugin bundle so import can verify provenance,
+  not just integrity,
+- **richer Grafana panels** -- add request-by-key and per-endpoint breakdowns to the sample
+  dashboard.
 
-The recommended next step is **workspace import preview (dry-run)**: it makes the new import
-safe-by-default (no surprises about overwrites), is small (reuses the bundle parser), and is the
-natural follow-on to the export/import that just shipped.
+There is no single high-leverage next step left; the project is effectively done for its stated
+educational scope. If continuing, **scheduled-task run history** is the most coherent follow-on
+(it reuses the run-history + filter work), with **bundle signing** as the most valuable hardening.
 
 ## 3. Guidance for AI implementers
 
@@ -334,6 +333,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Workspace import preview + Prometheus alert rules + per-session run history: `POST
+  /workspace/import/preview` dry-runs an import (create/overwrite/blocked + setting new/changed/unchanged,
+  writing nothing) via pure `WorkspacePreview`; `docs/observability/alert-rules.yml` ships example
+  Prometheus alerts (instance down, failure rate, queue backlog, latency) wired through `prometheus.yml`;
+  and `GET /session/runs` returns one session's runs (exact-match, read-access-scoped) with a session
+  toolbar button. Pure `WorkspacePreview` + `RunFilter.sessionEquals` unit-tested.
 - Grafana dashboard sample + run-history filters + whole-workspace bundle: `docs/observability/` ships a
   Prometheus scrape config and a starter Grafana dashboard with a how-to; `GET /admin/runs` now filters by
   endpoint/outcome/session (pure `RunFilter`, unit-tested); and `GET /workspace/export` /

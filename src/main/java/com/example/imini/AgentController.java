@@ -413,6 +413,15 @@ public class AgentController {
         return metrics.recentRuns(Math.max(1, Math.min(200, limit)), endpoint, outcome, session);
     }
 
+    /** Recent runs for one session (newest first): endpoint, mode, latency, outcome. Session read access. */
+    @GetMapping("/session/runs")
+    public List<Map<String, Object>> sessionRuns(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "limit", defaultValue = "25") int limit) {
+        requireRead(sessionId);
+        return metrics.recentRunsForSession(Math.max(1, Math.min(200, limit)), sessionId);
+    }
+
     /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
     @GetMapping("/audit")
     public List<AuditLog.Entry> audit(@RequestParam(name = "user", defaultValue = "") String user,
@@ -654,6 +663,13 @@ public class AgentController {
     public Map<String, Object> workspaceSummary() {
         requireAdmin();
         return workspace.summary();
+    }
+
+    /** Dry-run a workspace import: report what would be created/overwritten/changed, writing nothing (admin). */
+    @PostMapping("/workspace/import/preview")
+    public Map<String, Object> workspaceImportPreview(@RequestBody String bundleJson) {
+        requireAdmin();
+        return workspace.previewBundle(bundleJson);
     }
 
     /** Import a whole-workspace bundle: install its pack and apply its settings (admin). */

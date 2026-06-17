@@ -112,6 +112,7 @@ No cloud API key is required.
 | `PromFormat.java` | Pure Metrics snapshot -> Prometheus text exposition format |
 | `RunFilter.java` | Pure run-history filter (endpoint/outcome/session) |
 | `WorkspaceBundle.java` / `WorkspaceService.java` | Whole-workspace export/import (pack + settings) |
+| `WorkspacePreview.java` | Pure import dry-run classification (new/changed; create/overwrite) |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -261,8 +262,10 @@ http://localhost:8081
 | `GET /metrics` | Metrics snapshot (admin only) |
 | `GET /admin/overview` | Consolidated admin dashboard snapshot, incl. recent runs (admin only) |
 | `GET /admin/runs?limit=&endpoint=&outcome=&session=` | Recent runs, filterable by endpoint/outcome/session (admin) |
+| `GET /session/runs?sessionId=&limit=` | Recent runs for one session (session read access) |
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
 | `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
+| `POST /workspace/import/preview` | Dry-run an import: what would change, writes nothing (admin) |
 | `POST /workspace/import` | Import a whole-workspace bundle (admin) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
 | `GET /audit/export?format=csv\|json&since=&until=&...` | Download the (filtered, windowed) audit trail (admin) |
@@ -1122,9 +1125,16 @@ workspace** buttons (with an overwrite toggle).
 
 ```
 curl "localhost:8080/workspace/export" -H "X-API-Key: <admin-key>" -o workspace.imini-workspace.json
+curl -X POST "localhost:8080/workspace/import/preview" -H "X-API-Key: <admin-key>" \
+     -H "Content-Type: application/json" --data-binary @workspace.imini-workspace.json   # dry run
 curl -X POST "localhost:8080/workspace/import?overwrite=false" -H "X-API-Key: <admin-key>" \
      -H "Content-Type: application/json" --data-binary @workspace.imini-workspace.json
 ```
+
+**Preview before you import.** `POST /workspace/import/preview` (admin) parses a bundle and reports what an
+import *would* do -- pack entries that would be **created** vs **overwritten** vs **blocked**, and settings
+that are **new** vs **changed** vs **unchanged** -- while writing nothing. The *Plugins* card has a
+**Preview import** button next to **Import workspace**. Use it to check overwrites before applying.
 
 > Honest scope: the bundle includes skills/agents/commands and `app_settings` (e.g. the token budget). It
 > does **not** include session history, per-session settings, scheduled tasks, or audit -- it is a content
@@ -1275,7 +1285,9 @@ Click **refresh** on the card to re-poll. It's a read-only view; non-admins simp
 **resolved mode** that turn ran in, duration, outcome, and session. The overview embeds the last 10;
 `GET /admin/runs?limit=N` returns more (newest first, up to 200) and accepts `&endpoint=`, `&outcome=`
 (`ok`/`failed`), and `&session=` filters (substring, case-insensitive; blank = any) -- the admin card has
-matching filter controls. It is a bounded ring buffer that is also **persisted** (the `run_history` table) and a tail is reloaded on
+matching filter controls. For a single session, `GET /session/runs?sessionId=&limit=` returns just that
+session's runs (exact match) and only needs **read access to that session** (not admin) -- the session
+toolbar has a **runs** button that shows them inline. It is a bounded ring buffer that is also **persisted** (the `run_history` table) and a tail is reloaded on
 startup, so recent runs survive a restart. `agent.run-history.persist-max` (default 500) bounds how many
 rows are kept.
 

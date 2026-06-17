@@ -1,0 +1,48 @@
+# Example Prometheus alerting rules for imini.
+#
+# Load these by referencing this file from prometheus.yml (rule_files: ["alert-rules.yml"]) and wiring an
+# Alertmanager. The expressions use the imini_* series exposed at /metrics/prom. Thresholds are starting
+# points -- tune them to your traffic.
+#
+# NOTE: imini's counters are in-process and reset on restart, so rules use ratios and `increase(... [5m])`
+# over a window rather than absolute lifetime totals where possible.
+
+groups:
+  - name: imini
+    rules:
+      - alert: IminiInstanceDown
+        expr: up{job="imini"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "imini is not being scraped"
+          description: "Prometheus cannot scrape imini (target down) for 2 minutes."
+
+      - alert: IminiHighFailureRate
+        # >20% of runs in the last 5 minutes failed (only fires once there is some traffic)
+        expr: |
+          increase(imini_counter{name="runs_failed"}[5m])
+            / clamp_min(increase(imini_counter{name="runs_ok"}[5m])
+                        + increase(imini_counter{name="runs_failed"}[5m]), 1) > 0.2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "High run failure rate"
+          description: "More than 20% of imini runs failed over the last 5 minutes."
+
+      - alert: IminiQueueBacklog
+        # runs are waiting for a concurrency slot
+        expr: imini_concurrency_queued > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Run queue backing up"
+          description: "Runs have been queued (waiting for a slot) for 5 minutes; consider raising the slot limit."
+
+      - alert: IminiHighLatency
+        expr: imini_run_latency_avg_ms > 60000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "High average run latency"
+          description: "Average run latency has exceeded 60s for 10 minutes."

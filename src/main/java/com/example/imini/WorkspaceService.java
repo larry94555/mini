@@ -54,6 +54,65 @@ public class WorkspaceService {
     }
 
     /**
+     * Dry-run an import: report what installing the bundle WOULD do -- which pack entries would be created
+     * vs overwritten vs blocked, and which settings are new/changed/unchanged -- writing nothing.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> previewBundle(String bundleJson) {
+        if (bundleJson == null || bundleJson.isBlank()) return Map.of("error", "empty bundle");
+        Map<String, Object> root;
+        try {
+            root = mapper.readValue(bundleJson, Map.class);
+        } catch (Exception e) {
+            return Map.of("error", "invalid JSON: " + e.getMessage());
+        }
+        if (root == null || !root.containsKey("pack")) {
+            return Map.of("error", "not a workspace bundle (missing 'pack')");
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        // pack: classify via the (filesystem-aware) installer preview
+        List<String> create = List.of(), overwrite = List.of(), blocked = List.of();
+        try {
+            String packJson = mapper.writeValueAsString(root.get("pack"));
+            Map<String, Object> pv = plugins.previewInstall(packJson);
+            if (pv.containsKey("error")) return Map.of("error", "pack preview failed: " + pv.get("error"));
+            create = (List<String>) pv.getOrDefault("create", List.of());
+            overwrite = (List<String>) pv.getOrDefault("overwrite", List.of());
+            blocked = (List<String>) pv.getOrDefault("blocked", List.of());
+            Map<String, Object> packDetail = new LinkedHashMap<>();
+            packDetail.put("create", create);
+            packDetail.put("overwrite", overwrite);
+            packDetail.put("blocked", blocked);
+            out.put("packDetail", packDetail);
+        } catch (Exception e) {
+            return Map.of("error", "pack preview failed: " + e.getMessage());
+        }
+        // settings: classify each as new/changed/unchanged against current values
+        int sNew = 0, sChanged = 0, sUnchanged = 0;
+        List<String> changedKeys = new ArrayList<>();
+        Object s = root.get("settings");
+        if (s instanceof Map<?, ?> settingsMap) {
+            for (Map.Entry<?, ?> en : settingsMap.entrySet()) {
+                String k = String.valueOf(en.getKey());
+                if (k == null || k.isBlank()) continue;
+                String incoming = en.getValue() == null ? "" : String.valueOf(en.getValue());
+                String current = settings.getString(k, null);
+                String cls = WorkspacePreview.classifySetting(current, incoming);
+                switch (cls) {
+                    case "new" -> { sNew++; changedKeys.add(k + " (new)"); }
+                    case "changed" -> { sChanged++; changedKeys.add(k + " (changed)"); }
+                    default -> sUnchanged++;
+                }
+            }
+        }
+        out.put("settingsDetail", changedKeys);
+        out.put("summary", WorkspacePreview.summarize(create.size(), overwrite.size(), blocked.size(),
+                sNew, sChanged, sUnchanged));
+        return out;
+    }
+
+    /**
      * Import a bundle: install its pack (workspace-confined, honoring {@code overwrite}) and apply its
      * settings. Returns a report of what was installed/skipped and which settings were applied. Unknown
      * top-level shapes are rejected.

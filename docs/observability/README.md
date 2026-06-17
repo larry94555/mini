@@ -29,6 +29,14 @@ In Grafana: **Dashboards -> New -> Import**, upload [`grafana-dashboard.json`](g
 select your Prometheus data source when prompted. You get panels for runs (ok/failed), run latency
 (avg/max), tool calls by name, concurrency (active/queued/limit), uptime, and approximate output tokens.
 
+## 4. (Optional) alerting rules
+
+[`alert-rules.yml`](alert-rules.yml) ships example Prometheus alerting rules: instance down, high run
+failure rate (>20% over 5m), queue backlog (runs waiting for a slot), and high average latency. They are
+referenced from `prometheus.yml` via `rule_files`. Wire an Alertmanager to actually deliver them, and tune
+the thresholds to your traffic. Because imini's counters reset on restart, the failure-rate rule uses a
+5-minute `increase(...)` ratio rather than lifetime totals.
+
 ## Metrics reference
 
 | Series | Meaning |
@@ -45,5 +53,5 @@ select your Prometheus data source when prompted. You get panels for runs (ok/fa
 
 The counters are **in-process**: they reset when imini restarts and are not aggregated across nodes, and
 there are no histograms/percentiles. Scraping into Prometheus is exactly how you get retention and
-history on top of those instantaneous counters. There is no built-in alerting; add Prometheus alert rules
-if you need them.
+history on top of those instantaneous counters. Built-in alerting is not part of imini itself; the bundled `alert-rules.yml` shows how to add it at the
+Prometheus layer.

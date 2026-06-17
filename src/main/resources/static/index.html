@@ -88,6 +88,7 @@
     <select id="sessionModeSelect" title="Default permission mode for this session (persisted)">
       <option value="">(global)</option><option value="ask">ask</option><option value="auto">auto</option><option value="plan">plan</option>
     </select>
+    <button id="sessionRunsBtn" title="Recent runs for this session">runs</button>
   </span>
   <span class="grow"></span>
   <input id="apiKey" type="password" placeholder="API key (if auth on)" style="width:200px"/>
@@ -108,6 +109,7 @@
       </div>
     </div>
     <div class="composer">
+      <div id="sessionRunsPanel" class="muted" style="font-size:11px;margin:4px 0;display:none"></div>
       <textarea id="input" placeholder="Ask imini...  (Enter to send, Shift+Enter for newline)"></textarea>
       <div style="display:flex;flex-direction:column;gap:6px">
         <button class="primary" id="send">Send</button>
@@ -249,9 +251,11 @@
       <div class="row" style="gap:6px;margin-top:2px;flex-wrap:wrap;align-items:center">
         <button id="wsExport">Export workspace</button>
         <label class="muted" style="font-size:11px"><input type="checkbox" id="wsOverwrite"/> overwrite on import</label>
+        <button id="wsPreview">Preview import</button>
         <button id="wsImport">Import workspace</button>
       </div>
       <textarea id="wsJson" placeholder="paste a workspace bundle JSON to import" style="width:100%;height:60px;margin-top:4px;font-size:11px"></textarea>
+      <div id="wsPreviewOut" class="muted" style="font-size:11px;margin-top:4px"></div>
     </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
@@ -647,6 +651,21 @@ async function importWorkspace(){
   refreshPlugins(); refreshMemoryFiles();
 }
 $("#wsExport") && ($("#wsExport").onclick = exportWorkspace);
+async function previewWorkspace(){
+  const out = $("#wsPreviewOut");
+  const body = $("#wsJson").value.trim();
+  if (!body){ appendLog("[workspace] paste a bundle JSON first"); return; }
+  const r = await fetch("/workspace/import/preview", { method:"POST", headers: headers(true), body });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ out.textContent = "(preview failed; admin only?)"; return; }
+  if (j.error){ out.textContent = j.error; return; }
+  const p = (j.summary && j.summary.pack) || {}, st = (j.summary && j.summary.settings) || {};
+  out.innerHTML = "<b>dry run \u2014 nothing written</b><br>"
+    + "pack: create " + (p.create||0) + ", overwrite " + (p.overwrite||0) + ", blocked " + (p.blocked||0) + "<br>"
+    + "settings: new " + (st["new"]||0) + ", changed " + (st.changed||0) + ", unchanged " + (st.unchanged||0)
+    + ((j.packDetail && (j.packDetail.overwrite||[]).length) ? "<br>would overwrite: " + escapeHtml((j.packDetail.overwrite||[]).join(", ")) : "");
+}
+$("#wsPreview") && ($("#wsPreview").onclick = previewWorkspace);
 $("#wsImport") && ($("#wsImport").onclick = importWorkspace);
 function runsHtml(runs){
   if (!Array.isArray(runs) || !runs.length) return "(none)";
@@ -777,6 +796,16 @@ async function refreshSessionMode(){
   const m = (j && j.settings && j.settings.mode) ? j.settings.mode : "";
   sel.value = m;
 }
+async function showSessionRuns(){
+  const panel = $("#sessionRunsPanel"); if (!panel) return;
+  if (panel.style.display === "block"){ panel.style.display = "none"; return; }
+  const j = await getJson("/session/runs?sessionId=" + encodeURIComponent(state.session) + "&limit=25");
+  panel.style.display = "block";
+  if (!Array.isArray(j) || !j.length){ panel.textContent = "(no runs recorded for this session yet)"; return; }
+  panel.innerHTML = "<b>recent runs \u2014 this session</b>" + (typeof runsHtml === "function" ? runsHtml(j)
+    : j.map(r => "<div>" + escapeHtml(String(r.endpoint||"")) + " [" + escapeHtml(String(r.mode||"")) + "] " + (r.ok?"ok":"failed") + " " + (r.ms||0) + "ms</div>").join(""));
+}
+$("#sessionRunsBtn") && ($("#sessionRunsBtn").onclick = showSessionRuns);
 $("#sessionModeSelect") && ($("#sessionModeSelect").onchange = async () => {
   const v = $("#sessionModeSelect").value;
   if (!v) {

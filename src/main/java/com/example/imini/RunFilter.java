@@ -23,6 +23,12 @@ public final class RunFilter {
         return outcomeOk(r.ok(), outcome);
     }
 
+    /** Exact (case-insensitive) session match, null-safe. Used by the per-session run view. */
+    public static boolean sessionEquals(String value, String sessionId) {
+        if (sessionId == null) return false;
+        return sessionId.equalsIgnoreCase(value == null ? "" : value.trim());
+    }
+
     public static boolean outcomeOk(boolean ok, String outcome) {
         if (outcome == null) return true;
         String o = outcome.trim().toLowerCase(Locale.ROOT);

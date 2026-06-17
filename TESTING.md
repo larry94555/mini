@@ -2348,3 +2348,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** following `docs/observability/README.md`, Prometheus (using `prometheus.yml`) scrapes
   `GET /metrics/prom` and the target is UP; importing `grafana-dashboard.json` renders panels for runs,
   latency, tool calls, concurrency, and uptime against the `imini_*` series.
+
+---
+
+# Import preview, alert rules, and per-session run history
+
+## 259. WorkspacePreview classification + summary (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `WorkspacePreviewTest` passes -- `classifySetting` returns `new` (no current value),
+  `unchanged` (equal), or `changed`; `summarize` builds nested pack (create/overwrite/blocked) and settings
+  (new/changed/unchanged) counts, carries `dryRun=true`, and clamps negatives to 0.
+
+## 260. RunFilter.sessionEquals exact match (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RunFilterTest` passes the new case -- `sessionEquals` is exact and case-insensitive
+  (`proj-12` does NOT match `proj-1`) and null-safe on either argument.
+
+## 261. Workspace import preview / dry-run (manual)
+
+- **Observe:** `POST /workspace/import/preview` with a bundle returns `{packDetail, settingsDetail,
+  summary}` and writes nothing: a fresh workspace shows everything under `create`/`new`; re-previewing an
+  already-imported bundle shows entries under `overwrite` and settings as `unchanged`. The *Plugins* card's
+  **Preview import** button shows the same counts. Admin only; a non-bundle JSON returns a clear error.
+
+## 262. Prometheus alert rules sample (manual)
+
+- **Observe:** `docs/observability/alert-rules.yml` is referenced by `prometheus.yml` (`rule_files`) and
+  loads in Prometheus (Status -> Rules). The rules (instance down, >20% failure rate over 5m, queue
+  backlog, high latency) evaluate against the `imini_*` series; wiring an Alertmanager delivers them.
+
+## 263. Per-session run history (manual)
+
+- **Observe:** after some chat turns in a session, `GET /session/runs?sessionId=<id>` lists only that
+  session's runs (newest first); a different session's runs are excluded (exact match). It needs read
+  access to the session, not admin. The session toolbar's **runs** button toggles the same list inline.
