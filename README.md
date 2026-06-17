@@ -14,6 +14,7 @@ No cloud API key is required.
 - **New here? Start with [`GettingStarted.md`](GettingStarted.md)** — the newbie front door (simple test +
   recommended learning path + the docs to use).
 - First-time install: [`INSTALL.md`](INSTALL.md)
+- One-command demo (Docker, full stack incl. metrics dashboards): see [`docs/observability/`](docs/observability/) -- `docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build`
 - Core terms in plain language: [`docs/GLOSSARY.md`](docs/GLOSSARY.md)
 - Guided learning path: [`docs/LEARNING_PATH.md`](docs/LEARNING_PATH.md)
 - Guided 90-minute workshop (labs + test checkpoints): [`docs/WORKSHOP.md`](docs/WORKSHOP.md)
@@ -113,7 +114,9 @@ No cloud API key is required.
 | `RunFilter.java` | Pure run-history filter (endpoint/outcome/session) |
 | `WorkspaceBundle.java` / `WorkspaceService.java` | Whole-workspace export/import (pack + settings) |
 | `WorkspacePreview.java` | Pure import dry-run classification (new/changed; create/overwrite) |
-| `BundleSignature.java` | Pure HMAC-SHA256 bundle signing/verification (shared secret) |
+| `BundleSignature.java` | Pure bundle signing/verification: HMAC-SHA256 + Ed25519 (public-key) |
+| `Keyring.java` | Pure verifier keyring (trust several public keys; key ids) |
+| `SigningService.java` | Shared signing/verify config for bundles and plugin packs |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -692,10 +695,18 @@ curl -X POST "localhost:8080/plugin/registry/entry?name=web-tools&version=2&url=
 Paste the returned object into your registry index's `packs` array. The `sha256` matches what the pack
 will hash to, so anyone installing it gets the verified bytes.
 
+**Signed plugin packs.** When signing is configured (`bundle.signing-private-key` or
+`bundle.signing-secret`), `GET /plugin/export` and the workspace export embed a `signature` over the pack's
+content digest -- the same schemes (Ed25519/HMAC) and keyring as workspace bundles. On install (including
+install-by-URL and from a registry), imini verifies the pack's signature against the configured
+keyring/secret and reports a `signature` status in the result. Set `plugins.require-signature=true` to
+**refuse** unsigned or unverified packs entirely.
+
 > Honest scope: the registry is just a fetched JSON list -- there is no central/official index, no
-> signing or trust-root, and no dependency resolution. Trust a registry as much as you trust the site
-> hosting it; the SHA-256 pin protects integrity (you get the advertised bytes), not provenance. The
-> publish helper hashes the pack as it would be exported now; re-run it if the workspace changes.
+> signing or trust-root in the registry itself, and no dependency resolution. The SHA-256 pin protects
+> integrity (you get the advertised bytes); a pack *signature* adds provenance (who built it) when the
+> publisher signs and you trust their key. The publish helper hashes the pack as it would be exported now;
+> re-run it if the workspace changes.
 
 > Honest scope: install **validates and sanitizes every entry** -- the `type` must be one of
 > skill/agent/command and the `name` is reduced to a safe bare id (no path separators or `..` traversal),
@@ -1160,10 +1171,16 @@ pack's digest), in two schemes:
 - **Shared-secret (HMAC-SHA256).** Set `bundle.signing-secret` to the same value on both ends. Simpler, but
   symmetric: anyone who can verify can also sign.
 
-The bundle records which scheme it used (`signatureAlg`). On import, a signature that does not verify is
-**refused**; an unsigned bundle, or no configured key/secret for the bundle's scheme, is reported but
-allowed. Both `import` and `import/preview` return a `signature` field (`verified` / `invalid` / `unsigned`
-/ `no-key`).
+The bundle records which scheme it used (`signatureAlg`) and, for Ed25519, the signer's `keyId`. On
+import, a signature that does not verify is **refused**; an unsigned bundle, or no configured key/secret
+for the bundle's scheme, is reported but allowed. Both `import` and `import/preview` return a `signature`
+field (`verified` / `invalid` / `unsigned` / `no-key`).
+
+**Verifier keyring.** A verifier can trust **several** publisher public keys at once. Set
+`bundle.verify-public-keys` to a comma/newline-separated list of entries, each `keyId:base64PublicKey` or a
+bare `base64PublicKey` (key id derived from the key). The legacy single `bundle.signing-public-key` is also
+trusted. A signed bundle names the signer's `keyId` so verification picks the right key fast, then falls
+back to trying every trusted key. This turns single-signer verification into a small web of trust.
 
 ```
 # public-key: signer has the private key, verifier has the public key

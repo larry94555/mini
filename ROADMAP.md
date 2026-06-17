@@ -179,21 +179,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is complete for its educational scope, and this iteration hardened the last edges:
-bundles can be signed with **public-key (Ed25519)** signatures (true third-party provenance),
-scheduled-task run history is now **durable**, and the observability sample includes an
-**Alertmanager** routing config. Every story -- agent loop, tools, safety, persistence,
-observability, plugin lifecycle, onboarding, import safety, signing -- is closed out.
+The harness is complete for its educational scope, and this iteration extended the trust and
+deployment story: a **verifier keyring** (trust several publisher public keys), **signed plugin
+packs** (provenance on install, not just SHA-256 integrity), and a **one-command Docker demo
+stack** (imini + model + Prometheus + Alertmanager + Grafana, auto-provisioned). A merge had
+dropped the Ed25519 bundle *verify* path; this PR also restores it via the shared `SigningService`.
 
-There is no remaining high-leverage work; the project is finished for its stated goals. Anything
-further would be scope expansion rather than completion, for example:
+Every layer is now closed out. There is no remaining high-leverage feature; further work would be
+scope expansion, e.g.:
 
-- a **multi-key / keyring** verifier (trust several publisher public keys, with key ids),
-- **signed plugin packs** (extend signing from workspace bundles to individual packs/registry),
-- a **hosted demo / container image** to make first-run even easier.
+- **key rotation / revocation** metadata for the keyring (expiry, revoked-key list),
+- **signed registry index** (sign the listing document itself, not just the packs it points to),
+- **published demo image** on a registry so the stack runs without a local build.
 
-Recommendation: consider the harness done. If continuing, a **verifier keyring** (multiple trusted
-public keys) is the most natural extension of the public-key signing just shipped.
+Recommendation: the project is done for its stated goals. If continuing, **key rotation/revocation**
+is the most principled next step for the signing story.
 
 ## 3. Guidance for AI implementers
 
@@ -334,6 +334,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Verifier keyring + signed plugin packs + Docker demo stack: a `Keyring` lets a verifier trust several
+  Ed25519 public keys (with key ids); plugin packs are signed on export and verified on install (optionally
+  required via `plugins.require-signature`); and a `docker-compose.observability.yml` overlay brings up
+  imini + model + Prometheus + Alertmanager + auto-provisioned Grafana in one command. Signing config is
+  centralized in a new `SigningService` (which also restored the Ed25519 bundle verify path lost in a
+  merge). Pure `Keyring` unit-tested.
 - Public-key bundle signatures + durable scheduled-task run history + Alertmanager routing: bundles can be
   signed/verified with Ed25519 (mint keys via `POST /workspace/keygen`; signer sets the private key,
   verifiers only the public key), preferred over the existing HMAC; per-task run history now persists
