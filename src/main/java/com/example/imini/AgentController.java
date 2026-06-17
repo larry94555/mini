@@ -709,6 +709,19 @@ public class AgentController {
         return r;
     }
 
+    /** Sign a registry index JSON (embed a signature over its canonical listing digest). Admin. */
+    @PostMapping("/plugin/registry/sign")
+    public Map<String, Object> signRegistry(@RequestBody String indexJson) {
+        requireAdmin();
+        try {
+            String signed = plugins.signRegistryIndex(indexJson);
+            audit.record(currentUser(), "plugin-registry-sign", "index", "ok");
+            return Map.of("signedIndex", signed);
+        } catch (Exception e) {
+            return Map.of("error", "could not sign index: " + e.getMessage());
+        }
+    }
+
     /** Install a plugin pack from a URL, verifying its SHA-256 first (admin). Mirrors remote-skill install. */
     @PostMapping("/plugin/install-url")
     public Map<String, Object> installPluginUrl(

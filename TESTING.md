@@ -2491,3 +2491,44 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** imini (8080), Grafana (3000, admin/admin) with the **imini overview** dashboard preloaded,
   Prometheus (9090) showing the `imini` target UP and the alert rules loaded, and Alertmanager (9093). The
   Grafana panels populate as you drive a few runs in imini.
+
+---
+
+# Key rotation/revocation, signed registry index, and the published demo image
+
+## 277. Keyring expiry + revocation (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `KeyringTest` passes the new cases -- a key past its `@<epochMillis>` expiry is not trusted
+  by `verify` but is still found by `matchIgnoringStatus` (so callers can report `expired`); a future expiry
+  is trusted; a key with no expiry never expires; a revoked key id is rejected while a non-revoked one
+  verifies.
+
+## 278. Registry signable payload is canonical (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PluginRegistryTest` passes the new case -- `signablePayload` is order-independent, sorted by
+  name, prefixed `imini-registry/1`, and stable for the empty list.
+
+## 279. Key rotation / revocation end to end (manual)
+
+- **Setup:** trust a publisher key in `bundle.verify-public-keys` and sign a bundle with the matching
+  private key.
+- **Observe:** the bundle verifies (`verified`). Add the key's id to `bundle.revoked-key-ids` -> the same
+  bundle now reports `revoked` and import is refused. Give the keyring entry a past `@<epochMillis>` expiry
+  -> it reports `expired` and is refused. Rotate by adding a new key entry (new `keyId`) and re-signing.
+
+## 280. Signed registry index (manual)
+
+- **Setup:** signing configured; trust the signer's public key.
+- **Observe:** `POST /plugin/registry/sign` with an index JSON returns the index with a `signature`. Serve
+  it; `GET /plugin/registry?url=...` reports `signature: verified`. Tamper with a listing -> `invalid`.
+  With `plugins.require-signature=true`, installing from a registry whose index does not verify is refused
+  (`indexSignature` reported).
+
+## 281. Published demo image (manual)
+
+- **Run:** `docker compose -f docker-compose.published.yml up` (optionally add
+  `-f docker-compose.observability.yml`).
+- **Observe:** imini starts from `ghcr.io/larry94555/imini:latest` with no local build; the app is at
+  http://localhost:8080. The image is published by `.github/workflows/docker-publish.yml` on release/tag.

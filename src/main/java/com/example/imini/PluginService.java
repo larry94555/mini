@@ -257,6 +257,33 @@ public class PluginService {
         return entry;
     }
 
+    /**
+     * Verify a registry index's own signature (if present), over a canonical digest of its listings.
+     * Returns "verified"/"invalid"/"unsigned"/"no-key"/"revoked"/"expired".
+     */
+    @SuppressWarnings("unchecked")
+    public String verifyRegistrySignature(String indexJson) {
+        try {
+            Map<String, Object> raw = mapper.readValue(indexJson, Map.class);
+            Object sig = raw.get("signature");
+            String alg = raw.get("signatureAlg") == null ? BundleSignature.ALG_HMAC : String.valueOf(raw.get("signatureAlg"));
+            String keyId = raw.get("keyId") == null ? null : String.valueOf(raw.get("keyId"));
+            String sha = PluginPack.sha256(PluginRegistry.signablePayload(PluginRegistry.parse(indexJson)));
+            return signing.verify(sha, alg, sig == null ? null : String.valueOf(sig), keyId);
+        } catch (Exception e) {
+            return "invalid";
+        }
+    }
+
+    /** Sign a registry index JSON: embeds signature fields over the canonical listing digest. */
+    @SuppressWarnings("unchecked")
+    public String signRegistryIndex(String indexJson) throws Exception {
+        Map<String, Object> raw = mapper.readValue(indexJson, Map.class);
+        String sha = PluginPack.sha256(PluginRegistry.signablePayload(PluginRegistry.parse(indexJson)));
+        raw.putAll(signing.signFields(sha));
+        return mapper.writeValueAsString(raw);
+    }
+
     /** The configured default registry URL (may be blank). */
     public String defaultRegistryUrl() { return defaultRegistryUrl == null ? "" : defaultRegistryUrl.trim(); }
 
@@ -295,6 +322,7 @@ public class PluginService {
         out.put("url", u);
         out.put("count", packs.size());
         out.put("packs", packs);
+        out.put("signature", verifyRegistrySignature(body));
         return out;
     }
 
@@ -319,10 +347,16 @@ public class PluginService {
         } catch (Exception e) {
             return Map.of("error", "registry fetch failed: " + e.getMessage());
         }
+        String indexSig = verifyRegistrySignature(body);
+        if (requireSignature && !"verified".equals(indexSig)) {
+            return Map.of("error", "registry index signature " + indexSig + " -- refusing (plugins.require-signature=true)",
+                    "indexSignature", indexSig);
+        }
         PluginRegistry.Listing l = PluginRegistry.byName(PluginRegistry.parse(body), packName);
         if (l == null) return Map.of("error", "pack not found in registry: " + packName);
         Map<String, Object> r = new java.util.LinkedHashMap<>(installFromUrl(l.url(), l.sha256(), overwrite));
         r.put("registry", u);
+        r.put("indexSignature", indexSig);
         r.put("name", l.name());
         return r;
     }

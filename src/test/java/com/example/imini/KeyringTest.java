@@ -3,6 +3,7 @@ package com.example.imini;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -58,5 +59,37 @@ class KeyringTest {
         String b = BundleSignature.generateKeyPair().get("publicKey");
         assertNotEquals(Keyring.keyIdFor(a), Keyring.keyIdFor(b));
         assertFalse(Keyring.parse(a, null).isEmpty());
+    }
+
+    @Test
+    void expiredKeyNotTrustedButStillMatchable() {
+        Map<String, String> kp = BundleSignature.generateKeyPair();
+        String pub = kp.get("publicKey"), priv = kp.get("privateKey");
+        long now = 1_000_000_000_000L;
+        String sig = BundleSignature.signEd25519("digest", priv);
+
+        Keyring expired = Keyring.parse("k1:" + pub + "@" + (now - 1000), null);
+        assertTrue(Keyring.isExpired(expired.keys().get(0), now));
+        assertNull(expired.verify("digest", sig, "k1", Set.of(), now));         // expired -> not trusted
+        assertEquals("k1", expired.matchIgnoringStatus("digest", sig));         // but signature still matches
+
+        Keyring future = Keyring.parse("k2:" + pub + "@" + (now + 100000), null);
+        assertEquals("k2", future.verify("digest", sig, "k2", Set.of(), now));  // not yet expired
+
+        Keyring noExpiry = Keyring.parse("k3:" + pub, null);                     // 0 = never expires
+        assertEquals("k3", noExpiry.verify("digest", sig, null, Set.of(), now + 999_999_999_999L));
+    }
+
+    @Test
+    void revokedKeyRejected() {
+        Map<String, String> kp = BundleSignature.generateKeyPair();
+        String pub = kp.get("publicKey"), priv = kp.get("privateKey");
+        long now = System.currentTimeMillis();
+        String sig = BundleSignature.signEd25519("digest", priv);
+        Keyring ring = Keyring.parse("k1:" + pub, null);
+
+        assertNull(ring.verify("digest", sig, "k1", Set.of("k1"), now));        // revoked
+        assertEquals("k1", ring.verify("digest", sig, "k1", Set.of("other"), now)); // not revoked
+        assertEquals("k1", ring.matchIgnoringStatus("digest", sig));            // match ignores revocation
     }
 }

@@ -76,6 +76,22 @@ public final class PluginRegistry {
         return RetrievalService.lexicalScore(qt, l.name() + " " + l.description());
     }
 
+    /**
+     * A deterministic, canonical string over the listings (sorted by name; name|version|url|sha256 per
+     * line) suitable for signing the index. SHA-256 this to get the signing payload. Pure.
+     */
+    public static String signablePayload(List<Listing> listings) {
+        if (listings == null || listings.isEmpty()) return "imini-registry/1\n";
+        List<Listing> sorted = new ArrayList<>(listings);
+        sorted.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
+        StringBuilder sb = new StringBuilder("imini-registry/1\n");
+        for (Listing l : sorted) {
+            sb.append(l.name()).append('|').append(l.version()).append('|')
+              .append(l.url()).append('|').append(l.sha256()).append('\n');
+        }
+        return sb.toString();
+    }
+
     private static String text(JsonNode n, String field) {
         JsonNode v = n.get(field);
         if (v == null || v.isNull()) return null;

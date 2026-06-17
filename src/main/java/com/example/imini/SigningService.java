@@ -20,6 +20,7 @@ public class SigningService {
     @Value("${bundle.signing-public-key:}") private String signingPublicKey;
     @Value("${bundle.verify-public-keys:}") private String verifyPublicKeys;
     @Value("${bundle.signing-key-id:}") private String signingKeyId;
+    @Value("${bundle.revoked-key-ids:}") private String revokedKeyIds;
 
     private String secret() { return signingSecret == null ? "" : signingSecret.trim(); }
     private String privKey() { return signingPrivateKey == null ? "" : signingPrivateKey.trim(); }
@@ -28,6 +29,18 @@ public class SigningService {
     /** The verifier keyring: the configured ring plus any legacy single public key. */
     public Keyring keyring() {
         return Keyring.parse(verifyPublicKeys, pubKey());
+    }
+
+    /** Revoked key ids (case-insensitive); such keys are rejected even if a signature matches them. */
+    public java.util.Set<String> revoked() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (revokedKeyIds != null) {
+            for (String r : revokedKeyIds.split("[,\\n]")) {
+                String t = r.trim();
+                if (!t.isEmpty()) { out.add(t); out.add(t.toLowerCase(java.util.Locale.ROOT)); }
+            }
+        }
+        return out;
     }
 
     /** This signer's key id: configured value, else derived from the configured public key, else "". */
@@ -74,7 +87,15 @@ public class SigningService {
             Keyring ring = keyring();
             if (ring.isEmpty()) return "no-key";
             if (signature == null) return "unsigned";
-            return ring.verify(sha, signature, keyId) != null ? "verified" : "invalid";
+            long now = System.currentTimeMillis();
+            if (ring.verify(sha, signature, keyId, revoked(), now) != null) return "verified";
+            // a signature that matches a key the ring no longer trusts -> say why
+            String matched = ring.matchIgnoringStatus(sha, signature);
+            if (matched != null) {
+                if (revoked().contains(matched) || revoked().contains(matched.toLowerCase(java.util.Locale.ROOT))) return "revoked";
+                return "expired";
+            }
+            return "invalid";
         } else {
             if (secret().isEmpty()) return "no-key";
             if (signature == null) return "unsigned";
