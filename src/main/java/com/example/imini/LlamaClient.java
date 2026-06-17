@@ -68,6 +68,7 @@ public class LlamaClient {
 
     private final TokenBudgetService budget;
     private volatile int serverCtxCache = 0; // 0 = unknown / not yet fetched
+    private volatile int serverVisionCache = 0; // 0 unknown, 1 yes, -1 no
 
     public LlamaClient(TokenBudgetService budget) {
         this.budget = budget;
@@ -97,6 +98,28 @@ public class LlamaClient {
         }
         serverCtxCache = -1;
         return 0;
+    }
+
+    /** Best-effort: does the server expose a vision/multimodal capability? Cached. */
+    @SuppressWarnings("unchecked")
+    public boolean serverVision() {
+        if (serverVisionCache != 0) return serverVisionCache == 1;
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(propsEndpoint()))
+                    .timeout(Duration.ofSeconds(10)).GET().build();
+            HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() / 100 == 2) {
+                String body = r.body() == null ? "" : r.body().toLowerCase();
+                boolean vision = body.contains("mmproj") || body.contains("\"vision\"")
+                        || body.contains("modalities") || body.contains("clip_model") || body.contains("image");
+                serverVisionCache = vision ? 1 : -1;
+                return vision;
+            }
+        } catch (Exception ignore) {
+            // best-effort
+        }
+        serverVisionCache = -1;
+        return false;
     }
 
     @SuppressWarnings("unchecked")

@@ -1,5 +1,7 @@
 package com.example.imini;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Locale;
 
@@ -24,6 +26,28 @@ public final class PluginPack {
 
     /** A pack: a name/version/description and its entries. */
     public record Pack(String format, String name, String version, String description, List<Entry> entries) {}
+
+    /** Lowercase hex SHA-256 of the (UTF-8) text. Pure. */
+    public static String sha256(String text) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] d = md.digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * Does {@code content} match {@code expectedSha256}? A null/blank expected hash is "unpinned" and
+     * accepted (the caller should warn). Comparison is case-insensitive. Mirrors the remote-skill check.
+     */
+    public static boolean matches(String expectedSha256, String content) {
+        if (expectedSha256 == null || expectedSha256.isBlank()) return true;
+        return sha256(content).equalsIgnoreCase(expectedSha256.trim());
+    }
 
     public static boolean validType(String type) {
         return type != null && TYPES.contains(type.toLowerCase(Locale.ROOT));

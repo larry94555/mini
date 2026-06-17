@@ -174,27 +174,25 @@ These are still valuable, but they come after the top five workflow features.
 - ~~LSP-backed code intelligence~~ (go-to-def via `find_symbol`, find-refs via `find_references`).
 - ~~Session fork / rename / export UX polish~~ (done -- rename/fork/export + titles).
 - ~~`/loop` and scheduled local tasks~~ (done -- bounded iterate-until-green + local scheduler).
-- Image input.
+- ~~Image input~~ (done -- capability-gated multimodal input on the ask path).
 - ~~Plugin packaging~~ (done -- export/install packs of skills + agents + commands).
 
 ## 2. Current recommended priority
 
-All five numbered priorities and the Later-priority workflow items are now done, including
-durable settings + scheduled tasks and plugin packaging. What remains:
+The five numbered priorities and every Later-priority workflow item are now done, including
+capability-gated image input and a plugin registry (install-by-URL with SHA-256). The harness
+now covers the commonly-used Claude Code-style capabilities end to end. Remaining work is polish
+and the project's stated educational goal:
 
-- **image (multimodal) input** -- accept an image alongside a prompt (e.g. a screenshot of an
-  error) and pass it to the model where the local server supports vision; gated/optional since
-  many local llama.cpp builds are text-only,
-- broader hardening/polish: a plugin **registry** (install packs by URL with a SHA-256, like the
-  existing remote-skill install), durable per-session settings, and richer admin views.
+- **educational packaging / workshop materials** -- a guided, tier-by-tier walkthrough (the repo
+  is a teaching harness), turning the existing tiers + TESTING cases into a course,
+- richer admin/observability views (metrics, run history) in the web UI,
+- a registry index (discover packs, not just install one by URL); durable per-session settings.
 
-The recommended next step is **image (multimodal) input**, implemented behind a capability check:
-detect whether the configured model accepts images (llama-server multimodal / a vision GGUF) and,
-if so, accept an attached image in `ask`/`chat` and forward it in the OpenAI `image_url` content
-format; otherwise degrade gracefully with a clear message. It is the last commonly-used Claude
-Code-style capability missing, and the capability-gated design keeps it honest on text-only local
-models. If you would rather avoid the vision dependency, a **plugin registry** (install-by-URL
-with integrity check) is the strongest text-only alternative, building directly on this PR.
+The recommended next step is **educational packaging / workshop materials**: the codebase is now
+feature-complete for its scope, and its differentiator is being a readable, teachable
+build-your-own-agent harness. Packaging the tiers into a guided curriculum (with the deterministic
+tests as checkpoints) delivers the most value from here and needs no model dependency.
 
 ## 3. Guidance for AI implementers
 
@@ -335,6 +333,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Image (multimodal) input, capability-gated: an image attached to a one-shot `ask` is sent to the model
+  in the OpenAI `image_url` format when the model is vision-capable (`model.vision-enabled` or a `/props`
+  probe); on a text-only model it is dropped with a note so the turn still runs. Pure `VisionContent`
+  (data-URL + parts building) unit-tested; `VisionSupport` gates capability.
+- Plugin registry (install-by-URL): install a pack straight from an http/https URL, fetching it and
+  verifying its SHA-256 before writing (refuse on mismatch; unpinned allowed-but-flagged) -- mirrors the
+  remote-skill install. Pure `PluginPack.sha256`/`matches` unit-tested; `POST /plugin/install-url` + UI.
 - Durable settings + scheduled tasks: the token budget is persisted (`app_settings` via `SettingsStore`)
   and scheduled tasks are persisted to `scheduled_tasks` and reloaded on startup (overdue tasks fire
   shortly after restart, not instantly) -- runtime changes now survive a restart.

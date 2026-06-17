@@ -55,4 +55,17 @@ class PluginPackTest {
                 new PluginPack.Entry("bogus", "d", "w")));
         assertEquals("1 skill(s), 1 agent(s), 1 command(s), 1 skipped (invalid)", sum);
     }
+
+    @Test
+    void sha256IsDeterministicAndMatchesVerify() {
+        String pack = "{\"format\":\"imini-plugin/1\",\"entries\":[]}";
+        String h = PluginPack.sha256(pack);
+        assertEquals(64, h.length());
+        assertEquals(h, PluginPack.sha256(pack));            // deterministic
+        assertTrue(PluginPack.matches(h, pack));             // correct hash
+        assertTrue(PluginPack.matches(h.toUpperCase(), pack)); // case-insensitive
+        assertFalse(PluginPack.matches("deadbeef", pack));   // wrong hash
+        assertTrue(PluginPack.matches(null, pack));          // unpinned -> accepted
+        assertTrue(PluginPack.matches("   ", pack));         // blank -> accepted
+    }
 }

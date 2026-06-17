@@ -39,6 +39,7 @@ public class AgentLoop {
     @Value("${agent.profile:general}")
     private String profile;          // general (default) | coding
     @Value("${agent.plan.auto-fallback:true}") private boolean planAutoFallback;
+    private final VisionSupport vision;
     @Value("${agent.loop.max-attempts:5}") private int loopMaxAttempts;
     @Value("${agent.loop.hard-max-attempts:20}") private int loopHardMax;
     @Value("${agent.plan.step-retries:1}") private int planStepRetries;
@@ -72,7 +73,7 @@ public class AgentLoop {
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, InitService init, ContextRefService refs, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
-                     PlanHistory history, SkillService skills, AgentRegistry agents) {
+                     PlanHistory history, SkillService skills, AgentRegistry agents, VisionSupport vision) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -89,6 +90,7 @@ public class AgentLoop {
         this.history = history;
         this.skills = skills;
         this.agents = agents;
+        this.vision = vision;
     }
 
     private String systemPrompt() {
@@ -169,6 +171,21 @@ public class AgentLoop {
         for (String a : ex.attached()) sink.log("[context] attached @" + a);
         for (String sk : ex.skipped()) sink.log("[context] skipped @" + sk);
         return ex.text();
+    }
+
+    /** One-shot run that may include an image (base64 or data URL). Falls back to text on a text-only model. */
+    public String run(String sessionId, String userQuestion, String image, String imageType,
+                      Mode mode, RunSink sink) throws Exception {
+        if (image == null || image.isBlank()) return run(sessionId, userQuestion, mode, sink);
+        String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
+        boolean visionOn = vision != null && vision.enabled();
+        String dataUrl = VisionContent.dataUrl(image, imageType);
+        Object content = VisionContent.userContent(question, dataUrl, visionOn);
+        sink.log("[image] attached (" + (visionOn ? "vision model: included" : "text-only model: dropped with a note") + ")");
+        recorder.beginEdits(sessionId);
+        return withEditTrust(sessionId,
+                engine.run(systemPromptFor(question, sessionId), content, registry.tools(), mode, "main", sessionId, sink),
+                mode, sink);
     }
 
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {

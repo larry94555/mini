@@ -97,7 +97,8 @@ No cloud API key is required.
 | `LoopCommand.java` | Pure `/loop` parsing + iterate-until-green prompt/continue logic |
 | `Schedule.java` / `ScheduledTasks.java` | Pure scheduling math + the durable local task scheduler |
 | `SettingsStore.java` | Durable key/value app settings (`app_settings` table) |
-| `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation + export/install |
+| `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation/SHA-256 + export/install (incl. by URL) |
+| `VisionContent.java` / `VisionSupport.java` | Pure multimodal content building + vision capability gate |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -197,7 +198,8 @@ http://localhost:8081
 | `POST /schedule/cancel?id=` | Cancel a scheduled task |
 | `GET /plugin` | Counts of installable content (skills/agents/commands) |
 | `GET /plugin/export` | Download a plugin pack (skills + agents + commands) as JSON |
-| `POST /plugin/install` | Install a plugin pack into the workspace (admin) |
+| `POST /plugin/install` | Install a plugin pack (JSON body) into the workspace (admin) |
+| `POST /plugin/install-url?url=&sha256=` | Install a pack from a URL, verified by SHA-256 (admin) |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -567,6 +569,33 @@ you reach for* (instructions for a particular kind of task), and a subagent is *
 to* (an isolated loop that returns a summary). They compose -- e.g. a `code-review` skill can rely on the
 conventions your `CLAUDE.md` memory establishes.
 
+## Image (multimodal) input
+
+If your local model is vision-capable, you can attach an image to a one-shot `ask` and the harness sends
+it to the model in the OpenAI `image_url` format. Because most local llama.cpp builds are **text-only**,
+this is **capability-gated**: image input is active only when `model.vision-enabled=true` *or* llama-server
+reports a vision capability via `/props`. On a text-only model the image is dropped and a short note is
+added to the prompt, so the turn still runs instead of erroring.
+
+Attach an image by adding `image` (raw base64 or a full `data:` URL) and optional `imageType` to the
+request body:
+
+```
+curl -X POST localhost:8080/ask -H "X-API-Key: <key>" -H "Content-Type: application/json" -d '{
+  "question": "What does this screenshot show?",
+  "image": "data:image/png;base64,iVBORw0KGgo...",
+  "mode": "auto"
+}'
+```
+
+To run a vision model, start llama-server with a multimodal projector (e.g. `--mmproj <model.mmproj>`)
+and set `model.vision-enabled=true`.
+
+> Honest scope: image input is supported on the one-shot `ask` path (a single multimodal turn; it is not
+> threaded through plan/loop or multi-turn chat history). Capability detection via `/props` is best-effort
+> -- if it can't tell, set `model.vision-enabled` explicitly. The harness does not resize or re-encode the
+> image; very large images count against the token budget and may be trimmed.
+
 ## Plugins -- shareable packs of skills, agents, and commands
 
 `imini`'s extensibility lives in plain Markdown: `skills/`, `agents/`, and `commands/`. A **plugin pack**
@@ -586,6 +615,19 @@ curl -X POST "localhost:8080/plugin/install?overwrite=false" -H "X-API-Key: <adm
 
 A pack is a small manifest: `{ "format": "imini-plugin/1", "name", "version", "description", "entries":
 [ { "type": "skill|agent|command", "name", "content" } ] }`.
+
+**Install from a URL (a registry), verified by SHA-256.** Mirroring the remote-skill install, you can
+install a pack straight from a URL and pin its hash so you get exactly the bytes you expect:
+
+```
+curl -X POST "localhost:8080/plugin/install-url?url=https://example.com/my-pack.imini-plugin.json&sha256=<hex>" \
+     -H "X-API-Key: <admin-key>"
+```
+
+The pack is fetched (http/https only), its SHA-256 is computed and compared to the one you supply, and the
+install is **refused on mismatch**. Omitting the hash is allowed but reported as `unpinned (not verified)`
+-- pin it for anything you didn't produce yourself. The *Plugins* card has URL + sha256 fields for the
+same flow.
 
 > Honest scope: install **validates and sanitizes every entry** -- the `type` must be one of
 > skill/agent/command and the `name` is reduced to a safe bare id (no path separators or `..` traversal),
