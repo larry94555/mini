@@ -331,6 +331,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Automatic plan-mode fallback: when a normal turn's assembled prompt would exceed the enforced token cap,
+  the harness auto-runs it in plan mode (decompose into steps, each within budget) instead of trimming to
+  force a one-shot answer -- on by default (`agent.plan.auto-fallback`), never re-triggers an explicit
+  plan run; pure `PlanFallback` decision unit-tested.
 - Configurable token budget (context-overflow fix): a per-call token budget (default 8500, set in the
   config file, the web UI's *Token budget* card, or `POST /settings/token-budget`) is enforced before
   every llama-server call -- the prompt is measured (real `/tokenize`, `chars/4` fallback) and, if over

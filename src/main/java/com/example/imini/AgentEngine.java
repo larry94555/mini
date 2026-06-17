@@ -339,6 +339,23 @@ public class AgentEngine {
         return list;
     }
 
+    /** The enforced prompt cap (delegates to the budget service via the client). For plan-fallback. */
+    public int promptCap() { return llama.promptCap(); }
+
+    /** Measured token count of an assembled message list (real /tokenize, estimate fallback). */
+    public int countPromptTokens(List<Map<String, Object>> messages) {
+        int real = llama.countMessagesTokens(messages);
+        return real >= 0 ? real : TokenBudget.estimateMessages(messages);
+    }
+
+    /** A one-message-pair starting prompt ([system,user]) for a quick pre-send budget check. */
+    public List<Map<String, Object>> firstTurn(String systemPrompt, String userMessage) {
+        List<Map<String, Object>> m = new ArrayList<>();
+        m.add(msg("system", systemPrompt));
+        m.add(msg("user", userMessage));
+        return m;
+    }
+
     private Map<String, Object> msg(String role, String content) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("role", role);
