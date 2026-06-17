@@ -68,6 +68,40 @@ public class PluginService {
         return mapper.writeValueAsString(exportPack(name, version, description));
     }
 
+    /**
+     * Classify what {@link #install} would do for each pack entry WITHOUT writing anything: "create"
+     * (target absent), "overwrite" (target exists), "blocked" (invalid type/name or escapes workspace).
+     * Returns {create:[...], overwrite:[...], blocked:[...]}.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> previewInstall(String packJson) {
+        List<String> create = new ArrayList<>(), overwrite = new ArrayList<>(), blocked = new ArrayList<>();
+        List<PluginPack.Entry> entries = new ArrayList<>();
+        try {
+            Map<String, Object> raw = mapper.readValue(packJson, Map.class);
+            Object es = raw.get("entries");
+            if (es instanceof List<?> list) {
+                for (Object o : list) if (o instanceof Map<?, ?> m) {
+                    entries.add(new PluginPack.Entry(str(m, "type"), str(m, "name"), str(m, "content")));
+                }
+            }
+        } catch (Exception e) {
+            return Map.of("error", "could not parse pack: " + e.getMessage());
+        }
+        for (PluginPack.Entry e : entries) {
+            String rel = PluginPack.targetPath(e);
+            if (rel == null) { blocked.add((e.name() == null ? "?" : e.name()) + " (invalid type/name)"); continue; }
+            Path target = root.resolve(rel).normalize();
+            if (!target.startsWith(root)) { blocked.add(rel + " (escapes workspace)"); continue; }
+            if (Files.exists(target)) overwrite.add(rel); else create.add(rel);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("create", create);
+        out.put("overwrite", overwrite);
+        out.put("blocked", blocked);
+        return out;
+    }
+
     /** Install a pack JSON; returns a report (installed, skipped, errors). */
     @SuppressWarnings("unchecked")
     public Map<String, Object> install(String packJson, boolean overwrite) {

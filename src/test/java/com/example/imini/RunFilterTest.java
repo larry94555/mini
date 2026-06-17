@@ -41,4 +41,13 @@ class RunFilterTest {
         assertFalse(RunFilter.matches(r, "", "", "other"));
         assertFalse(RunFilter.matches(null, "", "", ""));
     }
+
+    @Test
+    void sessionEqualsIsExactCaseInsensitiveAndNullSafe() {
+        assertTrue(RunFilter.sessionEquals("proj-1", "proj-1"));
+        assertTrue(RunFilter.sessionEquals("PROJ-1", "proj-1")); // case-insensitive
+        assertFalse(RunFilter.sessionEquals("proj-12", "proj-1")); // exact, not substring
+        assertFalse(RunFilter.sessionEquals(null, "proj"));
+        assertFalse(RunFilter.sessionEquals("x", null));
+    }
 }
