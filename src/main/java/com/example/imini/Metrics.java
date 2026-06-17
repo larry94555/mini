@@ -83,6 +83,11 @@ public class Metrics {
         return history.recentMaps(n);
     }
 
+    /** Most recent runs (newest first) matching endpoint/outcome/session filters (blank = any). */
+    public java.util.List<java.util.Map<String, Object>> recentRuns(int n, String endpoint, String outcome, String session) {
+        return history.recentMaps(n, endpoint, outcome, session);
+    }
+
     /** Structured one-line run log for tailing/grep. */
     public void logRun(String endpoint, String sessionId, String keyLabel, long ms, boolean ok) {
         log.info("[metrics] run endpoint=" + endpoint + " session=" + sessionId

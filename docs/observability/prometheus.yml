@@ -1,0 +1,21 @@
+# Example Prometheus scrape config for imini.
+#
+# imini exposes metrics at GET /metrics/prom in the Prometheus text exposition format. The endpoint is
+# admin-only, so the scrape must send a valid admin API key. imini accepts the key either as the
+# `X-API-Key` header or as a Bearer token; below we use Bearer via `authorization`.
+#
+# Start imini with run history + metrics enabled (these are on by default), set an admin API key, then
+# point Prometheus at this file (prometheus --config.file=prometheus.yml).
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: imini
+    metrics_path: /metrics/prom
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials: REPLACE_WITH_ADMIN_API_KEY
+    static_configs:
+      - targets: ["localhost:8080"]

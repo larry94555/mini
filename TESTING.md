@@ -2310,3 +2310,41 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   token budget, scheduled tasks, plugins, admin overview) with a short description, **next**/**skip**
   controls, and a final step pointing to `docs/GLOSSARY.md` / `docs/LEARNING_PATH.md`. It changes no state
   and can be reopened anytime.
+
+---
+
+# Grafana sample, run-history filters, and whole-workspace bundle
+
+## 254. RunFilter matching (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `RunFilterTest` passes -- endpoint and session are case-insensitive substring matches
+  (blank = any), outcome accepts `ok`/`failed` (and `success`/`error` aliases; unknown = any), and a null
+  record never matches.
+
+## 255. WorkspaceBundle summary (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `WorkspaceBundleTest` passes -- `summarize` reports skill/agent/command/settings counts,
+  computes `entries` as their sum, carries the `imini-workspace/1` format, and clamps negatives to 0.
+
+## 256. Filter run history in the dashboard (manual)
+
+- **Observe:** with some runs recorded, `GET /admin/runs?outcome=failed` returns only failed runs;
+  `&endpoint=chat` and `&session=<substr>` narrow further; blank filters return everything. The admin
+  card's filter controls (endpoint / outcome / session + apply) drive the same query.
+
+## 257. Whole-workspace export + import (manual)
+
+- **Setup:** create a skill/agent/command and set the token budget.
+- **Observe:** `GET /workspace/export` downloads a `*.imini-workspace.json` with a `pack` (skills/agents/
+  commands) and a `settings` map. `GET /workspace/summary` shows the counts. On a fresh workspace,
+  `POST /workspace/import` (admin) re-creates the pack files and re-applies the settings; `overwrite=true`
+  replaces existing entries. A non-bundle JSON returns a clear error. Import is admin-only and stays
+  workspace-confined (it reuses the plugin installer). Session history / scheduled tasks are not included.
+
+## 258. Grafana + Prometheus scrape (manual)
+
+- **Observe:** following `docs/observability/README.md`, Prometheus (using `prometheus.yml`) scrapes
+  `GET /metrics/prom` and the target is UP; importing `grafana-dashboard.json` renders panels for runs,
+  latency, tool calls, concurrency, and uptime against the `imini_*` series.

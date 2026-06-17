@@ -11,6 +11,7 @@ import java.util.List;
  */
 @Component
 public class SettingsStore {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SettingsStore.class);
 
     private final Database db;
 
@@ -36,6 +37,19 @@ public class SettingsStore {
         String v = getString(key, null);
         if (v == null) return def;
         try { return Integer.parseInt(v.trim()); } catch (NumberFormatException e) { return def; }
+    }
+
+    /** Every app setting as key -> value (empty when no DB). */
+    public java.util.Map<String, String> all() {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        if (!db.available()) return out;
+        try {
+            db.query("SELECT key, value FROM app_settings ORDER BY key",
+                    rs -> { out.put(rs.getString(1), rs.getString(2)); return null; });
+        } catch (Exception e) {
+            log.warn("[settings] list failed: " + e.getMessage());
+        }
+        return out;
     }
 
     public void setInt(String key, int value) {

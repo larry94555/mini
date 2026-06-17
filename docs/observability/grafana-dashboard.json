@@ -1,0 +1,73 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }
+  ],
+  "title": "imini overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Runs (ok vs failed)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "imini_counter{name=\"runs_ok\"}", "legendFormat": "ok" },
+        { "expr": "imini_counter{name=\"runs_failed\"}", "legendFormat": "failed" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Run latency (ms)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "imini_run_latency_avg_ms", "legendFormat": "avg" },
+        { "expr": "imini_run_latency_max_ms", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Tool calls by name",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "imini_tool_calls", "legendFormat": "{{tool}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Concurrency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "imini_concurrency_active", "legendFormat": "active" },
+        { "expr": "imini_concurrency_queued", "legendFormat": "queued" },
+        { "expr": "imini_concurrency_limit", "legendFormat": "limit" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Uptime (seconds)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "imini_uptime_seconds", "legendFormat": "uptime" } ]
+    },
+    {
+      "id": 6,
+      "title": "Approx output tokens",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "imini_approx_output_tokens", "legendFormat": "tokens" } ]
+    }
+  ]
+}
