@@ -1,0 +1,44 @@
+# Example Alertmanager routing for imini's alert rules (see alert-rules.yml).
+#
+# Alertmanager receives alerts that Prometheus fires (wire Prometheus -> Alertmanager via the `alerting`
+# block in prometheus.yml) and decides who gets notified and how. This is a minimal, self-contained
+# example: one default receiver plus a critical route. Replace the receiver configs with your real
+# webhook/email/Slack settings, then run: alertmanager --config.file=alertmanager.yml
+#
+# Tip: validate with `amtool check-config alertmanager.yml`.
+
+route:
+  # group related alerts so you get one notification, not a storm
+  group_by: ["alertname"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: default
+  routes:
+    # critical alerts (e.g. IminiInstanceDown) page immediately and repeat sooner
+    - matchers:
+        - severity = "critical"
+      receiver: critical
+      group_wait: 10s
+      repeat_interval: 1h
+
+receivers:
+  - name: default
+    # Replace with a real integration. Webhook shown as the most generic option.
+    webhook_configs:
+      - url: "http://localhost:5001/imini-alerts"
+        send_resolved: true
+
+  - name: critical
+    webhook_configs:
+      - url: "http://localhost:5001/imini-alerts-critical"
+        send_resolved: true
+    # Example email (uncomment and configure smtp_* under `global:` to use):
+    # email_configs:
+    #   - to: "oncall@example.com"
+
+# inhibit_rules can suppress lower-severity alerts while a critical one for the same instance is firing:
+inhibit_rules:
+  - source_matchers: [severity = "critical"]
+    target_matchers: [severity = "warning"]
+    equal: ["alertname"]

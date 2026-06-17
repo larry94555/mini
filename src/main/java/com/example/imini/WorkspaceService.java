@@ -23,6 +23,8 @@ public class WorkspaceService {
     private final SettingsStore settings;
     private final ObjectMapper mapper = new ObjectMapper();
     @Value("${bundle.signing-secret:}") private String signingSecret;
+    @Value("${bundle.signing-private-key:}") private String signingPrivateKey;
+    @Value("${bundle.signing-public-key:}") private String signingPublicKey;
 
     public WorkspaceService(PluginService plugins, SettingsStore settings) {
         this.plugins = plugins;
@@ -30,6 +32,11 @@ public class WorkspaceService {
     }
 
     private String secret() { return signingSecret == null ? "" : signingSecret.trim(); }
+    private String privKey() { return signingPrivateKey == null ? "" : signingPrivateKey.trim(); }
+    private String pubKey() { return signingPublicKey == null ? "" : signingPublicKey.trim(); }
+
+    /** Mint a fresh Ed25519 key pair (base64) for signing/verifying bundles. */
+    public Map<String, String> generateKeyPair() { return BundleSignature.generateKeyPair(); }
 
     /** The canonical payload that gets signed: the pack's SHA-256 (a stable digest of its content). */
     private String signPayload(String packJson) { return PluginPack.sha256(packJson); }
@@ -42,9 +49,17 @@ public class WorkspaceService {
         bundle.put("exportedAt", java.time.Instant.now().toString());
         bundle.put("pack", pack);
         bundle.put("settings", settings.all());
-        if (!secret().isEmpty()) {
-            String packSha = signPayload(mapper.writeValueAsString(pack));
+        String packSha = signPayload(mapper.writeValueAsString(pack));
+        if (!privKey().isEmpty()) {                       // public-key signing preferred
+            String sig = BundleSignature.signEd25519(packSha, privKey());
+            if (!sig.isEmpty()) {
+                bundle.put("packSha256", packSha);
+                bundle.put("signatureAlg", BundleSignature.ALG_ED25519);
+                bundle.put("signature", sig);
+            }
+        } else if (!secret().isEmpty()) {                 // shared-secret signing
             bundle.put("packSha256", packSha);
+            bundle.put("signatureAlg", BundleSignature.ALG_HMAC);
             bundle.put("signature", BundleSignature.sign(packSha, secret()));
         }
         return mapper.writeValueAsString(bundle);
@@ -70,8 +85,9 @@ public class WorkspaceService {
      * vs overwritten vs blocked, and which settings are new/changed/unchanged -- writing nothing.
      */
     /**
-     * Verify the bundle's signature against the configured secret. Returns one of: "verified",
-     * "invalid", "unsigned" (bundle has no signature), or "no-secret" (no secret configured to check).
+     * Verify the bundle's signature using the scheme named by {@code signatureAlg} (Ed25519 public-key or
+     * HMAC shared-secret; default HMAC). Returns: "verified", "invalid", "unsigned" (no signature), or
+     * "no-key" (no matching key/secret configured to check against).
      */
     @SuppressWarnings("unchecked")
     private String verifySignature(Map<String, Object> root) {

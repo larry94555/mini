@@ -63,6 +63,7 @@ public class ScheduledTasks {
 
     private final Metrics metrics;
     private final java.util.Map<String, RunHistory> taskRuns = new java.util.concurrent.ConcurrentHashMap<>();
+    @org.springframework.beans.factory.annotation.Value("${agent.schedule.run-history.persist-max:50}") private int taskRunPersistMax;
 
     public ScheduledTasks(AgentLoop loop, Database db, Metrics metrics) {
         this.metrics = metrics;
@@ -173,9 +174,37 @@ public class ScheduledTasks {
 
     /** Record a scheduled execution into this task's recent-runs ring and the global run history. */
     private void recordTaskRun(Task t, long ms, boolean ok) {
+        long ts = System.currentTimeMillis();
         RunHistory h = taskRuns.computeIfAbsent(t.id, k -> new RunHistory(20));
-        h.add(new RunHistory.Record(System.currentTimeMillis(), "/schedule:" + t.kind, t.sessionId, "auto", ms, ok));
+        h.add(new RunHistory.Record(ts, "/schedule:" + t.kind, t.sessionId, "auto", ms, ok));
         if (metrics != null) metrics.recordRun("/schedule:" + t.kind, t.sessionId, "auto", ms, ok);
+        if (db.available()) {                              // durable across restarts
+            try {
+                db.update("INSERT INTO scheduled_task_runs(task_id, ts, ms, ok) VALUES(?,?,?,?)",
+                        t.id, ts, ms, ok ? 1 : 0);
+                int cap = Math.max(1, taskRunPersistMax);
+                db.update("DELETE FROM scheduled_task_runs WHERE task_id=? AND rowid NOT IN "
+                        + "(SELECT rowid FROM scheduled_task_runs WHERE task_id=? ORDER BY ts DESC, rowid DESC LIMIT ?)",
+                        t.id, t.id, cap);
+            } catch (Exception e) {
+                log.warn("[schedule] persist run for " + t.id + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /** Load a task's persisted run history (oldest-first) into its in-memory ring. */
+    private void loadTaskRuns(String id) {
+        if (!db.available()) return;
+        RunHistory h = taskRuns.computeIfAbsent(id, k -> new RunHistory(20));
+        try {
+            java.util.List<RunHistory.Record> newestFirst = db.query(
+                    "SELECT ts, ms, ok FROM scheduled_task_runs WHERE task_id=? ORDER BY ts DESC, rowid DESC LIMIT 20",
+                    rs -> new RunHistory.Record(rs.getLong(1), "/schedule", "", "auto", rs.getLong(2), rs.getInt(3) == 1),
+                    id);
+            for (int i = newestFirst.size() - 1; i >= 0; i--) h.add(newestFirst.get(i)); // -> oldest first
+        } catch (Exception e) {
+            log.warn("[schedule] load runs for " + id + ": " + e.getMessage());
+        }
     }
 
     /** Recent executions of one task (newest first), as plain maps. Empty if unknown / none yet. */
@@ -209,6 +238,7 @@ public class ScheduledTasks {
                 })) {
             // drop completed one-shots (next_run==0) rather than reloading them
             if (t.oneShot && t.nextRunEpochMs <= 0) { db.update("DELETE FROM scheduled_tasks WHERE id=?", t.id); continue; }
+            loadTaskRuns(t.id);
             tasks.put(t.id, t);
             try { maxSeq = Math.max(maxSeq, Long.parseLong(t.id.replace("task-", ""))); } catch (Exception ignore) {}
         }

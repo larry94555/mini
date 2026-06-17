@@ -10,9 +10,14 @@
 global:
   scrape_interval: 15s
 
-# Optional: load the example alerting rules (wire an Alertmanager to act on them).
+# Optional: load the example alerting rules and route them through Alertmanager.
 rule_files:
   - alert-rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["localhost:9093"]   # default Alertmanager port; see alertmanager.yml
 
 scrape_configs:
   - job_name: imini

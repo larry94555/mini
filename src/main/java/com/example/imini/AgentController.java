@@ -665,6 +665,14 @@ public class AgentController {
         return workspace.summary();
     }
 
+    /** Mint a fresh Ed25519 key pair (base64) for bundle signing. Keep the private key secret (admin). */
+    @PostMapping("/workspace/keygen")
+    public Map<String, String> workspaceKeygen() {
+        requireAdmin();
+        audit.record(currentUser(), "workspace-keygen", "ed25519", "ok");
+        return workspace.generateKeyPair();
+    }
+
     /** Dry-run a workspace import: report what would be created/overwritten/changed, writing nothing (admin). */
     @PostMapping("/workspace/import/preview")
     public Map<String, Object> workspaceImportPreview(@RequestBody String bundleJson) {

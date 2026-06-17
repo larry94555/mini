@@ -267,6 +267,7 @@ http://localhost:8081
 | `GET /schedule/runs?id=&limit=` | Recent executions of one scheduled task (session read access) |
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
 | `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
+| `POST /workspace/keygen` | Mint an Ed25519 key pair for bundle signing (admin) |
 | `POST /workspace/import/preview` | Dry-run an import: what would change, writes nothing (admin) |
 | `POST /workspace/import` | Import a whole-workspace bundle (admin) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
@@ -755,8 +756,9 @@ Scheduled-tasks card has a **history** link per task. Scheduled runs also feed t
 history and the metrics (as the `/schedule:<kind>` endpoint), so they appear in the admin
 dashboard and `imini_runs_by_endpoint` too.
 
-> Honest scope: the per-task log is in-memory (last 20 per task, resets on restart); the durable
-> `runs` counter and `lastDetail` on the task survive restarts as before.
+> Per-task history is now **durable**: executions are persisted to the `scheduled_task_runs` table
+> (pruned to `agent.schedule.run-history.persist-max`, default 50 per task) and a tail is reloaded on
+> startup, so it survives a restart along with the `runs` counter and `lastDetail`.
 
 ## Token budget and context limits
 
@@ -1148,15 +1150,25 @@ import *would* do -- pack entries that would be **created** vs **overwritten** v
 that are **new** vs **changed** vs **unchanged** -- while writing nothing. The *Plugins* card has a
 **Preview import** button next to **Import workspace**. Use it to check overwrites before applying.
 
-**Signing bundles (optional).** Set `bundle.signing-secret` to a shared secret and exported bundles are
-**signed** (HMAC-SHA256 over the pack's digest); import and preview then verify the signature. A bundle
-whose signature does not match the configured secret is **refused** on import; an unsigned bundle (or no
-configured secret) is reported but allowed. Both `import` and `import/preview` return a `signature` field
-(`verified` / `invalid` / `unsigned` / `no-secret`).
+**Signing bundles (optional).** imini can **sign** exported bundles and **verify** them on import (over the
+pack's digest), in two schemes:
+
+- **Public-key (Ed25519), preferred.** Mint a key pair with `POST /workspace/keygen` (or the *Plugins*
+  card's **keygen** button). The signer sets `bundle.signing-private-key`; verifiers set only
+  `bundle.signing-public-key`. Because verification needs only the public key, a verifier cannot forge a
+  signature -- this is true third-party provenance.
+- **Shared-secret (HMAC-SHA256).** Set `bundle.signing-secret` to the same value on both ends. Simpler, but
+  symmetric: anyone who can verify can also sign.
+
+The bundle records which scheme it used (`signatureAlg`). On import, a signature that does not verify is
+**refused**; an unsigned bundle, or no configured key/secret for the bundle's scheme, is reported but
+allowed. Both `import` and `import/preview` return a `signature` field (`verified` / `invalid` / `unsigned`
+/ `no-key`).
 
 ```
-# with bundle.signing-secret set on both ends:
-curl "localhost:8080/workspace/export" -H "X-API-Key: <admin>" -o ws.json   # signed
+# public-key: signer has the private key, verifier has the public key
+curl -X POST "localhost:8080/workspace/keygen" -H "X-API-Key: <admin>"      # -> {alg, publicKey, privateKey}
+curl "localhost:8080/workspace/export" -H "X-API-Key: <admin>" -o ws.json   # signed (Ed25519)
 curl -X POST "localhost:8080/workspace/import/preview" -H "X-API-Key: <admin>" \
      -H "Content-Type: application/json" --data-binary @ws.json             # -> "signature":"verified"
 ```
@@ -1165,8 +1177,10 @@ curl -X POST "localhost:8080/workspace/import/preview" -H "X-API-Key: <admin>" \
 > does **not** include session history, per-session settings, scheduled tasks, or audit -- it is a content
 > + config bundle, not a full state snapshot. Import reuses the plugin installer, so it stays
 > workspace-confined and path-sanitized; settings are applied as-is, so import from sources you trust.
-> Signing is **shared-secret** (HMAC): it proves the signer held the secret (provenance among parties who
-> share it), not public-key provenance, and it covers the pack digest, not the settings.
+> Signing covers the pack digest, not the settings. Ed25519 gives public-key provenance (verifiers hold
+> only the public key and cannot forge); the HMAC mode is shared-secret (anyone who can verify can also
+> sign). The `keygen` endpoint is a convenience -- keep the private key secret and distribute only the
+> public key.
 
 ## Session export / import
 
