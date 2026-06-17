@@ -113,13 +113,16 @@ public class AgentController {
         final boolean plan = isPlan(body.get("plan"));
         final boolean resume = isPlan(body.get("resume"));
         final String q = body.getOrDefault("question", "");
+        final String image = body.get("image");          // optional base64 or data: URL
+        final String imageType = body.get("imageType");  // optional media type, e.g. image/png
         sessions.claim(sessionId, currentUser());
         audit.record(currentUser(), planAction("ask", plan, resume), "session:" + sessionId, "started");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
         try {
             String answer = runService.runBounded(() ->
-                    (plan && resume) ? loop.resumePlan(sessionId, mode, new ConsoleSink())
+                    (image != null && !image.isBlank()) ? loop.run(sessionId, q, image, imageType, mode, new ConsoleSink())
+                         : (plan && resume) ? loop.resumePlan(sessionId, mode, new ConsoleSink())
                          : plan ? loop.runPlan(sessionId, q, mode, new ConsoleSink())
                          : loop.run(sessionId, q, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
@@ -530,6 +533,19 @@ public class AgentController {
                 .header("Content-Disposition", "attachment; filename=\"" + name + ".imini-plugin.json\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body);
+    }
+
+    /** Install a plugin pack from a URL, verifying its SHA-256 first (admin). Mirrors remote-skill install. */
+    @PostMapping("/plugin/install-url")
+    public Map<String, Object> installPluginUrl(
+            @RequestParam(name = "url") String url,
+            @RequestParam(name = "sha256", defaultValue = "") String sha256,
+            @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite) {
+        requireAdmin();
+        Map<String, Object> r = plugins.installFromUrl(url, sha256, overwrite);
+        audit.record(currentUser(), "plugin-install-url", url,
+                String.valueOf(r.getOrDefault("verification", r.getOrDefault("error", ""))));
+        return r;
     }
 
     /** Install a plugin pack (JSON body) into the workspace. Admin only (it writes files). */

@@ -2129,3 +2129,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   writes them under `skills/`/`agents/`/`commands/` (existing files skipped unless *overwrite*). A pack
   whose entry name contains `../` is sanitized to a safe leaf -- it cannot write outside those folders.
   Install is admin-only.
+
+---
+
+# Image input (capability-gated) + plugin registry (install-by-URL)
+
+## 232. VisionContent building + text-only fallback (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `VisionContentTest` passes -- `dataUrl` normalizes raw base64 (default `image/png`) and
+  passes a `data:` URL through; `userContent` returns a plain string with no image, a string + note on a
+  text-only model (image dropped), and an OpenAI `[{text},{image_url}]` parts array on a vision model;
+  `isMultimodal` distinguishes the two.
+
+## 233. PluginPack SHA-256 + matches (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PluginPackTest` passes the new case -- `sha256` is a deterministic 64-hex digest;
+  `matches` accepts the correct hash (case-insensitive), rejects a wrong one, and treats a null/blank
+  expected hash as unpinned (accepted).
+
+## 234. Attach an image to ask (manual)
+
+- **Setup (vision):** start llama-server with `--mmproj` and set `model.vision-enabled=true`; `POST /ask`
+  with an `image` (base64 or data URL) and a question about it.
+- **Observe:** the trace logs `[image] attached (vision model: included)` and the answer reflects the
+  image. On a text-only model (default), the log shows `text-only model: dropped with a note`, the image
+  is omitted, and the prompt carries a note -- the turn still completes.
+
+## 235. Install a plugin pack from a URL with SHA-256 (manual)
+
+- **Observe:** `POST /plugin/install-url?url=...&sha256=<hex>` (or the *Plugins* card's URL + sha256
+  fields) fetches the pack (http/https only), verifies the hash, and installs it; a wrong hash is
+  **refused** with `expected`/`actual` reported; omitting the hash installs but is flagged
+  `unpinned (not verified)`. Admin only.

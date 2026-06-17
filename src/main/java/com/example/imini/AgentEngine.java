@@ -79,9 +79,15 @@ public class AgentEngine {
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
                       Mode mode, String label, String sessionId, RunSink sink) throws Exception {
+        return run(systemPrompt, (Object) userMessage, tools, mode, label, sessionId, sink);
+    }
+
+    /** Run with a possibly-multimodal user content (a String, or an OpenAI parts array for images). */
+    public String run(String systemPrompt, Object userContent, Map<String, Tool> tools,
+                      Mode mode, String label, String sessionId, RunSink sink) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(msg("system", systemPrompt));
-        messages.add(msg("user", userMessage));
+        messages.add(msgObj("user", userContent));
         return converse(messages, tools, mode, label, sessionId, sink).answer();
     }
 
@@ -357,6 +363,10 @@ public class AgentEngine {
     }
 
     private Map<String, Object> msg(String role, String content) {
+        return msgObj(role, content);
+    }
+
+    private Map<String, Object> msgObj(String role, Object content) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("role", role);
         m.put("content", content);

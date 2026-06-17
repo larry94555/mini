@@ -198,6 +198,12 @@
         <label class="muted" style="font-size:11px"><input type="checkbox" id="pluginOverwrite"/> overwrite existing</label>
         <button id="pluginInstall">Install pack</button>
       </div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Or install from a URL (verified by SHA-256):</div>
+      <div class="row" style="gap:6px;margin-top:2px;flex-wrap:wrap;align-items:center">
+        <input id="pluginUrl" placeholder="https://.../pack.imini-plugin.json" style="min-width:170px;flex:1"/>
+        <input id="pluginSha" placeholder="sha256 (optional)" style="width:120px"/>
+        <button id="pluginInstallUrl">Install from URL</button>
+      </div>
     </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
@@ -474,6 +480,20 @@ async function installPlugin(){
 $("#refreshPluginLink") && ($("#refreshPluginLink").onclick = refreshPlugins);
 $("#pluginExport") && ($("#pluginExport").onclick = exportPlugin);
 $("#pluginInstall") && ($("#pluginInstall").onclick = installPlugin);
+async function installPluginUrl(){
+  const url = $("#pluginUrl").value.trim();
+  if (!url){ appendLog("[plugin] enter a URL"); return; }
+  const sha = $("#pluginSha").value.trim();
+  const overwrite = $("#pluginOverwrite").checked;
+  const qs = "/plugin/install-url?url=" + encodeURIComponent(url) + "&sha256=" + encodeURIComponent(sha) + "&overwrite=" + overwrite;
+  const r = await fetch(qs, { method:"POST", headers: headers(false) });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ appendLog("[plugin] URL install failed (admin only?)"); return; }
+  if (j.error){ appendLog("[plugin] " + j.error + (j.actual ? " (actual " + j.actual.slice(0,16) + "...)" : "")); return; }
+  appendLog("[plugin] " + (j.verification||"installed") + "; installed " + (j.installed||[]).length + ", skipped " + (j.skipped||[]).length);
+  refreshPlugins(); refreshMemoryFiles();
+}
+$("#pluginInstallUrl") && ($("#pluginInstallUrl").onclick = installPluginUrl);
 async function refreshSchedule(){
   const el = $("#schedList"); if (!el) return;
   const rows = await getJson("/schedule");

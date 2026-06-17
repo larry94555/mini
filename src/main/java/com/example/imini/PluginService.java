@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,6 +32,8 @@ public class PluginService {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path root = Path.of("").toAbsolutePath().normalize();
+    private final HttpClient http = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(15)).build();
 
     /** Build a pack from everything currently in the workspace. */
     public PluginPack.Pack exportPack(String name, String version, String description) {
@@ -104,6 +110,48 @@ public class PluginService {
         out.put("errors", errors);
         out.put("summary", PluginPack.summarize(pack.entries()));
         return out;
+    }
+
+    /**
+     * Install a pack fetched over HTTP(S), verifying its SHA-256 first (mirrors the remote-skill install).
+     * Refuses on hash mismatch; an absent expected hash is accepted but flagged "unpinned". Only http/https
+     * URLs are allowed.
+     */
+    public Map<String, Object> installFromUrl(String url, String expectedSha256, boolean overwrite) {
+        if (url == null || url.isBlank()) return Map.of("error", "url is required");
+        String u = url.trim();
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            return Map.of("error", "only http/https URLs are allowed");
+        }
+        String packJson;
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(u))
+                    .timeout(java.time.Duration.ofSeconds(30)).GET().build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 != 2) {
+                return Map.of("error", "fetch failed: HTTP " + resp.statusCode());
+            }
+            packJson = resp.body();
+        } catch (Exception e) {
+            return Map.of("error", "fetch failed: " + e.getMessage());
+        }
+
+        String actual = PluginPack.sha256(packJson);
+        boolean pinned = expectedSha256 != null && !expectedSha256.isBlank();
+        if (pinned && !PluginPack.matches(expectedSha256, packJson)) {
+            log.warn("[plugin] refused " + u + ": sha256 mismatch");
+            Map<String, Object> out = new java.util.LinkedHashMap<>();
+            out.put("error", "sha256 mismatch -- refusing to install");
+            out.put("expected", expectedSha256.trim());
+            out.put("actual", actual);
+            return out;
+        }
+
+        Map<String, Object> r = new java.util.LinkedHashMap<>(install(packJson, overwrite));
+        r.put("url", u);
+        r.put("sha256", actual);
+        r.put("verification", pinned ? "verified (sha256 matched)" : "unpinned (no sha256 supplied -- not verified)");
+        return r;
     }
 
     /** Counts of what's currently available, for the UI. */
