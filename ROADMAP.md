@@ -179,20 +179,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope and now safe-by-default for imports (dry-run
-preview), ships example alerting rules alongside the Grafana dashboard, and scopes run history to
-a single session. The observability, plugin, persistence, and onboarding stories are all
-complete. Remaining ideas are minor refinements and can be picked up opportunistically:
+The harness is complete for its educational scope. This iteration closed the last coherent gaps:
+scheduled tasks now have per-run history, bundles can be signed/verified (shared-secret HMAC),
+and the Grafana sample has runs-by-endpoint and requests-by-key panels. The observability,
+plugin, persistence, onboarding, and import-safety stories are all done.
 
-- **scheduled-task run history** -- surface past runs of a scheduled task next to its definition,
-- **bundle signing** -- optionally sign a workspace/plugin bundle so import can verify provenance,
-  not just integrity,
-- **richer Grafana panels** -- add request-by-key and per-endpoint breakdowns to the sample
-  dashboard.
+There is no remaining high-leverage feature; the project is effectively finished for its stated
+goals. Genuinely optional extras, if the project continues:
 
-There is no single high-leverage next step left; the project is effectively done for its stated
-educational scope. If continuing, **scheduled-task run history** is the most coherent follow-on
-(it reuses the run-history + filter work), with **bundle signing** as the most valuable hardening.
+- **public-key bundle signatures** -- upgrade the shared-secret HMAC to asymmetric signing so
+  verification needs only a public key (true third-party provenance),
+- **persist scheduled-task run history** -- keep per-task executions across restarts (small table),
+- **alerting docs expansion** -- a worked Alertmanager routing example for the bundled rules.
+
+If continuing, **public-key bundle signatures** is the most valuable hardening; otherwise this is
+a reasonable place to consider the harness done.
 
 ## 3. Guidance for AI implementers
 
@@ -333,6 +334,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Scheduled-task run history + bundle signing + richer Grafana panels: each scheduled task keeps a short
+  in-memory run log (`GET /schedule/runs`, plus a global `/schedule:<kind>` run-history/metrics feed);
+  workspace/plugin bundles can be signed and verified with a shared-secret HMAC (`bundle.signing-secret`,
+  pure `BundleSignature`); and the sample Grafana dashboard gains runs-by-endpoint
+  (`imini_runs_by_endpoint`) and requests-by-key panels. Pure `BundleSignature` unit-tested.
 - Workspace import preview + Prometheus alert rules + per-session run history: `POST
   /workspace/import/preview` dry-runs an import (create/overwrite/blocked + setting new/changed/unchanged,
   writing nothing) via pure `WorkspacePreview`; `docs/observability/alert-rules.yml` ships example

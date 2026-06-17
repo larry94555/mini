@@ -113,6 +113,7 @@ No cloud API key is required.
 | `RunFilter.java` | Pure run-history filter (endpoint/outcome/session) |
 | `WorkspaceBundle.java` / `WorkspaceService.java` | Whole-workspace export/import (pack + settings) |
 | `WorkspacePreview.java` | Pure import dry-run classification (new/changed; create/overwrite) |
+| `BundleSignature.java` | Pure HMAC-SHA256 bundle signing/verification (shared secret) |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -263,6 +264,7 @@ http://localhost:8081
 | `GET /admin/overview` | Consolidated admin dashboard snapshot, incl. recent runs (admin only) |
 | `GET /admin/runs?limit=&endpoint=&outcome=&session=` | Recent runs, filterable by endpoint/outcome/session (admin) |
 | `GET /session/runs?sessionId=&limit=` | Recent runs for one session (session read access) |
+| `GET /schedule/runs?id=&limit=` | Recent executions of one scheduled task (session read access) |
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
 | `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
 | `POST /workspace/import/preview` | Dry-run an import: what would change, writes nothing (admin) |
@@ -746,6 +748,16 @@ curl -X POST "localhost:8080/schedule/cancel?id=task-1" -H "X-API-Key: <key>" # 
 > permission rules; because they run in AUTO mode, only enable them for sessions/workspaces where
 > unattended tool use is acceptable.
 
+
+**Per-task run history.** Each task keeps a short in-memory log of its recent executions
+(status, latency, when). `GET /schedule/runs?id=<taskId>` returns them (newest first), and the
+Scheduled-tasks card has a **history** link per task. Scheduled runs also feed the global run
+history and the metrics (as the `/schedule:<kind>` endpoint), so they appear in the admin
+dashboard and `imini_runs_by_endpoint` too.
+
+> Honest scope: the per-task log is in-memory (last 20 per task, resets on restart); the durable
+> `runs` counter and `lastDetail` on the task survive restarts as before.
+
 ## Token budget and context limits
 
 A local model has a fixed **context window** (`n_ctx`). If a request's prompt exceeds it, llama-server
@@ -1136,10 +1148,25 @@ import *would* do -- pack entries that would be **created** vs **overwritten** v
 that are **new** vs **changed** vs **unchanged** -- while writing nothing. The *Plugins* card has a
 **Preview import** button next to **Import workspace**. Use it to check overwrites before applying.
 
+**Signing bundles (optional).** Set `bundle.signing-secret` to a shared secret and exported bundles are
+**signed** (HMAC-SHA256 over the pack's digest); import and preview then verify the signature. A bundle
+whose signature does not match the configured secret is **refused** on import; an unsigned bundle (or no
+configured secret) is reported but allowed. Both `import` and `import/preview` return a `signature` field
+(`verified` / `invalid` / `unsigned` / `no-secret`).
+
+```
+# with bundle.signing-secret set on both ends:
+curl "localhost:8080/workspace/export" -H "X-API-Key: <admin>" -o ws.json   # signed
+curl -X POST "localhost:8080/workspace/import/preview" -H "X-API-Key: <admin>" \
+     -H "Content-Type: application/json" --data-binary @ws.json             # -> "signature":"verified"
+```
+
 > Honest scope: the bundle includes skills/agents/commands and `app_settings` (e.g. the token budget). It
 > does **not** include session history, per-session settings, scheduled tasks, or audit -- it is a content
 > + config bundle, not a full state snapshot. Import reuses the plugin installer, so it stays
 > workspace-confined and path-sanitized; settings are applied as-is, so import from sources you trust.
+> Signing is **shared-secret** (HMAC): it proves the signer held the secret (provenance among parties who
+> share it), not public-key provenance, and it covers the pack digest, not the settings.
 
 ## Session export / import
 

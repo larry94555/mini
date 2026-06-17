@@ -27,7 +27,8 @@ curl "localhost:8080/metrics/prom" -H "X-API-Key: <admin-key>"
 
 In Grafana: **Dashboards -> New -> Import**, upload [`grafana-dashboard.json`](grafana-dashboard.json), and
 select your Prometheus data source when prompted. You get panels for runs (ok/failed), run latency
-(avg/max), tool calls by name, concurrency (active/queued/limit), uptime, and approximate output tokens.
+(avg/max), tool calls by name, concurrency (active/queued/limit), **runs by endpoint**, **requests by API
+key**, uptime, and approximate output tokens.
 
 ## 4. (Optional) alerting rules
 
@@ -44,6 +45,7 @@ the thresholds to your traffic. Because imini's counters reset on restart, the f
 | `imini_counter{name="..."}` | Named event counters (e.g. `runs_ok`, `runs_failed`, `runs_started`, `tool_calls`) |
 | `imini_tool_calls{tool="..."}` | Tool calls by tool name |
 | `imini_requests_by_key{key="..."}` | Requests by API-key label |
+| `imini_runs_by_endpoint{endpoint="..."}` | Runs by endpoint (incl. `/schedule:<kind>` for scheduled tasks) |
 | `imini_run_latency_avg_ms` / `imini_run_latency_max_ms` | Run latency (average / max) |
 | `imini_concurrency_active` / `_queued` / `_limit` | Live run concurrency |
 | `imini_uptime_seconds` | Process uptime |

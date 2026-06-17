@@ -1,6 +1,7 @@
 package com.example.imini;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -21,13 +22,19 @@ public class WorkspaceService {
     private final PluginService plugins;
     private final SettingsStore settings;
     private final ObjectMapper mapper = new ObjectMapper();
+    @Value("${bundle.signing-secret:}") private String signingSecret;
 
     public WorkspaceService(PluginService plugins, SettingsStore settings) {
         this.plugins = plugins;
         this.settings = settings;
     }
 
-    /** Build the bundle JSON: {format, exportedAt, pack:{...}, settings:{k:v}}. */
+    private String secret() { return signingSecret == null ? "" : signingSecret.trim(); }
+
+    /** The canonical payload that gets signed: the pack's SHA-256 (a stable digest of its content). */
+    private String signPayload(String packJson) { return PluginPack.sha256(packJson); }
+
+    /** Build the bundle JSON: {format, exportedAt, pack:{...}, settings:{k:v}[, packSha256, signature]}. */
     public String exportJson(String name, String description) throws Exception {
         PluginPack.Pack pack = plugins.exportPack(name, "1", description);
         Map<String, Object> bundle = new LinkedHashMap<>();
@@ -35,6 +42,11 @@ public class WorkspaceService {
         bundle.put("exportedAt", java.time.Instant.now().toString());
         bundle.put("pack", pack);
         bundle.put("settings", settings.all());
+        if (!secret().isEmpty()) {
+            String packSha = signPayload(mapper.writeValueAsString(pack));
+            bundle.put("packSha256", packSha);
+            bundle.put("signature", BundleSignature.sign(packSha, secret()));
+        }
         return mapper.writeValueAsString(bundle);
     }
 
@@ -57,6 +69,23 @@ public class WorkspaceService {
      * Dry-run an import: report what installing the bundle WOULD do -- which pack entries would be created
      * vs overwritten vs blocked, and which settings are new/changed/unchanged -- writing nothing.
      */
+    /**
+     * Verify the bundle's signature against the configured secret. Returns one of: "verified",
+     * "invalid", "unsigned" (bundle has no signature), or "no-secret" (no secret configured to check).
+     */
+    @SuppressWarnings("unchecked")
+    private String verifySignature(Map<String, Object> root) {
+        Object sig = root.get("signature");
+        if (secret().isEmpty()) return sig == null ? "no-secret" : "no-secret";
+        if (sig == null) return "unsigned";
+        try {
+            String packSha = signPayload(mapper.writeValueAsString(root.get("pack")));
+            return BundleSignature.verify(packSha, secret(), String.valueOf(sig)) ? "verified" : "invalid";
+        } catch (Exception e) {
+            return "invalid";
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> previewBundle(String bundleJson) {
         if (bundleJson == null || bundleJson.isBlank()) return Map.of("error", "empty bundle");
@@ -109,6 +138,7 @@ public class WorkspaceService {
         out.put("settingsDetail", changedKeys);
         out.put("summary", WorkspacePreview.summarize(create.size(), overwrite.size(), blocked.size(),
                 sNew, sChanged, sUnchanged));
+        out.put("signature", verifySignature(root));
         return out;
     }
 
@@ -130,7 +160,13 @@ public class WorkspaceService {
             return Map.of("error", "not a workspace bundle (missing 'pack')");
         }
 
+        String sigStatus = verifySignature(root);
+        if (sigStatus.equals("invalid")) {
+            return Map.of("error", "signature verification failed -- refusing to import", "signature", "invalid");
+        }
+
         Map<String, Object> out = new LinkedHashMap<>();
+        out.put("signature", sigStatus);
         // 1) install the pack via the existing, confined installer
         try {
             String packJson = mapper.writeValueAsString(root.get("pack"));

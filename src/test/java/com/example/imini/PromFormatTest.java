@@ -33,6 +33,10 @@ class PromFormatTest {
         conc.put("active", 1);
         conc.put("queued", 0);
         snap.put("concurrency", conc);
+        Map<String, Long> eps = new TreeMap<>();
+        eps.put("/chat", 4L);
+        eps.put("/schedule:run", 1L);
+        snap.put("runs_by_endpoint", eps);
         return snap;
     }
 
@@ -46,6 +50,7 @@ class PromFormatTest {
         assertTrue(out.contains("imini_uptime_seconds 90061"));
         assertTrue(out.contains("imini_run_latency_max_ms 300"));
         assertTrue(out.contains("imini_concurrency_active 1"));
+        assertTrue(out.contains("imini_runs_by_endpoint{endpoint=\"/chat\"} 4"));
     }
 
     @Test
