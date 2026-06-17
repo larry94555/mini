@@ -87,7 +87,8 @@ No cloud API key is required.
 | `PermissionService.java` | Permission modes, allow/deny rules, remembered decisions, plan mode, write confinement |
 | `Sandbox.java` | Command screening, read confinement, optional container execution wrapper |
 | `CheckpointStore.java` | Snapshot-before-edit and rewind |
-| `SessionStore.java` | Session history persistence |
+| `SessionStore.java` | Session history + ownership/sharing + titles persistence |
+| `SessionNaming.java` | Pure title normalization + fork-name derivation |
 | `SessionBundle.java` | Pure build/validate/extract/migrate of a portable session export bundle |
 | `Database.java` | SQLite connection and migrations |
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
@@ -177,8 +178,11 @@ http://localhost:8081
 | `POST /chat` | Multi-turn session prompt, blocking (`"plan":true` to plan; `"resume":true` to resume) |
 | `POST /ask/stream` | One-shot prompt over SSE |
 | `POST /chat/stream` | Session prompt over SSE |
-| `GET /sessions` | List sessions |
+| `GET /sessions` | List sessions (ids the caller can read) |
 | `GET /session?id=` | Read one session |
+| `GET /session/titles` | Friendly titles for readable sessions (`id -> title`) |
+| `POST /session/rename?sessionId=&title=` | Set/clear a session's title (owner/admin) |
+| `POST /session/fork?sessionId=&title=` | Copy a session (conversation + plans + todos) into a new one you own |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -804,6 +808,30 @@ curl -X POST "localhost:8080/preview/apply?sessionId=default&id=pv-1&hunks=0,2" 
 > prefix/suffix trimmed), good for small targeted edits -- not a full LCS diff. Previews are in-memory
 > and per-session (ephemeral). `apply_previewed_patch` re-applies the selected hunks against the
 > *current* files, so if a file changed since staging, the apply aborts rather than clobbering it.
+
+## Session fork, rename, and export
+
+Three small lifecycle conveniences in the toolbar (and over HTTP):
+
+- **Rename** -- give a session a friendly title instead of a random id. The session picker shows
+  `My refactor  (chat-1a2b)`; titles are normalized (trimmed, single-spaced, capped at 80 chars).
+  `POST /session/rename?sessionId=...&title=...` (blank `title` clears it).
+- **Fork** -- branch your work: copy a session's conversation, plan history, and todos into a **new**
+  session that you own, leaving the original untouched. Handy before trying a risky direction. The new
+  session is titled `fork of <name>` by default (it won't stack into `fork of fork of ...`).
+  `POST /session/fork?sessionId=...` returns the new id.
+- **Export** -- one click downloads the current session as a `*.imini-session.json` bundle (the same
+  bundle described below), so you can archive it or import it elsewhere.
+
+```
+curl -X POST "localhost:8080/session/rename?sessionId=proj&title=Payments%20refactor" -H "X-API-Key: <key>"
+curl -X POST "localhost:8080/session/fork?sessionId=proj"                              -H "X-API-Key: <key>"
+```
+
+> Honest scope: fork copies conversation + plan history + todos (the same content the export bundle
+> carries); it does not copy per-session skill overrides or the shared-with list (a fork is yours, and
+> starts private). Rename/fork require write access to the source (owner/admin/unowned); fork only needs
+> read access since it creates a new session you own. Titles are display-only metadata.
 
 ## Session export / import
 

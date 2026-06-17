@@ -69,6 +69,9 @@
     <span class="muted">session</span>
     <select id="sessionSelect" style="min-width:140px"></select>
     <button id="newSession" title="Start a fresh session">new</button>
+    <button id="renameSession" title="Rename this session">rename</button>
+    <button id="forkSession" title="Copy this session into a new one">fork</button>
+    <button id="exportSession" title="Download this session as a JSON bundle">export</button>
   </span>
   <span class="grow"></span>
   <input id="apiKey" type="password" placeholder="API key (if auth on)" style="width:200px"/>
@@ -422,10 +425,47 @@ async function getJson(path){ try { const r = await fetch(path, {headers: header
 
 async function refreshSessions(){
   const list = await getJson("/sessions"); const sel = $("#sessionSelect");
+  const titles = (await getJson("/session/titles")) || {};
   const ids = Array.isArray(list) ? list : [];
   if (!ids.includes(state.session)) ids.unshift(state.session);
-  sel.innerHTML = ids.map(id => '<option '+(id===state.session?'selected':'')+'>'+id+'</option>').join("");
+  sel.innerHTML = ids.map(id => {
+    const label = titles[id] ? (titles[id] + "  (" + id + ")") : id;
+    return '<option value="' + escapeHtml(id) + '" ' + (id===state.session?'selected':'') + '>'
+      + escapeHtml(label) + '</option>';
+  }).join("");
 }
+async function renameCurrentSession(){
+  const cur = (await getJson("/session/titles")) || {};
+  const t = prompt("Session title (blank to clear):", cur[state.session] || "");
+  if (t === null) return;
+  await post("/session/rename?sessionId=" + encodeURIComponent(state.session) + "&title=" + encodeURIComponent(t), {});
+  appendLog("[session] renamed");
+  refreshSessions();
+}
+async function forkCurrentSession(){
+  const r = await post("/session/fork?sessionId=" + encodeURIComponent(state.session), {});
+  const j = r && r.ok ? await r.json() : null;
+  if (!j || !j.sessionId){ appendLog("[fork] failed"); return; }
+  appendLog("[fork] " + state.session + " -> " + j.sessionId + " (messages=" + j.messages + ", plans=" + j.plans + ")");
+  state.session = j.sessionId; localStorage.setItem("imini.session", state.session);
+  await refreshSessions();
+  const sel = $("#sessionSelect"); if (sel) sel.value = state.session;
+  refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSessionActivity();
+}
+async function exportCurrentSession(){
+  const bundle = await getJson("/session/export?sessionId=" + encodeURIComponent(state.session));
+  if (!bundle){ appendLog("[export] failed"); return; }
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = state.session + ".imini-session.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+  appendLog("[export] downloaded " + a.download);
+}
+$("#renameSession") && ($("#renameSession").onclick = renameCurrentSession);
+$("#forkSession") && ($("#forkSession").onclick = forkCurrentSession);
+$("#exportSession") && ($("#exportSession").onclick = exportCurrentSession);
 $("#sessionSelect").onchange = async (e) => {
   state.session = e.target.value; localStorage.setItem("imini.session", state.session);
   $("#messages").innerHTML=""; $("#log").textContent="";

@@ -495,6 +495,100 @@ public class AgentController {
 
     /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
     /** Project what an import would do (counts before/incoming/after) without applying it. */
+    /** Friendly titles for the readable sessions (id -> title); powers the session list labels. */
+    @GetMapping("/session/titles")
+    public Map<String, String> sessionTitles() {
+        Principal caller = RequestContext.current();
+        List<String> ids = sessions.list().stream()
+                .filter(id -> Ownership.canRead(caller, sessions.owner(id), sessions.readers(id)))
+                .toList();
+        return sessions.titlesFor(ids);
+    }
+
+    /** Rename a session (set/clear its friendly title). Owner/admin/unowned only. */
+    @PostMapping("/session/rename")
+    public Map<String, Object> renameSession(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "title", defaultValue = "") String title) {
+        requireAccess(sessionId);
+        String clean = SessionNaming.cleanTitle(title);
+        sessions.setTitle(sessionId, clean);
+        audit.record(currentUser(), "rename", "session:" + sessionId, clean.isEmpty() ? "(cleared)" : clean);
+        return Map.of("sessionId", sessionId, "title", clean);
+    }
+
+    /**
+     * Fork a session: copy its conversation, plan history, and todos into a NEW session owned by the
+     * caller. The original is untouched. Returns the new id and what was copied.
+     */
+    @PostMapping("/session/fork")
+    public Map<String, Object> forkSession(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "title", defaultValue = "") String title) {
+        requireRead(sessionId);
+        String newId = "fork-" + UUID.randomUUID().toString().substring(0, 8);
+        sessions.claim(newId, currentUser());
+
+        // 1) conversation
+        List<Map<String, Object>> messages = sessions.get(sessionId);
+        sessions.save(newId, new java.util.ArrayList<>(messages));
+        // 2) todos
+        todos.set(newId, todos.get(sessionId));
+        // 3) plan history (oldest-first so seq numbering is preserved)
+        List<Map<String, Object>> plans = new java.util.ArrayList<>();
+        for (Map<String, Object> sum : history.list(sessionId)) {
+            Object seq = sum.get("seq");
+            if (seq instanceof Number n) {
+                Map<String, Object> full = history.get(sessionId, n.intValue());
+                if (full != null) plans.add(full);
+            }
+        }
+        java.util.Collections.reverse(plans);
+        int copiedPlans = 0;
+        for (Map<String, Object> plan : plans) {
+            try {
+                String goal = String.valueOf(plan.getOrDefault("goal", ""));
+                String report = String.valueOf(plan.getOrDefault("report", ""));
+                List<TodoStore.Item> items = new java.util.ArrayList<>();
+                Map<Integer, List<String>> transcript = new java.util.LinkedHashMap<>();
+                if (plan.get("steps") instanceof List<?> steps) {
+                    int i = 0;
+                    for (Object so : steps) {
+                        if (so instanceof Map<?, ?> sm) {
+                            Object txt = sm.get("text"), stt = sm.get("status");
+                            items.add(new TodoStore.Item(txt == null ? "" : String.valueOf(txt),
+                                    stt == null ? "pending" : String.valueOf(stt)));
+                            if (sm.get("tools") instanceof List<?> tl) {
+                                List<String> ts = new java.util.ArrayList<>();
+                                for (Object t : tl) ts.add(String.valueOf(t));
+                                transcript.put(i, ts);
+                            }
+                        }
+                        i++;
+                    }
+                }
+                if (!items.isEmpty()) { history.archive(newId, goal, items, transcript, report); copiedPlans++; }
+            } catch (Exception ignore) {
+                // skip a malformed plan; copy the rest
+            }
+        }
+        // title: explicit, else "fork of <source name>"
+        String chosen = SessionNaming.cleanTitle(title);
+        if (chosen.isEmpty()) chosen = SessionNaming.forkTitle(sessions.title(sessionId), sessionId);
+        sessions.setTitle(newId, chosen);
+
+        audit.record(currentUser(), "fork", "session:" + sessionId,
+                "-> " + newId + " messages=" + messages.size() + " plans=" + copiedPlans);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("sessionId", newId);
+        out.put("from", sessionId);
+        out.put("title", chosen);
+        out.put("messages", messages.size());
+        out.put("plans", copiedPlans);
+        out.put("todos", todos.get(newId).size());
+        return out;
+    }
+
     @PostMapping("/session/import/preview")
     public Map<String, Object> importPreview(@RequestBody Map<String, Object> bundle,
             @RequestParam(name = "mode", defaultValue = "new") String mode,

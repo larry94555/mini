@@ -23,6 +23,7 @@ public class SessionStore {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, List<Map<String, Object>>> cache = new ConcurrentHashMap<>();
     private final Map<String, String> owners = new ConcurrentHashMap<>(); // session_id -> owner
+    private final Map<String, String> titles = new ConcurrentHashMap<>(); // session_id -> display title
     private final Map<String, java.util.Set<String>> shares = new ConcurrentHashMap<>(); // session_id -> readers
 
     public SessionStore(Database db) {
@@ -147,6 +148,53 @@ public class SessionStore {
         if (previous != null && !previous.equals(newOwner)) share(id, previous);
         unshare(id, newOwner); // the new owner need not also appear as a reader
         return previous;
+    }
+
+    /** Set (or clear, when blank) a session's friendly title. */
+    public synchronized void setTitle(String id, String title) {
+        String clean = SessionNaming.cleanTitle(title);
+        if (clean.isEmpty()) {
+            titles.remove(id);
+            if (db.available()) {
+                try { db.update("DELETE FROM session_titles WHERE session_id=?", id); }
+                catch (Exception e) { log.warn("[session] could not clear title for '" + id + "': " + e.getMessage()); }
+            }
+            return;
+        }
+        titles.put(id, clean);
+        if (db.available()) {
+            try {
+                db.update("INSERT INTO session_titles(session_id, title) VALUES(?,?) "
+                        + "ON CONFLICT(session_id) DO UPDATE SET title=excluded.title", id, clean);
+            } catch (Exception e) {
+                log.warn("[session] could not set title for '" + id + "': " + e.getMessage());
+            }
+        }
+    }
+
+    /** A session's title, or "" if none set. */
+    public synchronized String title(String id) {
+        if (titles.containsKey(id)) return titles.get(id);
+        if (db.available()) {
+            try {
+                List<String> r = db.query("SELECT title FROM session_titles WHERE session_id=?",
+                        rs -> rs.getString(1), id);
+                if (!r.isEmpty()) { titles.put(id, r.get(0)); return r.get(0); }
+            } catch (Exception e) {
+                log.warn("[session] could not read title for '" + id + "': " + e.getMessage());
+            }
+        }
+        return "";
+    }
+
+    /** Titles for several sessions (id -> title); ids with no title are omitted. */
+    public synchronized Map<String, String> titlesFor(List<String> ids) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        for (String id : ids) {
+            String t = title(id);
+            if (!t.isEmpty()) out.put(id, t);
+        }
+        return out;
     }
 
     public synchronized List<String> list() {
