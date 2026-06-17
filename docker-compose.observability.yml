@@ -1,0 +1,46 @@
+# Observability overlay for the demo stack. Use ALONGSIDE the base compose:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+#
+# This adds Prometheus (scraping imini's /metrics/prom), Alertmanager (routing the bundled alert rules),
+# and Grafana (auto-provisioned with the Prometheus datasource and the imini dashboard). Then open:
+#   - imini       http://localhost:8080
+#   - Grafana     http://localhost:3000   (admin / admin on first login)
+#   - Prometheus  http://localhost:9090
+#   - Alertmanager http://localhost:9093
+#
+# NOTE: /metrics/prom is admin-only. This demo runs imini without an API key (single default admin), so
+# the scrape works out of the box. If you enable auth, set the admin key as a Bearer token in
+# docs/observability/compose/prometheus.yml.
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    depends_on: [imini]
+    volumes:
+      - ./docs/observability/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docs/observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    volumes:
+      - ./docs/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    depends_on: [prometheus]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docs/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docs/observability/grafana-dashboard.json:/var/lib/grafana/dashboards/imini.json:ro
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
