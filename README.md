@@ -103,6 +103,7 @@ No cloud API key is required.
 | `SettingsStore.java` | Durable key/value app settings (`app_settings` table) |
 | `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation/SHA-256 + export/install (incl. by URL) |
 | `VisionContent.java` / `VisionSupport.java` | Pure multimodal content building + vision capability gate |
+| `AdminFormat.java` | Pure dashboard formatting (uptime, top-N tallies, success rate) |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -244,6 +245,7 @@ http://localhost:8081
 | `GET /health` | Health check |
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
+| `GET /admin/overview` | Consolidated admin dashboard snapshot (admin only) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
 | `GET /audit/export?format=csv\|json&since=&until=&...` | Download the (filtered, windowed) audit trail (admin) |
 | `GET /session/activity?sessionId=&offset=&limit=` | This session's events (anyone with session access) |
@@ -1143,6 +1145,31 @@ Important limitations:
   ownership of sessions; it is not OAuth/OIDC or fine-grained per-resource ACLs.
 - Metrics are in-process JSON, not a production observability backend.
 - The audit log records privileged actions for accountability; it is not tamper-proof storage.
+
+## Admin overview (observability dashboard)
+
+`imini` records observability data as it runs -- run counts and latency, tool-call tallies, request
+volume by API key, live concurrency, plus the audit trail, scheduled tasks, and installed content. The
+raw counters are at `GET /metrics`; `GET /admin/overview` (admin only) **consolidates the useful signals
+into one snapshot**, and the web UI's **Admin overview** card renders it:
+
+- **uptime** (human-readable);
+- **runs** -- ok / failed / started and a success rate;
+- **latency** -- average and max run time, plus live **slots** (active / limit, queued);
+- **top tools** -- the most-called tools by name;
+- **tasks** -- enabled / total scheduled tasks; **content** -- skill / agent / command counts;
+- **server** -- detected context window, enforced prompt cap, token budget, and vision capability;
+- **recent admin actions** -- the last few audit entries.
+
+```
+curl "localhost:8080/admin/overview" -H "X-API-Key: <admin-key>"
+```
+
+Click **refresh** on the card to re-poll. It's a read-only view; non-admins simply see "(admin only)".
+
+> Honest scope: metrics are **in-process** -- they reset when the app restarts and are not aggregated
+> across nodes. Latency/throughput are simple counters (no histograms/percentiles). The dashboard is a
+> snapshot on demand, not a live stream. For long-term metrics, scrape `/metrics` into an external system.
 
 ## Audit log
 

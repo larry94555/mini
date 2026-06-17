@@ -2166,3 +2166,29 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   fields) fetches the pack (http/https only), verifies the hash, and installs it; a wrong hash is
   **refused** with `expected`/`actual` reported; omitting the hash installs but is flagged
   `unpinned (not verified)`. Admin only.
+
+---
+
+# Richer admin/observability views
+
+## 236. AdminFormat dashboard formatting (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `AdminFormatTest` passes -- `humanizeUptime` builds from the largest non-zero unit
+  (`90061000 -> "1d 1h 1m 1s"`, `65000 -> "1m 5s"`, clamps negatives to `"0s"`); `topN` sorts by count
+  then name and handles null/zero-limit; `successRate` is a whole percent and 0 when there are no runs.
+
+## 237. Admin overview snapshot (manual)
+
+- **Setup:** run a few asks, schedule a task, then `GET /admin/overview` with an **admin** key (or open
+  the *Admin overview* card and click refresh).
+- **Observe:** one JSON snapshot with `uptime`, `runs` (ok/failed/started + successRate), `runs.latency`
+  and `runs.concurrency`, `topTools`, `scheduledTasks` (total/enabled), `content` (skill/agent/command
+  counts), `server` (contextTokens/promptCap/tokenBudget/vision), and `recentAudit`. A non-admin key is
+  rejected; the UI card then shows "(admin only)".
+
+## 238. Dashboard reflects activity (manual)
+
+- **Observe:** after more runs, the card's run counts, success rate, latency, and top-tools update on
+  refresh; scheduling/cancelling a task changes the tasks line; installing a plugin changes the content
+  counts. Metrics are in-process and reset on restart.

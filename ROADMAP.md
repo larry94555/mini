@@ -179,21 +179,19 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-Feature work for the harness's scope is complete, and the educational packaging now has a clear
-front door: **GettingStarted.md** (newbie setup + learning path + document index), a guided
-**docs/WORKSHOP.md** (90-minute labs with `mvn test` checkpoints), and a plain-language
-**docs/GLOSSARY.md**, on top of the existing LEARNING_PATH / ARCHITECTURE / TRACE_EDIT /
-CONCEPT_MAP. Remaining work is polish:
+The harness is feature-complete for its scope, fully documented (GettingStarted + Workshop +
+Glossary + LEARNING_PATH), and now has a consolidated **admin overview** dashboard
+(`GET /admin/overview`). Remaining polish:
 
-- **richer admin/observability views** -- surface the existing metrics, run history, and the new
-  scheduled-task/plugin activity in the web UI (useful for demos and teaching),
-- a plugin **registry index** (discover packs, not just install one by URL),
-- durable per-session settings.
+- a plugin **registry index** -- discover packs from a registry URL (list, then install-by-URL
+  with the existing SHA-256 check), instead of needing a direct pack URL,
+- **durable per-session settings** -- persist per-session preferences (mode, skill toggles) via
+  the `app_settings`/SQLite pattern already in place,
+- a lightweight **run history** view (recent runs with status/latency) building on the metrics.
 
-The recommended next step is **richer admin/observability views**: the project is now
-feature- and docs-complete for its scope, and making the agent's internals *visible* in the UI
-(metrics, recent runs, scheduled tasks, audit) is the highest-value remaining polish for both
-demos and the workshop, and needs no model dependency.
+The recommended next step is the **plugin registry index**: it completes the plugin story shipped
+over the last PRs (export -> install-by-URL -> *discover*), is fully local/text-only, and reuses
+the existing manifest + SHA-256 verification, so it is small and high-value for sharing.
 
 ## 3. Guidance for AI implementers
 
@@ -334,6 +332,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Richer admin/observability views: `GET /admin/overview` consolidates uptime, run counts + success rate,
+  latency, live concurrency, top tool calls, scheduled-task and plugin/skill summaries, server
+  capabilities, and recent audit into one admin-only snapshot, rendered by a new web-UI *Admin overview*
+  card. Pure `AdminFormat` (uptime humanize, top-N, success rate) unit-tested.
 - Educational packaging / workshop materials: a newbie front-door `GettingStarted.md` (simple test +
   recommended learning path + a one-page document index), a guided `docs/WORKSHOP.md` (~90-minute, five
   labs, each with a `mvn test` checkpoint), and a plain-language `docs/GLOSSARY.md` (eight core terms);

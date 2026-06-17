@@ -334,6 +334,59 @@ public class AgentController {
         return metrics.snapshot();
     }
 
+    /**
+     * Consolidated admin/observability snapshot: uptime, run counts + success rate, latency, concurrency,
+     * top tool calls, scheduled-task and plugin/skill summaries, recent audit, and server capability flags.
+     * One call powers the web-UI admin dashboard. Admin only.
+     */
+    @SuppressWarnings("unchecked")
+    @GetMapping("/admin/overview")
+    public Map<String, Object> adminOverview(
+            @RequestParam(name = "auditLimit", defaultValue = "10") int auditLimit) {
+        requireAdmin();
+        Map<String, Object> snap = metrics.snapshot();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+
+        long uptimeMs = snap.get("uptime_ms") instanceof Number num ? num.longValue() : 0L;
+        out.put("uptimeMs", uptimeMs);
+        out.put("uptime", AdminFormat.humanizeUptime(uptimeMs));
+
+        // runs: ok/failed + success rate, latency, live concurrency
+        Map<String, Long> counters = (Map<String, Long>) snap.getOrDefault("counters", Map.of());
+        long ok = counters.getOrDefault("runs_ok", 0L);
+        long failed = counters.getOrDefault("runs_failed", 0L);
+        Map<String, Object> runs = new java.util.LinkedHashMap<>();
+        runs.put("ok", ok);
+        runs.put("failed", failed);
+        runs.put("started", counters.getOrDefault("runs_started", 0L));
+        runs.put("successRate", AdminFormat.successRate(ok, failed));
+        runs.put("latency", snap.get("run_latency"));
+        runs.put("concurrency", snap.get("concurrency"));
+        out.put("runs", runs);
+
+        out.put("topTools", AdminFormat.topN(
+                (Map<String, Long>) snap.getOrDefault("tool_calls_by_name", Map.of()), 8));
+        out.put("requestsByKey", snap.get("requests_by_key"));
+        out.put("approxOutputTokens", snap.get("approx_output_tokens"));
+
+        // scheduled tasks summary
+        int taskCount = 0, taskEnabled = 0;
+        for (ScheduledTasks.Task t : schedule.list()) { taskCount++; if (t.enabled) taskEnabled++; }
+        out.put("scheduledTasks", Map.of("total", taskCount, "enabled", taskEnabled));
+
+        // plugin/skill counts + token budget + server capabilities
+        out.put("content", plugins.summary());
+        int ctx = llama.serverContext();
+        out.put("server", Map.of(
+                "contextTokens", ctx,
+                "vision", llama.serverVision(),
+                "promptCap", tokenBudget.promptCap(ctx),
+                "tokenBudget", tokenBudget.budget()));
+
+        out.put("recentAudit", audit.recent("", "", "", 0, Math.max(1, Math.min(50, auditLimit))));
+        return out;
+    }
+
     /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
     @GetMapping("/audit")
     public List<AuditLog.Entry> audit(@RequestParam(name = "user", defaultValue = "") String user,
