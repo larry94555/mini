@@ -66,6 +66,7 @@ public class AgentController {
     private final TokenBudgetService tokenBudget;
     private final LlamaClient llama;
     private final ScheduledTasks schedule;
+    private final PluginService plugins;
     private final PreviewStore previews;
     private final BuiltinTools builtins;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -76,7 +77,8 @@ public class AgentController {
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
                            SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init,
                            PreviewStore previews, BuiltinTools builtins,
-                           TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule) {
+                           TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
+                           PluginService plugins) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -97,6 +99,7 @@ public class AgentController {
         this.tokenBudget = tokenBudget;
         this.llama = llama;
         this.schedule = schedule;
+        this.plugins = plugins;
         this.previews = previews;
         this.builtins = builtins;
     }
@@ -502,7 +505,45 @@ public class AgentController {
 
     /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
     /** Project what an import would do (counts before/incoming/after) without applying it. */
-    /** List scheduled local tasks (id, prompt, kind, timing, status). */
+    /** Summary of installable content currently in the workspace (skills/agents/commands counts). */
+    @GetMapping("/plugin")
+    public Map<String, Object> pluginSummary() {
+        requireRead("default");
+        return plugins.summary();
+    }
+
+    /** Export the workspace's skills + agents + commands as a downloadable plugin pack (JSON). */
+    @GetMapping("/plugin/export")
+    public ResponseEntity<String> exportPlugin(
+            @RequestParam(name = "name", defaultValue = "workspace-pack") String name,
+            @RequestParam(name = "version", defaultValue = "1") String version,
+            @RequestParam(name = "description", defaultValue = "") String description) {
+        requireRead("default");
+        String body;
+        try {
+            body = plugins.exportJson(name, version, description);
+        } catch (Exception e) {
+            body = "{\"error\":\"export failed\"}";
+        }
+        audit.record(currentUser(), "plugin-export", name, "exported");
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"" + name + ".imini-plugin.json\"")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body);
+    }
+
+    /** Install a plugin pack (JSON body) into the workspace. Admin only (it writes files). */
+    @PostMapping("/plugin/install")
+    public Map<String, Object> installPlugin(@RequestBody String packJson,
+            @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite) {
+        requireAdmin();
+        Map<String, Object> r = plugins.install(packJson, overwrite);
+        audit.record(currentUser(), "plugin-install", String.valueOf(r.getOrDefault("pack", "?")),
+                String.valueOf(r.getOrDefault("summary", "")));
+        return r;
+    }
+
+    /** List scheduled local tasks (id, prompt, kind, timing, status). */    /** List scheduled local tasks (id, prompt, kind, timing, status). */
     @GetMapping("/schedule")
     public List<Map<String, Object>> listSchedule() {
         Principal caller = RequestContext.current();

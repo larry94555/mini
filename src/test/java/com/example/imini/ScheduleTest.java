@@ -38,4 +38,15 @@ class ScheduleTest {
         assertEquals(Schedule.MIN_SECONDS, Schedule.clampSeconds(1));
         assertEquals(120, Schedule.clampSeconds(120));
     }
+
+    @Test
+    void reloadNextRunDefersOverdueTasks() {
+        long now = 1_000_000;
+        // overdue -> scheduled a grace period from now (not instantly, not all at once)
+        assertEquals(now + Schedule.MIN_SECONDS * 1000, Schedule.reloadNextRun(now - 5000, now));
+        // future -> kept as stored
+        assertEquals(now + 60_000, Schedule.reloadNextRun(now + 60_000, now));
+        // completed one-shot -> stays 0
+        assertEquals(0L, Schedule.reloadNextRun(0L, now));
+    }
 }

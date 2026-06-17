@@ -26,11 +26,22 @@ public class TokenBudgetService {
     @Value("${agent.max-tokens:1024}")
     private int reservedResponse;
 
+    private static final String KEY = "token.budget";
+
+    private final SettingsStore settings;
     private final AtomicInteger budget = new AtomicInteger(-1);
+
+    public TokenBudgetService(SettingsStore settings) {
+        this.settings = settings;
+    }
 
     private int current() {
         int b = budget.get();
-        if (b < 0) { budget.compareAndSet(-1, Math.max(MIN_BUDGET, configured)); b = budget.get(); }
+        if (b < 0) {
+            int persisted = settings.getInt(KEY, Math.max(MIN_BUDGET, configured)); // durable value wins
+            budget.compareAndSet(-1, Math.max(MIN_BUDGET, persisted));
+            b = budget.get();
+        }
         return b;
     }
 
@@ -44,6 +55,7 @@ public class TokenBudgetService {
     public int setBudget(int tokens) {
         int v = Math.max(MIN_BUDGET, tokens);
         budget.set(v);
+        settings.setInt(KEY, v); // persist so the change survives a restart
         return v;
     }
 

@@ -60,7 +60,12 @@ public class Database {
                     + "description TEXT, body TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL)",
             "CREATE TABLE session_skill_state (session_id TEXT NOT NULL, name TEXT NOT NULL, "
                     + "enabled INTEGER NOT NULL, PRIMARY KEY(session_id, name))",
-            "CREATE TABLE session_titles (session_id TEXT PRIMARY KEY, title TEXT NOT NULL)");
+            "CREATE TABLE session_titles (session_id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            "CREATE TABLE scheduled_tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, "
+                    + "kind TEXT NOT NULL, interval_seconds INTEGER NOT NULL, one_shot INTEGER NOT NULL, "
+                    + "next_run INTEGER NOT NULL, enabled INTEGER NOT NULL, owner TEXT, runs INTEGER NOT NULL, "
+                    + "created_at INTEGER NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

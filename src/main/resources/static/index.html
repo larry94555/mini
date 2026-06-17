@@ -185,6 +185,20 @@
       </div>
       <div id="schedList" class="muted" style="margin-top:4px">(none)</div>
     </div>
+    <div class="card" id="pluginCard">
+      <h3>Plugins <a class="linklike" id="refreshPluginLink" title="Reload counts">refresh</a></h3>
+      <div class="muted" style="font-size:11px">Bundle this workspace's skills, agents, and commands into a portable pack -- or install one.</div>
+      <div id="pluginInfo" class="muted" style="font-size:11px;margin-top:4px"></div>
+      <div class="row" style="gap:6px;margin-top:4px;align-items:center">
+        <input id="pluginName" placeholder="pack name" value="workspace-pack" style="width:130px"/>
+        <button id="pluginExport">Export pack</button>
+      </div>
+      <textarea id="pluginJson" placeholder="paste a plugin pack JSON to install" style="width:100%;height:60px;margin-top:6px;font-size:11px"></textarea>
+      <div class="row" style="gap:6px;align-items:center">
+        <label class="muted" style="font-size:11px"><input type="checkbox" id="pluginOverwrite"/> overwrite existing</label>
+        <button id="pluginInstall">Install pack</button>
+      </div>
+    </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
       <div class="muted" style="font-size:11px">Files loaded into the system prompt (load order; local overrides win). Run <code>/init</code> to scaffold <code>CLAUDE.md</code>.</div>
@@ -427,6 +441,39 @@ async function doSearch(){
 }
 
 // --- sidebars ---
+async function refreshPlugins(){
+  const el = $("#pluginInfo"); if (!el) return;
+  const j = await getJson("/plugin");
+  if (j) el.textContent = "available: " + (j.skills||0) + " skill(s), " + (j.agents||0) + " agent(s), " + (j.commands||0) + " command(s)";
+}
+async function exportPlugin(){
+  const name = ($("#pluginName").value || "workspace-pack").trim();
+  const r = await fetch("/plugin/export?name=" + encodeURIComponent(name), { headers: headers(false) });
+  if (!r.ok){ appendLog("[plugin] export failed"); return; }
+  const text = await r.text();
+  const blob = new Blob([text], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name + ".imini-plugin.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+  appendLog("[plugin] exported " + a.download);
+}
+async function installPlugin(){
+  const json = $("#pluginJson").value.trim();
+  if (!json){ appendLog("[plugin] paste a pack JSON first"); return; }
+  const overwrite = $("#pluginOverwrite").checked;
+  const r = await fetch("/plugin/install?overwrite=" + overwrite, {
+    method:"POST", headers: headers(true), body: json });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ appendLog("[plugin] install failed (admin only?)"); return; }
+  if (j.error){ appendLog("[plugin] " + j.error); return; }
+  appendLog("[plugin] installed " + (j.installed||[]).length + ", skipped " + (j.skipped||[]).length + " (" + (j.summary||"") + ")");
+  refreshPlugins(); refreshMemoryFiles();
+}
+$("#refreshPluginLink") && ($("#refreshPluginLink").onclick = refreshPlugins);
+$("#pluginExport") && ($("#pluginExport").onclick = exportPlugin);
+$("#pluginInstall") && ($("#pluginInstall").onclick = installPlugin);
 async function refreshSchedule(){
   const el = $("#schedList"); if (!el) return;
   const rows = await getJson("/schedule");
@@ -943,7 +990,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule(); refreshPlugins();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>
