@@ -62,6 +62,8 @@ public class Database {
                     + "enabled INTEGER NOT NULL, PRIMARY KEY(session_id, name))",
             "CREATE TABLE session_titles (session_id TEXT PRIMARY KEY, title TEXT NOT NULL)",
             "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            "CREATE TABLE session_settings (session_id TEXT NOT NULL, key TEXT NOT NULL, "
+                    + "value TEXT NOT NULL, PRIMARY KEY(session_id, key))",
             "CREATE TABLE scheduled_tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, "
                     + "kind TEXT NOT NULL, interval_seconds INTEGER NOT NULL, one_shot INTEGER NOT NULL, "
                     + "next_run INTEGER NOT NULL, enabled INTEGER NOT NULL, owner TEXT, runs INTEGER NOT NULL, "

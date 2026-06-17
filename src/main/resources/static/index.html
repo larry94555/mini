@@ -72,6 +72,10 @@
     <button id="renameSession" title="Rename this session">rename</button>
     <button id="forkSession" title="Copy this session into a new one">fork</button>
     <button id="exportSession" title="Download this session as a JSON bundle">export</button>
+    <span class="muted" style="font-size:11px">default mode</span>
+    <select id="sessionModeSelect" title="Default permission mode for this session (persisted)">
+      <option value="">(global)</option><option value="ask">ask</option><option value="auto">auto</option><option value="plan">plan</option>
+    </select>
   </span>
   <span class="grow"></span>
   <input id="apiKey" type="password" placeholder="API key (if auth on)" style="width:200px"/>
@@ -637,6 +641,22 @@ async function refreshSessions(){
       + escapeHtml(label) + '</option>';
   }).join("");
 }
+async function refreshSessionMode(){
+  const sel = $("#sessionModeSelect"); if (!sel) return;
+  const j = await getJson("/session/settings?sessionId=" + encodeURIComponent(state.session));
+  const m = (j && j.settings && j.settings.mode) ? j.settings.mode : "";
+  sel.value = m;
+}
+$("#sessionModeSelect") && ($("#sessionModeSelect").onchange = async () => {
+  const v = $("#sessionModeSelect").value;
+  if (!v) {
+    await post("/session/settings/clear?sessionId=" + encodeURIComponent(state.session) + "&key=mode", {});
+    appendLog("[session] default mode cleared (uses global)");
+  } else {
+    await post("/session/settings?sessionId=" + encodeURIComponent(state.session) + "&key=mode&value=" + encodeURIComponent(v), {});
+    appendLog("[session] default mode = " + v);
+  }
+});
 async function renameCurrentSession(){
   const cur = (await getJson("/session/titles")) || {};
   const t = prompt("Session title (blank to clear):", cur[state.session] || "");
@@ -672,6 +692,7 @@ $("#exportSession") && ($("#exportSession").onclick = exportCurrentSession);
 $("#sessionSelect").onchange = async (e) => {
   state.session = e.target.value; localStorage.setItem("imini.session", state.session);
   $("#messages").innerHTML=""; $("#log").textContent="";
+  refreshSessionMode();
   const msgs = await getJson("/session?id="+encodeURIComponent(state.session));
   (msgs||[]).forEach(m => {
     if (m.role==="user" && m.content) addMsg("you","user").textContent = m.content;
@@ -1071,7 +1092,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule(); refreshPlugins(); refreshAdmin();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule(); refreshPlugins(); refreshAdmin(); refreshSessionMode();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>

@@ -179,20 +179,19 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope, fully documented, and has a consolidated admin
-dashboard. The plugin story is now end-to-end: export -> install-by-URL (SHA-256) -> **discover
-via a registry index**. Remaining polish:
+The harness is feature-complete for its scope and the persistence story is now complete: global
+settings, scheduled tasks, per-session skill toggles, and now a durable **per-session default
+mode** all survive a restart. Remaining work is small polish:
 
-- **durable per-session settings** -- persist per-session preferences (mode, skill toggles) via
-  the `app_settings`/SQLite pattern already in place,
-- a lightweight **run history** view (recent runs with status/latency) building on the metrics +
-  admin dashboard,
+- a lightweight **run history** view (recent runs with status/latency/session) surfaced in the
+  admin dashboard, building on the existing metrics,
 - a **registry publish helper** -- generate a registry index entry (name/version/url/sha256) for
-  a pack you exported, to make hosting one easier.
+  a pack you exported, making it easy to host a registry,
+- minor UX: show the active resolved mode per turn in the trace/UI.
 
-The recommended next step is **durable per-session settings**: it is the last obvious gap in the
-persistence story (global settings and scheduled tasks already persist), is fully local/text-only,
-and reuses the existing `SettingsStore`/SQLite pattern, so it is small and low-risk.
+The recommended next step is the **run history view**: it builds directly on the metrics + admin
+dashboard already shipped, is fully local/text-only, and is the most useful remaining observability
+addition for demos and the workshop (seeing recent runs, their status, and latency at a glance).
 
 ## 3. Guidance for AI implementers
 
@@ -333,6 +332,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Durable per-session settings: a session remembers its default permission mode across restarts
+  (`session_settings` table), layered as request mode > session default > global `ask`; `GET/POST
+  /session/settings`, `POST /session/settings/clear`, and a toolbar dropdown. Pure
+  `SessionSettingsResolver` (validation + precedence) unit-tested; completes the persistence story.
 - Plugin registry index: browse a registry index (a JSON list of packs) and install by name, pinned to the
   registry's declared SHA-256 -- completing the plugin story (export -> install-by-URL -> discover).
   `GET /plugin/registry`, `POST /plugin/registry/install`, optional `plugins.registry-url` default, and a

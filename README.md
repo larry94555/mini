@@ -101,6 +101,8 @@ No cloud API key is required.
 | `LoopCommand.java` | Pure `/loop` parsing + iterate-until-green prompt/continue logic |
 | `Schedule.java` / `ScheduledTasks.java` | Pure scheduling math + the durable local task scheduler |
 | `SettingsStore.java` | Durable key/value app settings (`app_settings` table) |
+| `SessionSettings.java` | Durable per-session settings (`session_settings` table) |
+| `SessionSettingsResolver.java` | Pure per-session setting validation + mode precedence |
 | `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation/SHA-256 + export/install (incl. by URL/registry) |
 | `PluginRegistry.java` | Pure registry-index model + parse/search/lookup |
 | `VisionContent.java` / `VisionSupport.java` | Pure multimodal content building + vision capability gate |
@@ -196,6 +198,9 @@ http://localhost:8081
 | `GET /session?id=` | Read one session |
 | `GET /session/titles` | Friendly titles for readable sessions (`id -> title`) |
 | `POST /session/rename?sessionId=&title=` | Set/clear a session's title (owner/admin) |
+| `GET /session/settings?sessionId=` | A session's durable settings (e.g. default mode) |
+| `POST /session/settings?sessionId=&key=&value=` | Set a per-session setting (owner/admin) |
+| `POST /session/settings/clear?sessionId=&key=` | Clear a per-session setting |
 | `POST /session/fork?sessionId=&title=` | Copy a session (conversation + plans + todos) into a new one you own |
 | `GET /settings/token-budget` | Current token budget, enforced prompt cap, and server `n_ctx` |
 | `POST /settings/token-budget?tokens=` | Set the per-call token budget at runtime (admin) |
@@ -1029,6 +1034,30 @@ curl -X POST "localhost:8080/preview/apply?sessionId=default&id=pv-1&hunks=0,2" 
 > prefix/suffix trimmed), good for small targeted edits -- not a full LCS diff. Previews are in-memory
 > and per-session (ephemeral). `apply_previewed_patch` re-applies the selected hunks against the
 > *current* files, so if a file changed since staging, the apply aborts rather than clobbering it.
+
+## Per-session settings (durable)
+
+A session can remember its own **default permission mode**, so you don't have to pass `mode` on every
+request. It is layered as: an explicit per-request `mode` wins; otherwise the session's stored default;
+otherwise the global default (`ask`). The setting persists across restarts (the `session_settings` table)
+and is independent of per-session skill toggles, which already persist.
+
+In the web UI, the session toolbar has a **default mode** dropdown (`(global)` / `ask` / `auto` / `plan`).
+Over HTTP:
+
+```
+curl "localhost:8080/session/settings?sessionId=proj" -H "X-API-Key: <key>"                       # view
+curl -X POST "localhost:8080/session/settings?sessionId=proj&key=mode&value=auto" -H "X-API-Key: <key>"  # set
+curl -X POST "localhost:8080/session/settings/clear?sessionId=proj&key=mode" -H "X-API-Key: <key>"       # clear -> global
+```
+
+Setting the default mode applies to the persistent `chat` paths (the one-shot `ask` uses an ephemeral
+session, so pass `mode` there). Values are validated (`mode` must be `ask`/`auto`/`plan`); setting
+requires write access to the session.
+
+> Honest scope: the only per-session key today is `mode` (the validation/precedence is a small pure
+> resolver). The store is generic (`session_settings`), so adding keys later is a one-line whitelist
+> change. A fork starts without inherited settings; clearing a key reverts to the global default.
 
 ## Session fork, rename, and export
 

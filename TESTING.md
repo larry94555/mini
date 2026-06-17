@@ -2219,3 +2219,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** with `plugins.registry-url` set, `GET /plugin/registry` (no `url=`) browses the default;
   passing `url=` overrides it. With no default and no `url=`, the call returns a clear "no registry URL"
   message rather than failing.
+
+---
+
+# Durable per-session settings
+
+## 242. SessionSettingsResolver validation + mode precedence (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionSettingsResolverTest` passes -- `resolveMode` prefers an explicit (valid) request
+  mode, then a valid session default, then the global default, ignoring blank/invalid values and treating
+  case insensitively; `isValidKey`/`isValidMode` accept only known keys/modes; `normalizeValue` trims and
+  lower-cases a valid mode and rejects unknown keys or bad values.
+
+## 243. A session remembers its default mode across a restart (manual)
+
+- **Observe:** set a session's default mode (toolbar dropdown, or `POST /session/settings?...&key=mode&
+  value=auto`); send a `chat` turn without a `mode` and it runs in that mode. Restart the app -> the
+  setting is still in effect (persisted in `session_settings`). An explicit `mode` on a request still
+  overrides it; clearing the setting reverts to the global default (`ask`).
+
+## 244. Validation and access (manual)
+
+- **Observe:** `POST /session/settings` with an unknown key or an invalid mode returns an `error` and
+  stores nothing; setting requires write access to the session (owner/admin/unowned), while
+  `GET /session/settings` is readable by anyone who can read the session.

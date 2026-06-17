@@ -67,6 +67,7 @@ public class AgentController {
     private final LlamaClient llama;
     private final ScheduledTasks schedule;
     private final PluginService plugins;
+    private final SessionSettings sessionSettings;
     private final PreviewStore previews;
     private final BuiltinTools builtins;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -78,7 +79,7 @@ public class AgentController {
                            SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init,
                            PreviewStore previews, BuiltinTools builtins,
                            TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
-                           PluginService plugins) {
+                           PluginService plugins, SessionSettings sessionSettings) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -100,6 +101,7 @@ public class AgentController {
         this.llama = llama;
         this.schedule = schedule;
         this.plugins = plugins;
+        this.sessionSettings = sessionSettings;
         this.previews = previews;
         this.builtins = builtins;
     }
@@ -140,7 +142,7 @@ public class AgentController {
         final String sessionId = resolveSession(body.get("sessionId"));
         requireAccess(sessionId);
         sessions.claim(sessionId, currentUser());
-        final Mode mode = parseMode(body.get("mode"));
+        final Mode mode = effectiveMode(sessionId, body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
         final boolean resume = isPlan(body.get("resume"));
         audit.record(currentUser(), planAction("chat", plan, resume), "session:" + sessionId, "started");
@@ -169,7 +171,7 @@ public class AgentController {
         final String sessionId = resolveSession(body.get("sessionId"));
         requireAccess(sessionId);
         sessions.claim(sessionId, currentUser());
-        final Mode mode = parseMode(body.get("mode"));
+        final Mode mode = effectiveMode(sessionId, body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
         final boolean resume = isPlan(body.get("resume"));
         audit.record(currentUser(), planAction("chat/stream", plan, resume), "session:" + sessionId, "started");
@@ -711,7 +713,46 @@ public class AgentController {
         return getTokenBudget();
     }
 
-    /** Friendly titles for the readable sessions (id -> title); powers the session list labels. */
+    /** A session's durable settings (e.g. its default mode). Readable by anyone who can read the session. */
+    @GetMapping("/session/settings")
+    public Map<String, Object> getSessionSettings(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId) {
+        requireRead(sessionId);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("sessionId", sessionId);
+        out.put("settings", sessionSettings.all(sessionId));
+        out.put("keys", SessionSettingsResolver.KEYS);
+        return out;
+    }
+
+    /** Set a durable per-session setting (validated/normalized). Owner/admin/unowned only. */
+    @PostMapping("/session/settings")
+    public Map<String, Object> setSessionSetting(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "key") String key,
+            @RequestParam(name = "value") String value) {
+        requireAccess(sessionId);
+        if (!SessionSettingsResolver.isValidKey(key)) {
+            return Map.of("error", "unknown setting: " + key + " (allowed: " + SessionSettingsResolver.KEYS + ")");
+        }
+        String norm = SessionSettingsResolver.normalizeValue(key, value);
+        if (norm == null) return Map.of("error", "invalid value for " + key + ": " + value);
+        sessionSettings.set(sessionId, key, norm);
+        audit.record(currentUser(), "session-setting", "session:" + sessionId, key + "=" + norm);
+        return Map.of("sessionId", sessionId, "key", key.trim().toLowerCase(), "value", norm);
+    }
+
+    /** Clear a per-session setting (it falls back to the global default). */
+    @PostMapping("/session/settings/clear")
+    public Map<String, Object> clearSessionSetting(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "key") String key) {
+        requireAccess(sessionId);
+        sessionSettings.clear(sessionId, key);
+        return Map.of("sessionId", sessionId, "cleared", key.trim().toLowerCase());
+    }
+
+    /** Friendly titles for the readable sessions (id -> title); powers the session list labels. */    /** Friendly titles for the readable sessions (id -> title); powers the session list labels. */
     @GetMapping("/session/titles")
     public Map<String, String> sessionTitles() {
         Principal caller = RequestContext.current();
@@ -1269,6 +1310,12 @@ public class AgentController {
 
     private static boolean isPlan(String raw) {
         return raw != null && (raw.equalsIgnoreCase("true") || raw.equals("1") || raw.equalsIgnoreCase("yes"));
+    }
+
+    /** Mode for a turn: explicit request value, else the session's stored default, else global ASK. */
+    private Mode effectiveMode(String sessionId, String requestMode) {
+        String sessionMode = sessionSettings.get(sessionId, "mode");
+        return parseMode(SessionSettingsResolver.resolveMode(requestMode, sessionMode, "ask"));
     }
 
     private Mode parseMode(String raw) {
