@@ -61,7 +61,11 @@ public class ScheduledTasks {
     private ScheduledExecutorService ticker;
     private ExecutorService pool;
 
-    public ScheduledTasks(AgentLoop loop, Database db) {
+    private final Metrics metrics;
+    private final java.util.Map<String, RunHistory> taskRuns = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public ScheduledTasks(AgentLoop loop, Database db, Metrics metrics) {
+        this.metrics = metrics;
         this.loop = loop;
         this.db = db;
     }
@@ -151,9 +155,12 @@ public class ScheduledTasks {
             };
             t.runs++;
             t.lastDetail = truncate(result, 300);
-            log.info("[schedule] " + t.id + " ran (" + (System.currentTimeMillis() - start) + "ms)");
+            long ms = System.currentTimeMillis() - start;
+            recordTaskRun(t, ms, true);
+            log.info("[schedule] " + t.id + " ran (" + ms + "ms)");
         } catch (Exception e) {
             t.lastDetail = "error: " + e.getMessage();
+            recordTaskRun(t, System.currentTimeMillis() - start, false);
             log.warn("[schedule] " + t.id + " failed: " + e.getMessage());
         }
         if (t.oneShot) {
@@ -162,6 +169,19 @@ public class ScheduledTasks {
         } else {
             persist(t);                                          // record runs / lastDetail
         }
+    }
+
+    /** Record a scheduled execution into this task's recent-runs ring and the global run history. */
+    private void recordTaskRun(Task t, long ms, boolean ok) {
+        RunHistory h = taskRuns.computeIfAbsent(t.id, k -> new RunHistory(20));
+        h.add(new RunHistory.Record(System.currentTimeMillis(), "/schedule:" + t.kind, t.sessionId, "auto", ms, ok));
+        if (metrics != null) metrics.recordRun("/schedule:" + t.kind, t.sessionId, "auto", ms, ok);
+    }
+
+    /** Recent executions of one task (newest first), as plain maps. Empty if unknown / none yet. */
+    public java.util.List<java.util.Map<String, Object>> runHistory(String id, int n) {
+        RunHistory h = taskRuns.get(id);
+        return h == null ? java.util.List.of() : h.recentMaps(n);
     }
 
     private void persist(Task t) {

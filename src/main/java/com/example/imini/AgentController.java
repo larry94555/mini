@@ -749,6 +749,21 @@ public class AgentController {
         return out;
     }
 
+    /** Recent executions of one scheduled task (newest first): status, latency, when. Session read access. */
+    @GetMapping("/schedule/runs")
+    public List<Map<String, Object>> scheduleRuns(@RequestParam(name = "id") String id,
+                                                  @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        Principal caller = RequestContext.current();
+        for (ScheduledTasks.Task t : schedule.list()) {
+            if (!t.id.equals(id)) continue;
+            if (!Ownership.canRead(caller, sessions.owner(t.sessionId), sessions.readers(t.sessionId))) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "no access to this task's session");
+            }
+            return schedule.runHistory(id, Math.max(1, Math.min(50, limit)));
+        }
+        return List.of();
+    }
+
     /** Schedule a task: run a prompt after delaySeconds, optionally repeating every intervalSeconds. */
     @PostMapping("/schedule")
     public Map<String, Object> addSchedule(

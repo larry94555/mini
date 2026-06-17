@@ -2384,3 +2384,42 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** after some chat turns in a session, `GET /session/runs?sessionId=<id>` lists only that
   session's runs (newest first); a different session's runs are excluded (exact match). It needs read
   access to the session, not admin. The session toolbar's **runs** button toggles the same list inline.
+
+---
+
+# Scheduled-task run history, bundle signing, and richer Grafana panels
+
+## 264. BundleSignature HMAC sign/verify (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `BundleSignatureTest` passes -- `sign` produces a 64-char lowercase hex HMAC and `verify`
+  accepts it (case-insensitively); a wrong secret, tampered payload, bad signature, or null signature is
+  rejected; a blank/null secret disables signing (empty result, verify false); signing is deterministic.
+
+## 265. runs_by_endpoint in Prometheus output (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PromFormatTest` passes the extended case -- the snapshot's `runs_by_endpoint` map renders
+  as `imini_runs_by_endpoint{endpoint="..."}` series.
+
+## 266. Scheduled-task run history (manual)
+
+- **Observe:** schedule a repeating task; after it fires a few times, `GET /schedule/runs?id=<taskId>`
+  lists recent executions (status, latency, when) newest-first, and the Scheduled-tasks card's **history**
+  link shows the same. Scheduled runs also appear in `GET /admin/runs` and `imini_runs_by_endpoint` under
+  `/schedule:<kind>`. Per-task history is in-memory (last 20, resets on restart); the `runs` count and
+  `lastDetail` persist.
+
+## 267. Sign and verify a workspace bundle (manual)
+
+- **Setup:** set `bundle.signing-secret` to the same value on export and import.
+- **Observe:** `GET /workspace/export` produces a bundle with `signature` and `packSha256`.
+  `POST /workspace/import/preview` and `/workspace/import` report `signature: verified`. Tamper with the
+  pack -> import is **refused** (`signature: invalid`). With no configured secret, the field reports
+  `no-secret`; an unsigned bundle under a configured secret reports `unsigned` (allowed).
+
+## 268. Richer Grafana panels (manual)
+
+- **Observe:** the updated `docs/observability/grafana-dashboard.json` imports cleanly and adds **Runs by
+  endpoint** (`imini_runs_by_endpoint`) and **Requests by API key** (`imini_requests_by_key`) panels
+  alongside the existing ones.

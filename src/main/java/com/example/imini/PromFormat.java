@@ -44,6 +44,12 @@ public final class PromFormat {
                 line(sb, PREFIX + "requests_by_key", "key=\"" + esc(e.getKey()) + "\"", e.getValue());
             }
         }
+        if (snapshot.get("runs_by_endpoint") instanceof Map<?, ?> eps) {
+            help(sb, "runs_by_endpoint", "Runs by endpoint", "counter");
+            for (Map.Entry<String, Long> e : sorted((Map<String, Long>) eps)) {
+                line(sb, PREFIX + "runs_by_endpoint", "endpoint=\"" + esc(e.getKey()) + "\"", e.getValue());
+            }
+        }
         if (snapshot.get("run_latency") instanceof Map<?, ?> lat) {
             number(sb, "run_latency_count", "Completed runs measured for latency", "gauge", lat.get("count"));
             number(sb, "run_latency_avg_ms", "Average run latency (ms)", "gauge", lat.get("avg_ms"));

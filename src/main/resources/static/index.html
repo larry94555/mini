@@ -663,7 +663,8 @@ async function previewWorkspace(){
   out.innerHTML = "<b>dry run \u2014 nothing written</b><br>"
     + "pack: create " + (p.create||0) + ", overwrite " + (p.overwrite||0) + ", blocked " + (p.blocked||0) + "<br>"
     + "settings: new " + (st["new"]||0) + ", changed " + (st.changed||0) + ", unchanged " + (st.unchanged||0)
-    + ((j.packDetail && (j.packDetail.overwrite||[]).length) ? "<br>would overwrite: " + escapeHtml((j.packDetail.overwrite||[]).join(", ")) : "");
+    + ((j.packDetail && (j.packDetail.overwrite||[]).length) ? "<br>would overwrite: " + escapeHtml((j.packDetail.overwrite||[]).join(", ")) : "")
+    + (j.signature ? "<br>signature: " + escapeHtml(String(j.signature)) : "");
 }
 $("#wsPreview") && ($("#wsPreview").onclick = previewWorkspace);
 $("#wsImport") && ($("#wsImport").onclick = importWorkspace);
@@ -719,8 +720,10 @@ async function refreshSchedule(){
       + '<b>' + escapeHtml(t.id) + '</b> [' + escapeHtml(t.kind) + ', ' + rep + '] next ' + when
       + ' · runs ' + t.runs
       + ' <a class="linklike" onclick="cancelSchedule(\'' + t.id + '\')">cancel</a>'
+      + ' <a class="linklike" onclick="taskRuns(\'' + t.id + '\')">history</a>'
       + '<br><span class="muted">' + escapeHtml(String(t.prompt||"")) + '</span>'
       + (t.lastDetail ? '<br><span class="muted">last: ' + escapeHtml(String(t.lastDetail)) + '</span>' : '')
+      + '<div id="taskRuns-' + t.id + '" class="muted" style="font-size:11px;margin-top:2px"></div>'
       + '</div>';
   }).join("");
 }
@@ -737,6 +740,16 @@ async function addSchedule(){
   const r = await post(qs, {});
   if (r && r.ok){ appendLog("[schedule] added"); $("#schedPrompt").value=""; refreshSchedule(); }
   else appendLog("[schedule] add failed");
+}
+async function taskRuns(id){
+  const el = document.getElementById("taskRuns-" + id); if (!el) return;
+  if (el.innerHTML){ el.innerHTML = ""; return; } // toggle off
+  const j = await getJson("/schedule/runs?id=" + encodeURIComponent(id) + "&limit=20");
+  if (!Array.isArray(j) || !j.length){ el.textContent = "(no executions recorded yet; in-memory, resets on restart)"; return; }
+  el.innerHTML = j.map(r => {
+    const t = r.ts ? new Date(r.ts).toLocaleTimeString() : "";
+    return "· " + escapeHtml(t) + " " + (r.ok ? "ok" : "failed") + " " + (r.ms||0) + "ms";
+  }).join("<br>");
 }
 async function cancelSchedule(id){
   await post("/schedule/cancel?id=" + encodeURIComponent(id), {});

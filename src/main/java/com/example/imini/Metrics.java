@@ -26,6 +26,7 @@ public class Metrics {
     private final Map<String, LongAdder> counters = new ConcurrentHashMap<>();
     private final Map<String, LongAdder> toolCalls = new ConcurrentHashMap<>();
     private final Map<String, LongAdder> byKey = new ConcurrentHashMap<>();
+    private final Map<String, LongAdder> byEndpoint = new ConcurrentHashMap<>();
 
     private final AtomicLong runLatencyCount = new AtomicLong();
     private final AtomicLong runLatencyTotalMs = new AtomicLong();
@@ -73,6 +74,7 @@ public class Metrics {
     /** Record a run AND append it to the run-history ring buffer (endpoint/session/mode for the dashboard). */
     public void recordRun(String endpoint, String session, String mode, long ms, boolean ok) {
         recordRun(ms, ok);
+        if (endpoint != null) byEndpoint.computeIfAbsent(endpoint, k -> new LongAdder()).increment();
         RunHistory.Record r = new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok);
         history.add(r);
         if (historyStore != null) historyStore.append(r); // durable across restarts
@@ -114,6 +116,10 @@ public class Metrics {
         Map<String, Long> keys = new TreeMap<>();
         byKey.forEach((k, v) -> keys.put(k, v.sum()));
         out.put("requests_by_key", keys);
+
+        Map<String, Long> eps = new TreeMap<>();
+        byEndpoint.forEach((k, v) -> eps.put(k, v.sum()));
+        out.put("runs_by_endpoint", eps);
 
         long n = runLatencyCount.get();
         Map<String, Object> lat = new LinkedHashMap<>();
