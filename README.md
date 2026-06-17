@@ -15,6 +15,7 @@ No cloud API key is required.
   recommended learning path + the docs to use).
 - First-time install: [`INSTALL.md`](INSTALL.md)
 - One-command demo (Docker, full stack incl. metrics dashboards): see [`docs/observability/`](docs/observability/) -- `docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build`
+- No-build demo from a **published image**: `docker compose -f docker-compose.published.yml up` (pulls `ghcr.io/larry94555/imini`, published by the release workflow)
 - Core terms in plain language: [`docs/GLOSSARY.md`](docs/GLOSSARY.md)
 - Guided learning path: [`docs/LEARNING_PATH.md`](docs/LEARNING_PATH.md)
 - Guided 90-minute workshop (labs + test checkpoints): [`docs/WORKSHOP.md`](docs/WORKSHOP.md)
@@ -271,6 +272,7 @@ http://localhost:8081
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
 | `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
 | `POST /workspace/keygen` | Mint an Ed25519 key pair for bundle signing (admin) |
+| `POST /plugin/registry/sign` | Sign a registry index over its canonical listing digest (admin) |
 | `POST /workspace/import/preview` | Dry-run an import: what would change, writes nothing (admin) |
 | `POST /workspace/import` | Import a whole-workspace bundle (admin) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
@@ -701,6 +703,13 @@ content digest -- the same schemes (Ed25519/HMAC) and keyring as workspace bundl
 install-by-URL and from a registry), imini verifies the pack's signature against the configured
 keyring/secret and reports a `signature` status in the result. Set `plugins.require-signature=true` to
 **refuse** unsigned or unverified packs entirely.
+
+**Signed registry index.** The registry *listing document* itself can be signed, so a consumer can trust
+the index came from a known publisher (not just that each pack hashes correctly). `POST /plugin/registry/sign`
+(admin) takes an index JSON and returns it with a `signature` embedded over a canonical digest of its
+listings (sorted, order-independent). When you fetch a registry, the result includes a `signature` status
+for the index; with `plugins.require-signature=true`, installing from a registry whose index does not
+verify is refused (its status is reported as `indexSignature`).
 
 > Honest scope: the registry is just a fetched JSON list -- there is no central/official index, no
 > signing or trust-root in the registry itself, and no dependency resolution. The SHA-256 pin protects
@@ -1181,6 +1190,14 @@ field (`verified` / `invalid` / `unsigned` / `no-key`).
 bare `base64PublicKey` (key id derived from the key). The legacy single `bundle.signing-public-key` is also
 trusted. A signed bundle names the signer's `keyId` so verification picks the right key fast, then falls
 back to trying every trusted key. This turns single-signer verification into a small web of trust.
+
+**Key rotation and revocation.** A keyring entry may carry an **expiry**: append `@<epochMillis>` to the
+key (e.g. `alice:<base64>@1767225600000`). Past its expiry a key is no longer trusted, though imini can
+still tell a signature *was* made by that key (so the status is `expired`, not a bare `invalid`). To retire
+a compromised key immediately, add its id to `bundle.revoked-key-ids` (comma/newline-separated); a
+signature matching a revoked key verifies as `revoked`. Imports refuse `expired`/`revoked`/`invalid`
+signatures. Together these let trust change over time without rewriting every bundle: rotate by adding a
+new key (new `keyId`) and expiring the old, or revoke on compromise.
 
 ```
 # public-key: signer has the private key, verifier has the public key

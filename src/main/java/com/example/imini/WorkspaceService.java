@@ -161,8 +161,8 @@ public class WorkspaceService {
         }
 
         String sigStatus = verifySignature(root);
-        if (sigStatus.equals("invalid")) {
-            return Map.of("error", "signature verification failed -- refusing to import", "signature", "invalid");
+        if (sigStatus.equals("invalid") || sigStatus.equals("revoked") || sigStatus.equals("expired")) {
+            return Map.of("error", "signature " + sigStatus + " -- refusing to import", "signature", sigStatus);
         }
 
         Map<String, Object> out = new LinkedHashMap<>();

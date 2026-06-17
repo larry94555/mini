@@ -179,21 +179,22 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is complete for its educational scope, and this iteration extended the trust and
-deployment story: a **verifier keyring** (trust several publisher public keys), **signed plugin
-packs** (provenance on install, not just SHA-256 integrity), and a **one-command Docker demo
-stack** (imini + model + Prometheus + Alertmanager + Grafana, auto-provisioned). A merge had
-dropped the Ed25519 bundle *verify* path; this PR also restores it via the shared `SigningService`.
+The harness is complete for its educational scope, and this iteration rounded out the signing and
+deployment story to its natural end: keys can **expire and be revoked** (trust changes over time),
+the **registry index itself is signable** (provenance for the listing, not just each pack), and a
+**published image** plus release workflow let the demo run with no local build.
 
-Every layer is now closed out. There is no remaining high-leverage feature; further work would be
-scope expansion, e.g.:
+Every layer -- agent loop, tools, safety, persistence, observability, the full plugin/signing
+lifecycle, onboarding, and one-command deployment -- is closed out. There is no remaining
+high-leverage feature; the project is genuinely done for its stated goals. Any further work would
+be scope expansion rather than completion, for example:
 
-- **key rotation / revocation** metadata for the keyring (expiry, revoked-key list),
-- **signed registry index** (sign the listing document itself, not just the packs it points to),
-- **published demo image** on a registry so the stack runs without a local build.
+- a small **key-management UI** (list trusted keys, mark revoked, show expiry) instead of config,
+- **multi-arch images** (arm64 + amd64) from the publish workflow,
+- a **signed-index registry browser** that surfaces the index signature in the Plugins card.
 
-Recommendation: the project is done for its stated goals. If continuing, **key rotation/revocation**
-is the most principled next step for the signing story.
+Recommendation: consider the project finished. The most natural remaining polish, if continuing,
+is surfacing key/signature status in the UI rather than any new backend capability.
 
 ## 3. Guidance for AI implementers
 
@@ -334,6 +335,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Key rotation/revocation + signed registry index + published demo image: keyring entries can carry an
+  expiry (`key@<epochMillis>`) and ids can be revoked (`bundle.revoked-key-ids`), with `expired`/`revoked`
+  verification statuses that imports refuse; the registry listing document is signable
+  (`POST /plugin/registry/sign`, verified on fetch and gated by `plugins.require-signature`); and
+  `docker-compose.published.yml` + a GHCR publish workflow run the demo from a prebuilt image with no local
+  build. Pure `Keyring` (expiry/revocation) and `PluginRegistry.signablePayload` unit-tested.
 - Verifier keyring + signed plugin packs + Docker demo stack: a `Keyring` lets a verifier trust several
   Ed25519 public keys (with key ids); plugin packs are signed on export and verified on install (optionally
   required via `plugins.require-signature`); and a `docker-compose.observability.yml` overlay brings up

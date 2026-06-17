@@ -63,4 +63,20 @@ class PluginRegistryTest {
         assertEquals(2, PluginRegistry.search(ls, "", 5).size()); // blank -> passthrough (capped at k)
         assertEquals(0, PluginRegistry.search(null, "x", 5).size());
     }
+
+    @Test
+    void signablePayloadIsDeterministicSortedAndOrderIndependent() {
+        List<PluginRegistry.Listing> a = List.of(
+                new PluginRegistry.Listing("beta", "1", "d", "https://x/b.json", "sb"),
+                new PluginRegistry.Listing("alpha", "2", "d", "https://x/a.json", "sa"));
+        List<PluginRegistry.Listing> b = List.of(
+                new PluginRegistry.Listing("alpha", "2", "d", "https://x/a.json", "sa"),
+                new PluginRegistry.Listing("beta", "1", "d", "https://x/b.json", "sb"));
+        String pa = PluginRegistry.signablePayload(a);
+        String pb = PluginRegistry.signablePayload(b);
+        assertEquals(pa, pb);                                   // order-independent
+        assertTrue(pa.indexOf("alpha") < pa.indexOf("beta"));   // sorted by name
+        assertTrue(pa.startsWith("imini-registry/1"));
+        assertEquals("imini-registry/1", PluginRegistry.signablePayload(List.of()).trim());
+    }
 }

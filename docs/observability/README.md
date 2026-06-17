@@ -21,6 +21,15 @@ The overlay uses [`compose/prometheus.yml`](compose/prometheus.yml) (which targe
 name and points at Alertmanager). The demo runs imini without an API key, so the admin-only `/metrics/prom`
 scrape works out of the box; if you enable auth, add the admin key as a Bearer token there.
 
+To skip the local build entirely, use the published image instead of the source build:
+
+```
+docker compose -f docker-compose.published.yml -f docker-compose.observability.yml up
+```
+
+`docker-compose.published.yml` pulls `ghcr.io/larry94555/imini:latest` (published by
+`.github/workflows/docker-publish.yml` on each release/tag) rather than building from source.
+
 The sections below describe the same setup **without** Docker (pointing the tools at a host install).
 
 ---

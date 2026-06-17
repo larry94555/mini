@@ -1,0 +1,42 @@
+# Run the demo from a PREBUILT image -- no local Maven/Docker build required.
+#
+#   docker compose -f docker-compose.published.yml up
+#
+# This is the same stack as docker-compose.yml, except imini uses the published image from GHCR instead of
+# building from source. Combine with the observability overlay for the full monitored stack:
+#
+#   docker compose -f docker-compose.published.yml -f docker-compose.observability.yml up
+#
+# The image is published by .github/workflows/docker-publish.yml on each release/tag. Pin a version by
+# replacing ':latest' with a tag (e.g. ':v1.2.0'). Then open http://localhost:8080 .
+services:
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command: >
+      -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M
+      --host 0.0.0.0 --port 8081 --jinja --ctx-size 8192
+    volumes:
+      - llama-cache:/root/.cache/llama.cpp
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  imini:
+    image: ghcr.io/larry94555/imini:latest   # prebuilt; no "build:" so nothing compiles locally
+    depends_on:
+      - llama
+    command:
+      - "--llama.manage-server=false"
+      - "--llama.client-host=llama"
+      - "--llama.port=8081"
+      - "--agent.workspace-root=/workspace"
+    volumes:
+      - imini-data:/app/.imini
+      - ./workspace:/workspace
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  llama-cache:
+  imini-data:
