@@ -179,20 +179,21 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope and the observability/state story is now fully
-durable and outward-facing: run history persists across restarts, metrics scrape in Prometheus
-format, and a guided in-app tour onboards new users. The project is a polished, teachable,
-self-explaining build-your-own-agent harness. Remaining ideas are small and optional:
+The harness is feature-complete for its scope and now ships concrete observability tooling (a
+Grafana dashboard + Prometheus scrape config in `docs/observability/`), filterable run history,
+and a whole-workspace export/import bundle. It is a polished, teachable, self-explaining
+build-your-own-agent harness with durable state and external-monitoring hooks. Remaining ideas
+are genuinely optional refinements:
 
-- **Grafana dashboard sample** -- ship an example dashboard JSON + a short scraping how-to for the
-  new `/metrics/prom` endpoint,
-- **run-history filters** -- filter the admin run list by endpoint/outcome/session,
-- **export the whole workspace** as one bundle (skills + agents + commands + settings) beyond the
-  per-session export.
+- **workspace import preview (dry-run)** -- show what a bundle would install/overwrite before
+  applying it,
+- **alert rules sample** -- ship example Prometheus alert rules (e.g. failure-rate, queue depth)
+  alongside the Grafana dashboard,
+- **per-session run history** -- scope the run list to one session in the session view.
 
-The recommended next step is the **Grafana dashboard sample + scraping guide**: it makes the
-scrape-friendly metrics immediately useful with a concrete, copy-paste monitoring setup, needs no
-model dependency, and fits the educational goal (showing how real observability is wired up).
+The recommended next step is **workspace import preview (dry-run)**: it makes the new import
+safe-by-default (no surprises about overwrites), is small (reuses the bundle parser), and is the
+natural follow-on to the export/import that just shipped.
 
 ## 3. Guidance for AI implementers
 
@@ -333,6 +334,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Grafana dashboard sample + run-history filters + whole-workspace bundle: `docs/observability/` ships a
+  Prometheus scrape config and a starter Grafana dashboard with a how-to; `GET /admin/runs` now filters by
+  endpoint/outcome/session (pure `RunFilter`, unit-tested); and `GET /workspace/export` /
+  `POST /workspace/import` back up or clone an entire setup (skills + agents + commands + settings) via a
+  new `WorkspaceService` (pure `WorkspaceBundle` summary, unit-tested).
 - Persist run history + scrape-friendly metrics + guided in-app tour: the recent-runs list is now durable
   (`run_history` table via `RunHistoryStore`, reloaded on startup, capped by `agent.run-history.persist-max`);
   `GET /metrics/prom` exposes the counters in Prometheus text format (pure `PromFormat`, unit-tested); and a

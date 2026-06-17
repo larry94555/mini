@@ -68,6 +68,7 @@ public class AgentController {
     private final ScheduledTasks schedule;
     private final PluginService plugins;
     private final SessionSettings sessionSettings;
+    private final WorkspaceService workspace;
     private final PreviewStore previews;
     private final BuiltinTools builtins;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -79,7 +80,8 @@ public class AgentController {
                            SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init,
                            PreviewStore previews, BuiltinTools builtins,
                            TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
-                           PluginService plugins, SessionSettings sessionSettings) {
+                           PluginService plugins, SessionSettings sessionSettings,
+                           WorkspaceService workspace) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -102,6 +104,7 @@ public class AgentController {
         this.schedule = schedule;
         this.plugins = plugins;
         this.sessionSettings = sessionSettings;
+        this.workspace = workspace;
         this.previews = previews;
         this.builtins = builtins;
     }
@@ -401,9 +404,13 @@ public class AgentController {
 
     /** Recent runs (newest first): endpoint, session, resolved mode, duration, outcome. Admin only. */
     @GetMapping("/admin/runs")
-    public List<Map<String, Object>> adminRuns(@RequestParam(name = "limit", defaultValue = "25") int limit) {
+    public List<Map<String, Object>> adminRuns(
+            @RequestParam(name = "limit", defaultValue = "25") int limit,
+            @RequestParam(name = "endpoint", defaultValue = "") String endpoint,
+            @RequestParam(name = "outcome", defaultValue = "") String outcome,
+            @RequestParam(name = "session", defaultValue = "") String session) {
         requireAdmin();
-        return metrics.recentRuns(Math.max(1, Math.min(200, limit)));
+        return metrics.recentRuns(Math.max(1, Math.min(200, limit)), endpoint, outcome, session);
     }
 
     /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
@@ -624,6 +631,40 @@ public class AgentController {
         Map<String, Object> r = plugins.installFromRegistry(url, name, overwrite);
         audit.record(currentUser(), "plugin-registry-install", name,
                 String.valueOf(r.getOrDefault("verification", r.getOrDefault("error", ""))));
+        return r;
+    }
+
+    /** Export the whole workspace (skills + agents + commands + settings) as one downloadable bundle. */
+    @GetMapping("/workspace/export")
+    public ResponseEntity<String> workspaceExport(
+            @RequestParam(name = "name", defaultValue = "workspace") String name,
+            @RequestParam(name = "description", defaultValue = "") String description) throws Exception {
+        requireAdmin();
+        String json = workspace.exportJson(name, description);
+        audit.record(currentUser(), "workspace-export", name, "ok");
+        String filename = (name == null || name.isBlank() ? "workspace" : name) + ".imini-workspace.json";
+        return ResponseEntity.ok()
+                .header("Content-Type", "application/json")
+                .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
+                .body(json);
+    }
+
+    /** A summary of what the workspace would export (skill/agent/command/settings counts). */
+    @GetMapping("/workspace/summary")
+    public Map<String, Object> workspaceSummary() {
+        requireAdmin();
+        return workspace.summary();
+    }
+
+    /** Import a whole-workspace bundle: install its pack and apply its settings (admin). */
+    @PostMapping("/workspace/import")
+    public Map<String, Object> workspaceImport(
+            @RequestBody String bundleJson,
+            @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite) {
+        requireAdmin();
+        Map<String, Object> r = workspace.importBundle(bundleJson, overwrite);
+        audit.record(currentUser(), "workspace-import", "bundle",
+                String.valueOf(r.getOrDefault("error", "ok")));
         return r;
     }
 

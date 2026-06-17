@@ -192,6 +192,14 @@
       <h3>Admin overview <a class="linklike" id="refreshAdminLink" title="Reload the dashboard">refresh</a></h3>
       <div class="muted" style="font-size:11px">Live observability (admin only): runs, latency, tools, tasks, and recent privileged actions.</div>
       <div id="adminBody" class="muted" style="font-size:11px;margin-top:4px">(load with refresh)</div>
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
+        <span class="muted" style="font-size:11px">filter runs:</span>
+        <input id="runFilterEndpoint" placeholder="endpoint" style="width:90px;font-size:11px"/>
+        <select id="runFilterOutcome" style="font-size:11px"><option value="">any</option><option value="ok">ok</option><option value="failed">failed</option></select>
+        <input id="runFilterSession" placeholder="session" style="width:90px;font-size:11px"/>
+        <button id="runFilterApply">apply</button>
+      </div>
+      <div id="runFilterList" class="muted" style="font-size:11px;margin-top:4px"></div>
     </div>
     <div class="card" id="scheduleCard">
       <h3>Scheduled tasks <a class="linklike" id="refreshSchedLink" title="Reload scheduled tasks">refresh</a></h3>
@@ -237,6 +245,13 @@
         <button id="pluginEntryBuild">Build entry</button>
       </div>
       <textarea id="pluginEntryOut" placeholder="registry entry JSON appears here" style="width:100%;height:54px;margin-top:4px;font-size:11px" readonly></textarea>
+      <div class="muted" style="font-size:11px;margin-top:8px;border-top:1px solid var(--border);padding-top:6px">Whole-workspace bundle (skills + agents + commands + settings):</div>
+      <div class="row" style="gap:6px;margin-top:2px;flex-wrap:wrap;align-items:center">
+        <button id="wsExport">Export workspace</button>
+        <label class="muted" style="font-size:11px"><input type="checkbox" id="wsOverwrite"/> overwrite on import</label>
+        <button id="wsImport">Import workspace</button>
+      </div>
+      <textarea id="wsJson" placeholder="paste a workspace bundle JSON to import" style="width:100%;height:60px;margin-top:4px;font-size:11px"></textarea>
     </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
@@ -610,6 +625,29 @@ async function buildRegistryEntry(){
   appendLog("[plugin] built registry entry for " + (j.name||name));
 }
 $("#pluginEntryBuild") && ($("#pluginEntryBuild").onclick = buildRegistryEntry);
+async function exportWorkspace(){
+  const r = await fetch("/workspace/export?name=workspace", { headers: headers(false) });
+  if (!r.ok){ appendLog("[workspace] export failed (admin only?)"); return; }
+  const text = await r.text();
+  const blob = new Blob([text], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "workspace.imini-workspace.json"; a.click(); URL.revokeObjectURL(a.href);
+  appendLog("[workspace] exported bundle");
+}
+async function importWorkspace(){
+  const body = $("#wsJson").value.trim();
+  if (!body){ appendLog("[workspace] paste a bundle JSON first"); return; }
+  const overwrite = $("#wsOverwrite").checked;
+  const r = await fetch("/workspace/import?overwrite=" + overwrite, { method:"POST", headers: headers(true), body });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ appendLog("[workspace] import failed (admin only?)"); return; }
+  if (j.error){ appendLog("[workspace] " + j.error); return; }
+  const pack = j.pack || {};
+  appendLog("[workspace] imported: installed " + ((pack.installed||[]).length) + ", skipped " + ((pack.skipped||[]).length) + ", settings " + ((j.settingsApplied||[]).length));
+  refreshPlugins(); refreshMemoryFiles();
+}
+$("#wsExport") && ($("#wsExport").onclick = exportWorkspace);
+$("#wsImport") && ($("#wsImport").onclick = importWorkspace);
 function runsHtml(runs){
   if (!Array.isArray(runs) || !runs.length) return "(none)";
   return runs.slice(0,10).map(r => {
@@ -641,6 +679,16 @@ async function refreshAdmin(){
     + '<div style="margin-top:4px"><b>recent admin actions</b></div>' + audit;
 }
 $("#refreshAdminLink") && ($("#refreshAdminLink").onclick = refreshAdmin);
+async function applyRunFilter(){
+  const el = $("#runFilterList"); if (!el) return;
+  const ep = encodeURIComponent($("#runFilterEndpoint").value.trim());
+  const oc = encodeURIComponent($("#runFilterOutcome").value);
+  const se = encodeURIComponent($("#runFilterSession").value.trim());
+  const j = await getJson("/admin/runs?limit=50&endpoint="+ep+"&outcome="+oc+"&session="+se);
+  if (!Array.isArray(j)){ el.textContent = "(admin only)"; return; }
+  el.innerHTML = j.length ? runsHtml(j) : "(no matching runs)";
+}
+$("#runFilterApply") && ($("#runFilterApply").onclick = applyRunFilter);
 async function refreshSchedule(){
   const el = $("#schedList"); if (!el) return;
   const rows = await getJson("/schedule");

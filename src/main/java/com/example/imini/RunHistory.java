@@ -56,6 +56,26 @@ public final class RunHistory {
         return out;
     }
 
+    /** Recent records (newest first) matching the given filter, as plain maps. */
+    public synchronized List<Map<String, Object>> recentMaps(int n, String endpoint, String outcome, String session) {
+        int want = Math.max(0, n);
+        List<Record> all = new ArrayList<>(records);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (int i = all.size() - 1; i >= 0 && out.size() < want; i--) {
+            Record r = all.get(i);
+            if (!RunFilter.matches(r, endpoint, outcome, session)) continue;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("ts", r.ts());
+            m.put("endpoint", r.endpoint());
+            m.put("session", r.session());
+            m.put("mode", r.mode());
+            m.put("ms", r.ms());
+            m.put("ok", r.ok());
+            out.add(m);
+        }
+        return out;
+    }
+
     public synchronized int size() {
         return records.size();
     }

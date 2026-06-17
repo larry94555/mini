@@ -110,6 +110,8 @@ No cloud API key is required.
 | `RunHistory.java` | Pure bounded ring buffer of recent runs (for the dashboard) |
 | `RunHistoryStore.java` | Durable run history (`run_history` table) + startup reload |
 | `PromFormat.java` | Pure Metrics snapshot -> Prometheus text exposition format |
+| `RunFilter.java` | Pure run-history filter (endpoint/outcome/session) |
+| `WorkspaceBundle.java` / `WorkspaceService.java` | Whole-workspace export/import (pack + settings) |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -258,8 +260,10 @@ http://localhost:8081
 | `GET /me` | Current caller identity (`user`, `role`) |
 | `GET /metrics` | Metrics snapshot (admin only) |
 | `GET /admin/overview` | Consolidated admin dashboard snapshot, incl. recent runs (admin only) |
-| `GET /admin/runs?limit=` | Recent runs: endpoint, session, resolved mode, latency, outcome (admin) |
+| `GET /admin/runs?limit=&endpoint=&outcome=&session=` | Recent runs, filterable by endpoint/outcome/session (admin) |
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
+| `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
+| `POST /workspace/import` | Import a whole-workspace bundle (admin) |
 | `GET /audit?user=&action=&target=&offset=&limit=` | Audit trail of privileged actions, filterable + paged (admin only) |
 | `GET /audit/export?format=csv\|json&since=&until=&...` | Download the (filtered, windowed) audit trail (admin) |
 | `GET /session/activity?sessionId=&offset=&limit=` | This session's events (anyone with session access) |
@@ -1108,6 +1112,25 @@ curl -X POST "localhost:8080/session/fork?sessionId=proj"                       
 > starts private). Rename/fork require write access to the source (owner/admin/unowned); fork only needs
 > read access since it creates a new session you own. Titles are display-only metadata.
 
+## Whole-workspace bundle (export / import)
+
+Beyond per-session export and single plugin packs, you can back up or clone an **entire setup** in one
+file. `GET /workspace/export` (admin) downloads a `*.imini-workspace.json` bundle containing the plugin
+pack (all skills, agents, and commands) plus the durable app settings; `POST /workspace/import` (admin)
+installs the pack and applies the settings. The *Plugins* card has **Export workspace** / **Import
+workspace** buttons (with an overwrite toggle).
+
+```
+curl "localhost:8080/workspace/export" -H "X-API-Key: <admin-key>" -o workspace.imini-workspace.json
+curl -X POST "localhost:8080/workspace/import?overwrite=false" -H "X-API-Key: <admin-key>" \
+     -H "Content-Type: application/json" --data-binary @workspace.imini-workspace.json
+```
+
+> Honest scope: the bundle includes skills/agents/commands and `app_settings` (e.g. the token budget). It
+> does **not** include session history, per-session settings, scheduled tasks, or audit -- it is a content
+> + config bundle, not a full state snapshot. Import reuses the plugin installer, so it stays
+> workspace-confined and path-sanitized; settings are applied as-is, so import from sources you trust.
+
 ## Session export / import
 
 A whole session -- its conversation, plan history (steps + per-step tools + coding reports), and todos --
@@ -1250,7 +1273,9 @@ Click **refresh** on the card to re-poll. It's a read-only view; non-admins simp
 
 **Run history.** The dashboard also lists the most **recent runs** -- each with its endpoint, the
 **resolved mode** that turn ran in, duration, outcome, and session. The overview embeds the last 10;
-`GET /admin/runs?limit=N` returns more (newest first, up to 200). It is a bounded ring buffer that is also **persisted** (the `run_history` table) and a tail is reloaded on
+`GET /admin/runs?limit=N` returns more (newest first, up to 200) and accepts `&endpoint=`, `&outcome=`
+(`ok`/`failed`), and `&session=` filters (substring, case-insensitive; blank = any) -- the admin card has
+matching filter controls. It is a bounded ring buffer that is also **persisted** (the `run_history` table) and a tail is reloaded on
 startup, so recent runs survive a restart. `agent.run-history.persist-max` (default 500) bounds how many
 rows are kept.
 
@@ -1267,6 +1292,9 @@ curl "localhost:8080/metrics/prom" -H "X-API-Key: <admin-key>"
 # imini_tool_calls{tool="read_file"} 3
 # imini_run_latency_avg_ms 120
 ```
+
+A ready-to-use Prometheus scrape config and a starter **Grafana dashboard** (panels for runs, latency,
+tool calls, concurrency, uptime) live in [`docs/observability/`](docs/observability/) with a short how-to.
 
 > Honest scope: the counters themselves are still **in-process** (they reset on restart and aren't
 > aggregated across nodes), and there are no histograms/percentiles -- but the `/metrics/prom` format lets
