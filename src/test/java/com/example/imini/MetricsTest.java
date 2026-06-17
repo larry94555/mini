@@ -13,7 +13,7 @@ class MetricsTest {
     @Test
     @SuppressWarnings("unchecked")
     void countersAndLatencyAggregate() {
-        Metrics m = new Metrics(null);
+        Metrics m = new Metrics(null, null);
         m.inc("requests");
         m.inc("requests");
         m.incTool("read_file");

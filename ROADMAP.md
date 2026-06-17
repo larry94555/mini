@@ -179,21 +179,20 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope; observability, the plugin lifecycle
-(export -> install-by-URL -> discover -> publish), and the persistence story are all done, and
-each turn now reports its resolved mode. The codebase is a polished, teachable
-build-your-own-agent harness. Remaining ideas are genuinely optional:
+The harness is feature-complete for its scope and the observability/state story is now fully
+durable and outward-facing: run history persists across restarts, metrics scrape in Prometheus
+format, and a guided in-app tour onboards new users. The project is a polished, teachable,
+self-explaining build-your-own-agent harness. Remaining ideas are small and optional:
 
-- **persist run history** -- keep the recent-runs list across restarts (a small table), so the
-  dashboard survives a restart like settings and scheduled tasks already do,
-- **export/scrape-friendly metrics** -- a Prometheus-style `/metrics` text format for external
-  monitoring,
-- **a guided in-app tour** that ties the web UI cards to the GettingStarted/Workshop docs.
+- **Grafana dashboard sample** -- ship an example dashboard JSON + a short scraping how-to for the
+  new `/metrics/prom` endpoint,
+- **run-history filters** -- filter the admin run list by endpoint/outcome/session,
+- **export the whole workspace** as one bundle (skills + agents + commands + settings) beyond the
+  per-session export.
 
-The recommended next step is **persist run history**: it is the last in-memory-only piece of the
-now-durable observability/state story, is small (reuses the SQLite/migration pattern), and keeps
-the dashboard useful across restarts. If you would rather face outward, **scrape-friendly
-metrics** is the strongest alternative for real monitoring.
+The recommended next step is the **Grafana dashboard sample + scraping guide**: it makes the
+scrape-friendly metrics immediately useful with a concrete, copy-paste monitoring setup, needs no
+model dependency, and fits the educational goal (showing how real observability is wired up).
 
 ## 3. Guidance for AI implementers
 
@@ -334,6 +333,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Persist run history + scrape-friendly metrics + guided in-app tour: the recent-runs list is now durable
+  (`run_history` table via `RunHistoryStore`, reloaded on startup, capped by `agent.run-history.persist-max`);
+  `GET /metrics/prom` exposes the counters in Prometheus text format (pure `PromFormat`, unit-tested); and a
+  dependency-free **? tour** button walks new users through the web-UI cards, ending at the learning docs.
 - Run history view + resolved-mode-per-turn + registry publish helper: the admin dashboard now lists
   recent runs (endpoint, resolved mode, latency, outcome) via a bounded `RunHistory` buffer
   (`GET /admin/runs`, embedded in `/admin/overview`); every turn logs `[mode] running in <mode>` to its
