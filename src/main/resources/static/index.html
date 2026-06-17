@@ -209,6 +209,12 @@
         <input id="pluginSha" placeholder="sha256 (optional)" style="width:120px"/>
         <button id="pluginInstallUrl">Install from URL</button>
       </div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Or browse a registry index (discover packs, install by name with the registry's hash):</div>
+      <div class="row" style="gap:6px;margin-top:2px;flex-wrap:wrap;align-items:center">
+        <input id="pluginRegUrl" placeholder="https://.../registry.json (blank = default)" style="min-width:190px;flex:1"/>
+        <button id="pluginRegBrowse">Browse registry</button>
+      </div>
+      <div id="pluginRegList" class="muted" style="font-size:11px;margin-top:4px"></div>
     </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
@@ -499,6 +505,36 @@ async function installPluginUrl(){
   refreshPlugins(); refreshMemoryFiles();
 }
 $("#pluginInstallUrl") && ($("#pluginInstallUrl").onclick = installPluginUrl);
+async function browseRegistry(){
+  const el = $("#pluginRegList"); if (!el) return;
+  const url = $("#pluginRegUrl").value.trim();
+  const j = await getJson("/plugin/registry" + (url ? "?url=" + encodeURIComponent(url) : ""));
+  if (!j){ el.textContent = "(failed)"; return; }
+  if (j.error){ el.textContent = j.error; return; }
+  const packs = j.packs || [];
+  if (!packs.length){ el.textContent = "(no packs in registry)"; return; }
+  window._pluginRegUrl = j.url || url || "";
+  el.innerHTML = packs.map(p =>
+    '<div style="border-top:1px solid var(--border);padding:3px 0">'
+    + '<b>' + escapeHtml(p.name) + '</b>' + (p.version ? ' v' + escapeHtml(String(p.version)) : '')
+    + (p.pinned ? ' <span class="muted">[pinned]</span>' : ' <span class="muted">[unpinned]</span>')
+    + ' <a class="linklike" onclick="installFromRegistry(\'' + encodeURIComponent(p.name) + '\')">install</a>'
+    + '<br><span class="muted">' + escapeHtml(String(p.description||"")) + '</span></div>').join("");
+}
+async function installFromRegistry(nameEnc){
+  const name = decodeURIComponent(nameEnc);
+  const overwrite = $("#pluginOverwrite").checked;
+  const url = window._pluginRegUrl || $("#pluginRegUrl").value.trim();
+  const qs = "/plugin/registry/install?name=" + encodeURIComponent(name)
+    + (url ? "&url=" + encodeURIComponent(url) : "") + "&overwrite=" + overwrite;
+  const r = await fetch(qs, { method:"POST", headers: headers(false) });
+  const j = r.ok ? await r.json() : null;
+  if (!j){ appendLog("[plugin] registry install failed (admin only?)"); return; }
+  if (j.error){ appendLog("[plugin] " + j.error); return; }
+  appendLog("[plugin] " + name + ": " + (j.verification||"installed") + "; installed " + (j.installed||[]).length + ", skipped " + (j.skipped||[]).length);
+  refreshPlugins(); refreshMemoryFiles();
+}
+$("#pluginRegBrowse") && ($("#pluginRegBrowse").onclick = browseRegistry);
 async function refreshAdmin(){
   const el = $("#adminBody"); if (!el) return;
   const j = await getJson("/admin/overview");

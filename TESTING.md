@@ -2192,3 +2192,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** after more runs, the card's run counts, success rate, latency, and top-tools update on
   refresh; scheduling/cancelling a task changes the tasks line; installing a plugin changes the content
   counts. Metrics are in-process and reset on restart.
+
+---
+
+# Plugin registry index (discover packs)
+
+## 239. PluginRegistry index parsing + lookup/search (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `PluginRegistryTest` passes -- `parse` reads both the object form (`{"packs":[...]}`) and a
+  top-level array, skips entries missing a name or url, and never throws on garbage/null; `byName` is
+  case-insensitive; `search` ranks by lexical overlap and passes through a blank query (capped at k).
+
+## 240. Browse a registry and install by name (manual)
+
+- **Setup:** host a registry index JSON (or set `plugins.registry-url`); it lists one or more packs with
+  `name`/`url`/`sha256`.
+- **Observe:** `GET /plugin/registry?url=...` (or the *Plugins* card's **Browse registry**) lists the
+  advertised packs (name, version, pinned/unpinned, description). Clicking **install** (or `POST
+  /plugin/registry/install?name=...`) installs that pack, pinning the registry's declared SHA-256: a good
+  hash installs and reports `verified`; a tampered pack is **refused** on mismatch; a registry entry with
+  no hash installs as `unpinned`. Install is admin-only; browsing is read-only.
+
+## 241. Default registry URL (manual)
+
+- **Observe:** with `plugins.registry-url` set, `GET /plugin/registry` (no `url=`) browses the default;
+  passing `url=` overrides it. With no default and no `url=`, the call returns a clear "no registry URL"
+  message rather than failing.
