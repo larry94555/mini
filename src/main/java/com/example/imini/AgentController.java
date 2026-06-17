@@ -588,6 +588,26 @@ public class AgentController {
                 .body(body);
     }
 
+    /** Browse a plugin registry index: list the packs it advertises (read-only). Uses the default URL if none given. */
+    @GetMapping("/plugin/registry")
+    public Map<String, Object> pluginRegistry(@RequestParam(name = "url", defaultValue = "") String url) {
+        requireRead("default");
+        return plugins.fetchRegistry(url);
+    }
+
+    /** Install a pack by name from a registry index, pinned to the registry's declared SHA-256 (admin). */
+    @PostMapping("/plugin/registry/install")
+    public Map<String, Object> installFromRegistry(
+            @RequestParam(name = "url", defaultValue = "") String url,
+            @RequestParam(name = "name") String name,
+            @RequestParam(name = "overwrite", defaultValue = "false") boolean overwrite) {
+        requireAdmin();
+        Map<String, Object> r = plugins.installFromRegistry(url, name, overwrite);
+        audit.record(currentUser(), "plugin-registry-install", name,
+                String.valueOf(r.getOrDefault("verification", r.getOrDefault("error", ""))));
+        return r;
+    }
+
     /** Install a plugin pack from a URL, verifying its SHA-256 first (admin). Mirrors remote-skill install. */
     @PostMapping("/plugin/install-url")
     public Map<String, Object> installPluginUrl(

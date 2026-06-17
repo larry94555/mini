@@ -101,7 +101,8 @@ No cloud API key is required.
 | `LoopCommand.java` | Pure `/loop` parsing + iterate-until-green prompt/continue logic |
 | `Schedule.java` / `ScheduledTasks.java` | Pure scheduling math + the durable local task scheduler |
 | `SettingsStore.java` | Durable key/value app settings (`app_settings` table) |
-| `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation/SHA-256 + export/install (incl. by URL) |
+| `PluginPack.java` / `PluginService.java` | Plugin packs: pure model/validation/SHA-256 + export/install (incl. by URL/registry) |
+| `PluginRegistry.java` | Pure registry-index model + parse/search/lookup |
 | `VisionContent.java` / `VisionSupport.java` | Pure multimodal content building + vision capability gate |
 | `AdminFormat.java` | Pure dashboard formatting (uptime, top-N tallies, success rate) |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
@@ -205,6 +206,8 @@ http://localhost:8081
 | `GET /plugin/export` | Download a plugin pack (skills + agents + commands) as JSON |
 | `POST /plugin/install` | Install a plugin pack (JSON body) into the workspace (admin) |
 | `POST /plugin/install-url?url=&sha256=` | Install a pack from a URL, verified by SHA-256 (admin) |
+| `GET /plugin/registry?url=` | Browse a registry index (list advertised packs) |
+| `POST /plugin/registry/install?url=&name=` | Install a pack by name from a registry, pinned to its hash (admin) |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -634,6 +637,30 @@ The pack is fetched (http/https only), its SHA-256 is computed and compared to t
 install is **refused on mismatch**. Omitting the hash is allowed but reported as `unpinned (not verified)`
 -- pin it for anything you didn't produce yourself. The *Plugins* card has URL + sha256 fields for the
 same flow.
+
+**Discover packs with a registry index.** Rather than knowing each pack's URL, point the harness at a
+*registry index* -- a JSON document that lists available packs -- to browse and install by name:
+
+```json
+{ "format": "imini-registry/1", "name": "my-registry", "packs": [
+    { "name": "web-tools", "version": "2", "description": "web helpers",
+      "url": "https://example.com/web-tools.imini-plugin.json", "sha256": "<hex>" } ] }
+```
+
+```
+curl "localhost:8080/plugin/registry?url=https://example.com/registry.json" -H "X-API-Key: <key>"     # browse
+curl -X POST "localhost:8080/plugin/registry/install?url=https://example.com/registry.json&name=web-tools" \
+     -H "X-API-Key: <admin-key>"                                                                       # install by name
+```
+
+Installing by name reuses install-by-URL and **pins the registry's declared SHA-256**, so you get exactly
+the bytes the registry advertises (refused on mismatch; `unpinned` if the registry omits a hash). Set a
+default registry with `plugins.registry-url=` so you can browse without passing `url=` each time. The
+*Plugins* card has a **Browse registry** button that lists packs with per-pack install links.
+
+> Honest scope: the registry is just a fetched JSON list -- there is no central/official index, no
+> signing or trust-root, and no dependency resolution. Trust a registry as much as you trust the site
+> hosting it; the SHA-256 pin protects integrity (you get the advertised bytes), not provenance.
 
 > Honest scope: install **validates and sanitizes every entry** -- the `type` must be one of
 > skill/agent/command and the `name` is reduced to a safe bare id (no path separators or `..` traversal),

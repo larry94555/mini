@@ -179,19 +179,20 @@ These are still valuable, but they come after the top five workflow features.
 
 ## 2. Current recommended priority
 
-The harness is feature-complete for its scope, fully documented (GettingStarted + Workshop +
-Glossary + LEARNING_PATH), and now has a consolidated **admin overview** dashboard
-(`GET /admin/overview`). Remaining polish:
+The harness is feature-complete for its scope, fully documented, and has a consolidated admin
+dashboard. The plugin story is now end-to-end: export -> install-by-URL (SHA-256) -> **discover
+via a registry index**. Remaining polish:
 
-- a plugin **registry index** -- discover packs from a registry URL (list, then install-by-URL
-  with the existing SHA-256 check), instead of needing a direct pack URL,
 - **durable per-session settings** -- persist per-session preferences (mode, skill toggles) via
   the `app_settings`/SQLite pattern already in place,
-- a lightweight **run history** view (recent runs with status/latency) building on the metrics.
+- a lightweight **run history** view (recent runs with status/latency) building on the metrics +
+  admin dashboard,
+- a **registry publish helper** -- generate a registry index entry (name/version/url/sha256) for
+  a pack you exported, to make hosting one easier.
 
-The recommended next step is the **plugin registry index**: it completes the plugin story shipped
-over the last PRs (export -> install-by-URL -> *discover*), is fully local/text-only, and reuses
-the existing manifest + SHA-256 verification, so it is small and high-value for sharing.
+The recommended next step is **durable per-session settings**: it is the last obvious gap in the
+persistence story (global settings and scheduled tasks already persist), is fully local/text-only,
+and reuses the existing `SettingsStore`/SQLite pattern, so it is small and low-risk.
 
 ## 3. Guidance for AI implementers
 
@@ -332,6 +333,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Plugin registry index: browse a registry index (a JSON list of packs) and install by name, pinned to the
+  registry's declared SHA-256 -- completing the plugin story (export -> install-by-URL -> discover).
+  `GET /plugin/registry`, `POST /plugin/registry/install`, optional `plugins.registry-url` default, and a
+  *Browse registry* UI flow. Pure `PluginRegistry` (parse/byName/search) unit-tested.
 - Richer admin/observability views: `GET /admin/overview` consolidates uptime, run counts + success rate,
   latency, live concurrency, top tool calls, scheduled-task and plugin/skill summaries, server
   capabilities, and recent audit into one admin-only snapshot, rendered by a new web-UI *Admin overview*

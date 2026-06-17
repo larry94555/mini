@@ -29,6 +29,7 @@ public class PluginService {
     @Value("${skills.dir:skills}") private String skillsDir;
     @Value("${agents.dir:agents}") private String agentsDir;
     @Value("${commands.dir:commands}") private String commandsDir;
+    @Value("${plugins.registry-url:}") private String defaultRegistryUrl;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path root = Path.of("").toAbsolutePath().normalize();
@@ -151,6 +152,76 @@ public class PluginService {
         r.put("url", u);
         r.put("sha256", actual);
         r.put("verification", pinned ? "verified (sha256 matched)" : "unpinned (no sha256 supplied -- not verified)");
+        return r;
+    }
+
+    /** The configured default registry URL (may be blank). */
+    public String defaultRegistryUrl() { return defaultRegistryUrl == null ? "" : defaultRegistryUrl.trim(); }
+
+    /**
+     * Fetch and parse a registry index (http/https). Returns {@code {url, format?, count, packs:[...]}} or
+     * {@code {error}}. Read-only -- it installs nothing.
+     */
+    public Map<String, Object> fetchRegistry(String url) {
+        String u = (url == null || url.isBlank()) ? defaultRegistryUrl() : url.trim();
+        if (u.isBlank()) return Map.of("error", "no registry URL (set plugins.registry-url or pass url)");
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            return Map.of("error", "only http/https URLs are allowed");
+        }
+        String body;
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(u))
+                    .timeout(java.time.Duration.ofSeconds(30)).GET().build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 != 2) return Map.of("error", "fetch failed: HTTP " + resp.statusCode());
+            body = resp.body();
+        } catch (Exception e) {
+            return Map.of("error", "fetch failed: " + e.getMessage());
+        }
+        List<PluginRegistry.Listing> listings = PluginRegistry.parse(body);
+        List<Map<String, Object>> packs = new ArrayList<>();
+        for (PluginRegistry.Listing l : listings) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("name", l.name());
+            m.put("version", l.version());
+            m.put("description", l.description());
+            m.put("url", l.url());
+            m.put("pinned", l.sha256() != null && !l.sha256().isBlank());
+            packs.add(m);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("url", u);
+        out.put("count", packs.size());
+        out.put("packs", packs);
+        return out;
+    }
+
+    /**
+     * Install a pack named in a registry: fetch the index, find the pack, then install-by-URL pinning the
+     * registry-declared SHA-256 (refused on mismatch). Reuses {@link #installFromUrl}.
+     */
+    public Map<String, Object> installFromRegistry(String registryUrl, String packName, boolean overwrite) {
+        String u = (registryUrl == null || registryUrl.isBlank()) ? defaultRegistryUrl() : registryUrl.trim();
+        if (u.isBlank()) return Map.of("error", "no registry URL (set plugins.registry-url or pass url)");
+        if (packName == null || packName.isBlank()) return Map.of("error", "pack name is required");
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            return Map.of("error", "only http/https URLs are allowed");
+        }
+        String body;
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(u))
+                    .timeout(java.time.Duration.ofSeconds(30)).GET().build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 != 2) return Map.of("error", "registry fetch failed: HTTP " + resp.statusCode());
+            body = resp.body();
+        } catch (Exception e) {
+            return Map.of("error", "registry fetch failed: " + e.getMessage());
+        }
+        PluginRegistry.Listing l = PluginRegistry.byName(PluginRegistry.parse(body), packName);
+        if (l == null) return Map.of("error", "pack not found in registry: " + packName);
+        Map<String, Object> r = new java.util.LinkedHashMap<>(installFromUrl(l.url(), l.sha256(), overwrite));
+        r.put("registry", u);
+        r.put("name", l.name());
         return r;
     }
 
