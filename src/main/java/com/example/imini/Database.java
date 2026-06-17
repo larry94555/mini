@@ -59,7 +59,8 @@ public class Database {
             "CREATE TABLE skill_requests (id TEXT PRIMARY KEY, requester TEXT, name TEXT, "
                     + "description TEXT, body TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL)",
             "CREATE TABLE session_skill_state (session_id TEXT NOT NULL, name TEXT NOT NULL, "
-                    + "enabled INTEGER NOT NULL, PRIMARY KEY(session_id, name))");
+                    + "enabled INTEGER NOT NULL, PRIMARY KEY(session_id, name))",
+            "CREATE TABLE session_titles (session_id TEXT PRIMARY KEY, title TEXT NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

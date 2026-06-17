@@ -1978,3 +1978,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the *Project memory* card lists every memory file in load order with its reason/source and
   size (skipped files dimmed, `@`-imports nested), matching `/memory` and `GET /memory/files`. It is
   distinct from the *Memory search* (retrieval) card.
+
+---
+
+# Session fork / rename / export UX
+
+## 213. SessionNaming title + fork-name logic (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `SessionNamingTest` passes -- `cleanTitle` trims, collapses whitespace, and caps at 80
+  chars (blank/null -> ""); `forkTitle` prefers the source's title, falls back to its id, and does not
+  stack ("fork of fork of ..."); `displayName` shows the title or the id.
+
+## 214. Rename a session (manual)
+
+- **Observe:** the toolbar **rename** button (or `POST /session/rename?sessionId=&title=`) sets a title;
+  the session picker then shows `Title  (id)`. A blank title clears it. Rename requires write access
+  (owner/admin/unowned). Titles survive a restart (persisted in `session_titles`).
+
+## 215. Fork a session (manual)
+
+- **Observe:** **fork** (or `POST /session/fork?sessionId=`) creates a new session you own whose
+  conversation, plan history, and todos match the source; the original is unchanged; the new session is
+  titled `fork of <name>`. The UI switches to the new session. Per-session skill overrides and the
+  shared-with list are intentionally NOT copied (a fork starts private).
+
+## 216. Export a session (manual)
+
+- **Observe:** the **export** button downloads `<id>.imini-session.json` (the same bundle as
+  `GET /session/export`), which can be re-imported via the bundle import flow.

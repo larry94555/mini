@@ -172,26 +172,25 @@ Why this is fifth:
 These are still valuable, but they come after the top five workflow features.
 
 - ~~LSP-backed code intelligence~~ (go-to-def via `find_symbol`, find-refs via `find_references`).
-- Session fork / rename / export UX polish.
+- ~~Session fork / rename / export UX polish~~ (done -- rename/fork/export + titles).
 - `/loop` and scheduled local tasks.
 - Image input.
 - Plugin packaging.
 
 ## 2. Current recommended priority
 
-All five numbered priorities, hunk-level approval, and LSP-style code intelligence are done
-(`find_symbol` for definitions, `find_references` for usages). The remaining work comes from
-**Later priorities** -- pick by frequency and teaching value:
+All five numbered priorities, hunk-level approval, LSP-style code intelligence, and session
+fork/rename/export UX are now done. Remaining **Later priorities**:
 
-- session fork / rename / export UX polish (build on export/import bundles),
-- `/loop` and scheduled local tasks (bounded iterate-until-green as a first-class command),
-- image input,
+- `/loop` and scheduled local tasks (a bounded, first-class iterate-until-green command),
+- image (multimodal) input, where the local model supports it,
 - plugin packaging.
 
-Session fork / rename / export UX polish is the recommended next step: it raises the daily
-ergonomics of the web UI on top of the session lifecycle and bundle work already shipped, and
-is mostly deterministic plumbing (good teaching value, low risk). Keep avoiding trust/admin
-polish ahead of these unless the task is specifically trust/security work.
+The recommended next step is **`/loop` + scheduled local tasks**: it makes the agentic
+iterate-until-green pattern a first-class, *bounded* command (complementing the existing `loop`
+skill and the verification/check tooling), has high everyday value, and is fully
+local-model-compatible. Image input is lower priority here because most local llama.cpp setups
+are not vision-capable, so it would ship gated/optional.
 
 ## 3. Guidance for AI implementers
 
@@ -332,6 +331,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Session fork / rename / export UX: friendly session titles (`/session/rename`, shown in the picker),
+  one-click **fork** that copies conversation + plan history + todos into a new owned session
+  (`/session/fork`), and a one-click **export** download; pure title/fork-name logic in `SessionNaming`
+  (unit-tested), titles persisted via a new `session_titles` table.
 - Memory parity polish (Priority 1 finish): `/init` now **improves an existing `CLAUDE.md` in place** --
   appending only the scaffold sections it is missing (append-only, content preserved; `InitDraft.augment`
   pure + tested) via the chat command and `POST /init?augment=true`; a web-UI *Project memory* card
