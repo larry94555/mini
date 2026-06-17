@@ -1,12 +1,4 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROMETHEUS",
-      "label": "Prometheus",
-      "type": "datasource",
-      "pluginId": "prometheus"
-    }
-  ],
   "title": "imini overview",
   "schemaVersion": 39,
   "version": 1,
@@ -31,7 +23,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -56,7 +48,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -81,7 +73,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -102,7 +94,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -131,7 +123,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -152,7 +144,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -173,7 +165,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {
@@ -194,7 +186,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "PROM_IMINI"
       },
       "targets": [
         {

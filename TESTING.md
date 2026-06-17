@@ -2457,3 +2457,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `localhost:9093`; `docs/observability/alertmanager.yml` defines a default receiver, a `severity=critical`
   route, and an inhibit rule. `amtool check-config alertmanager.yml` validates it; running Alertmanager
   with it routes alerts fired by `alert-rules.yml`.
+
+---
+
+# Verifier keyring, signed plugin packs, and the Docker demo stack
+
+## 273. Keyring parse / key-id / ring verify (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `KeyringTest` passes -- `keyIdFor` is a stable 16-hex id; `parse` reads mixed
+  `keyId:base64` and bare entries plus a legacy single key, dedupes by id, and handles blank/null; `verify`
+  tries the preferred key id first, falls back to every trusted key, and rejects a tampered digest or blank
+  signature. (Ed25519 resolves via the JDK 21 runtime.)
+
+## 274. Signed plugin pack round-trip (manual)
+
+- **Setup:** configure signing (`bundle.signing-private-key` on the publisher; the matching public key in
+  `bundle.verify-public-keys` on the installer).
+- **Observe:** `GET /plugin/export` embeds `signatureAlg`/`signature`/`packSha256`(/`keyId`); installing it
+  (`POST /plugin/install`, or install-by-URL/registry) reports `signature: verified`. Tamper with an entry
+  -> `signature: invalid`. With `plugins.require-signature=true`, an unsigned or invalid pack is **refused**;
+  with it false, it installs and the status is reported.
+
+## 275. Verifier keyring with multiple publishers (manual)
+
+- **Observe:** put two publishers' public keys in `bundle.verify-public-keys` (e.g. `alice:<k1>,bob:<k2>`).
+  A bundle/pack signed by either verifies (`verified`), naming the matching key id; one signed by an
+  untrusted key reports `invalid`.
+
+## 276. One-command Docker demo stack (manual)
+
+- **Run:** `docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build`
+- **Observe:** imini (8080), Grafana (3000, admin/admin) with the **imini overview** dashboard preloaded,
+  Prometheus (9090) showing the `imini` target UP and the alert rules loaded, and Alertmanager (9093). The
+  Grafana panels populate as you drive a few runs in imini.

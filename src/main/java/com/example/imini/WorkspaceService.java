@@ -1,7 +1,6 @@
 package com.example.imini;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -21,22 +20,17 @@ public class WorkspaceService {
 
     private final PluginService plugins;
     private final SettingsStore settings;
+    private final SigningService signing;
     private final ObjectMapper mapper = new ObjectMapper();
-    @Value("${bundle.signing-secret:}") private String signingSecret;
-    @Value("${bundle.signing-private-key:}") private String signingPrivateKey;
-    @Value("${bundle.signing-public-key:}") private String signingPublicKey;
 
-    public WorkspaceService(PluginService plugins, SettingsStore settings) {
+    public WorkspaceService(PluginService plugins, SettingsStore settings, SigningService signing) {
         this.plugins = plugins;
         this.settings = settings;
+        this.signing = signing;
     }
 
-    private String secret() { return signingSecret == null ? "" : signingSecret.trim(); }
-    private String privKey() { return signingPrivateKey == null ? "" : signingPrivateKey.trim(); }
-    private String pubKey() { return signingPublicKey == null ? "" : signingPublicKey.trim(); }
-
     /** Mint a fresh Ed25519 key pair (base64) for signing/verifying bundles. */
-    public Map<String, String> generateKeyPair() { return BundleSignature.generateKeyPair(); }
+    public Map<String, String> generateKeyPair() { return signing.generateKeyPair(); }
 
     /** The canonical payload that gets signed: the pack's SHA-256 (a stable digest of its content). */
     private String signPayload(String packJson) { return PluginPack.sha256(packJson); }
@@ -50,18 +44,7 @@ public class WorkspaceService {
         bundle.put("pack", pack);
         bundle.put("settings", settings.all());
         String packSha = signPayload(mapper.writeValueAsString(pack));
-        if (!privKey().isEmpty()) {                       // public-key signing preferred
-            String sig = BundleSignature.signEd25519(packSha, privKey());
-            if (!sig.isEmpty()) {
-                bundle.put("packSha256", packSha);
-                bundle.put("signatureAlg", BundleSignature.ALG_ED25519);
-                bundle.put("signature", sig);
-            }
-        } else if (!secret().isEmpty()) {                 // shared-secret signing
-            bundle.put("packSha256", packSha);
-            bundle.put("signatureAlg", BundleSignature.ALG_HMAC);
-            bundle.put("signature", BundleSignature.sign(packSha, secret()));
-        }
+        bundle.putAll(signing.signFields(packSha));       // adds signatureAlg/signature/packSha256[/keyId] when configured
         return mapper.writeValueAsString(bundle);
     }
 
@@ -92,11 +75,12 @@ public class WorkspaceService {
     @SuppressWarnings("unchecked")
     private String verifySignature(Map<String, Object> root) {
         Object sig = root.get("signature");
-        if (secret().isEmpty()) return sig == null ? "no-secret" : "no-secret";
-        if (sig == null) return "unsigned";
+        String alg = root.get("signatureAlg") == null ? BundleSignature.ALG_HMAC
+                : String.valueOf(root.get("signatureAlg"));
+        String keyId = root.get("keyId") == null ? null : String.valueOf(root.get("keyId"));
         try {
             String packSha = signPayload(mapper.writeValueAsString(root.get("pack")));
-            return BundleSignature.verify(packSha, secret(), String.valueOf(sig)) ? "verified" : "invalid";
+            return signing.verify(packSha, alg, sig == null ? null : String.valueOf(sig), keyId);
         } catch (Exception e) {
             return "invalid";
         }

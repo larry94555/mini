@@ -30,9 +30,15 @@ public class PluginService {
     @Value("${agents.dir:agents}") private String agentsDir;
     @Value("${commands.dir:commands}") private String commandsDir;
     @Value("${plugins.registry-url:}") private String defaultRegistryUrl;
+    @Value("${plugins.require-signature:false}") private boolean requireSignature;
 
+    private final SigningService signing;
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path root = Path.of("").toAbsolutePath().normalize();
+
+    public PluginService(SigningService signing) {
+        this.signing = signing;
+    }
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(java.time.Duration.ofSeconds(15)).build();
 
@@ -65,7 +71,40 @@ public class PluginService {
     }
 
     public String exportJson(String name, String version, String description) throws Exception {
-        return mapper.writeValueAsString(exportPack(name, version, description));
+        PluginPack.Pack pack = exportPack(name, version, description);
+        String packJson = mapper.writeValueAsString(pack);
+        if (!signing.canSign()) return packJson;          // unsigned
+        @SuppressWarnings("unchecked")
+        Map<String, Object> signed = mapper.readValue(packJson, Map.class);
+        signed.putAll(signing.signFields(PluginPack.sha256(packJson)));  // packSha256/signatureAlg/signature[/keyId]
+        return mapper.writeValueAsString(signed);
+    }
+
+    /**
+     * Verify a pack JSON's signature (if any) using the configured keyring/secret, over the pack's content
+     * digest (signature fields excluded). Returns "verified"/"invalid"/"unsigned"/"no-key".
+     */
+    @SuppressWarnings("unchecked")
+    public String verifyPackSignature(String packJson) {
+        try {
+            Map<String, Object> raw = mapper.readValue(packJson, Map.class);
+            Object sig = raw.get("signature");
+            String alg = raw.get("signatureAlg") == null ? BundleSignature.ALG_HMAC
+                    : String.valueOf(raw.get("signatureAlg"));
+            String keyId = raw.get("keyId") == null ? null : String.valueOf(raw.get("keyId"));
+            // canonical digest = sha256 of the pack with signature fields removed (reconstruct the Pack)
+            List<PluginPack.Entry> entries = new ArrayList<>();
+            Object es = raw.get("entries");
+            if (es instanceof List<?> list) for (Object o : list) if (o instanceof Map<?, ?> m) {
+                entries.add(new PluginPack.Entry(str(m, "type"), str(m, "name"), str(m, "content")));
+            }
+            PluginPack.Pack canonical = new PluginPack.Pack(str(raw, "format"), str(raw, "name"),
+                    str(raw, "version"), str(raw, "description"), entries);
+            String sha = PluginPack.sha256(mapper.writeValueAsString(canonical));
+            return signing.verify(sha, alg, sig == null ? null : String.valueOf(sig), keyId);
+        } catch (Exception e) {
+            return "invalid";
+        }
     }
 
     /**
@@ -122,6 +161,12 @@ public class PluginService {
             return Map.of("error", "could not parse pack: " + e.getMessage());
         }
 
+        String sigStatus = verifyPackSignature(packJson);
+        if (requireSignature && !"verified".equals(sigStatus)) {
+            return Map.of("error", "unsigned or unverified pack refused (plugins.require-signature=true)",
+                    "signature", sigStatus);
+        }
+
         for (PluginPack.Entry e : pack.entries()) {
             String rel = PluginPack.targetPath(e);
             if (rel == null) { skipped.add((e.name() == null ? "?" : e.name()) + " (invalid type/name)"); continue; }
@@ -139,6 +184,7 @@ public class PluginService {
         log.info("[plugin] install: " + installed.size() + " installed, " + skipped.size()
                 + " skipped, " + errors.size() + " errors");
         Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("signature", sigStatus);
         out.put("pack", pack.name());
         out.put("installed", installed);
         out.put("skipped", skipped);

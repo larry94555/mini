@@ -1,5 +1,30 @@
 # Observability: scraping imini with Prometheus + Grafana
 
+## One-command demo stack (Docker)
+
+The fastest way to see all of this working: from the repo root, run both compose files together --
+
+```
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+```
+
+This starts imini + a local llama.cpp model server (base compose) plus Prometheus, Alertmanager, and
+Grafana (this overlay). Grafana is auto-provisioned with the Prometheus datasource and the imini
+dashboard. Open:
+
+- imini: http://localhost:8080
+- Grafana: http://localhost:3000 (admin / admin) -- the **imini overview** dashboard is preloaded
+- Prometheus: http://localhost:9090 (Status -> Targets shows `imini` UP; Status -> Rules shows the alerts)
+- Alertmanager: http://localhost:9093
+
+The overlay uses [`compose/prometheus.yml`](compose/prometheus.yml) (which targets the `imini` service by
+name and points at Alertmanager). The demo runs imini without an API key, so the admin-only `/metrics/prom`
+scrape works out of the box; if you enable auth, add the admin key as a Bearer token there.
+
+The sections below describe the same setup **without** Docker (pointing the tools at a host install).
+
+---
+
 imini exposes its in-process metrics in the Prometheus text exposition format at **`GET /metrics/prom`**
 (admin only). This folder has a ready-to-use scrape config and a starter Grafana dashboard.
 
