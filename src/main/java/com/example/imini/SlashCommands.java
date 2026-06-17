@@ -59,6 +59,7 @@ public class SlashCommands {
         sb.append("  /<skill-name>      invoke a skill directly ($ARGUMENTS = text after the name)\n");
         sb.append("  /agents            list available subagents\n");
         sb.append("  /agent <name> ...  delegate a task to a subagent\n");
+        sb.append("  /loop [check=<cmd>] [attempts=N] <goal>  iterate until the check passes (bounded)\n");
         if (templates.isEmpty()) {
             sb.append("  (none -- add .md files to the commands/ folder)");
         } else {

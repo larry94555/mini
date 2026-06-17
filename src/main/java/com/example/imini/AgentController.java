@@ -65,6 +65,7 @@ public class AgentController {
     private final InitService init;
     private final TokenBudgetService tokenBudget;
     private final LlamaClient llama;
+    private final ScheduledTasks schedule;
     private final PreviewStore previews;
     private final BuiltinTools builtins;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -75,7 +76,7 @@ public class AgentController {
                            AuditLog audit, PlanStore plans, RunRecorder recorder, PlanHistory history,
                            SkillService skills, SkillRequests skillRequests, ProjectContext project, InitService init,
                            PreviewStore previews, BuiltinTools builtins,
-                           TokenBudgetService tokenBudget, LlamaClient llama) {
+                           TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -95,6 +96,7 @@ public class AgentController {
         this.init = init;
         this.tokenBudget = tokenBudget;
         this.llama = llama;
+        this.schedule = schedule;
         this.previews = previews;
         this.builtins = builtins;
     }
@@ -500,6 +502,63 @@ public class AgentController {
 
     /** Import a bundle into a NEW session owned by the caller; returns the new session id. */
     /** Project what an import would do (counts before/incoming/after) without applying it. */
+    /** List scheduled local tasks (id, prompt, kind, timing, status). */
+    @GetMapping("/schedule")
+    public List<Map<String, Object>> listSchedule() {
+        Principal caller = RequestContext.current();
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (ScheduledTasks.Task t : schedule.list()) {
+            if (!Ownership.canRead(caller, sessions.owner(t.sessionId), sessions.readers(t.sessionId))) continue;
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", t.id);
+            m.put("sessionId", t.sessionId);
+            m.put("prompt", t.prompt);
+            m.put("kind", t.kind);
+            m.put("oneShot", t.oneShot);
+            m.put("intervalSeconds", t.intervalSeconds);
+            m.put("enabled", t.enabled);
+            m.put("nextRunEpochMs", t.nextRunEpochMs);
+            m.put("lastRunEpochMs", t.lastRunEpochMs);
+            m.put("runs", t.runs);
+            m.put("lastDetail", t.lastDetail);
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** Schedule a task: run a prompt after delaySeconds, optionally repeating every intervalSeconds. */
+    @PostMapping("/schedule")
+    public Map<String, Object> addSchedule(
+            @RequestParam(name = "sessionId", defaultValue = "default") String sessionId,
+            @RequestParam(name = "prompt") String prompt,
+            @RequestParam(name = "kind", defaultValue = "run") String kind,
+            @RequestParam(name = "delaySeconds", defaultValue = "30") long delaySeconds,
+            @RequestParam(name = "intervalSeconds", defaultValue = "0") long intervalSeconds,
+            @RequestParam(name = "repeat", defaultValue = "false") boolean repeat) {
+        requireAccess(sessionId);
+        if (prompt == null || prompt.isBlank()) return Map.of("error", "prompt is required");
+        ScheduledTasks.Task t = schedule.add(sessionId, prompt, kind, delaySeconds,
+                repeat ? intervalSeconds : 0, !repeat, currentUser());
+        audit.record(currentUser(), "schedule-add", "session:" + sessionId, t.id + " kind=" + t.kind + " repeat=" + repeat);
+        return Map.of("id", t.id, "kind", t.kind, "repeat", repeat, "nextRunEpochMs", t.nextRunEpochMs);
+    }
+
+    /** Cancel (remove) a scheduled task. */
+    @PostMapping("/schedule/cancel")
+    public Map<String, Object> cancelSchedule(@RequestParam(name = "id") String id) {
+        boolean ok = schedule.cancel(id);
+        if (ok) audit.record(currentUser(), "schedule-cancel", "task:" + id, "cancelled");
+        return Map.of("cancelled", ok);
+    }
+
+    /** Enable/disable a scheduled task without removing it. */
+    @PostMapping("/schedule/toggle")
+    public Map<String, Object> toggleSchedule(@RequestParam(name = "id") String id,
+                                              @RequestParam(name = "enabled") boolean enabled) {
+        boolean ok = schedule.setEnabled(id, enabled);
+        return Map.of("ok", ok, "enabled", enabled);
+    }
+
     /** Current token budget for llama-server calls (configured budget, enforced prompt cap, server n_ctx). */
     @GetMapping("/settings/token-budget")
     public Map<String, Object> getTokenBudget() {

@@ -2063,3 +2063,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** a request already sent with `plan=true` runs as plan mode directly (no fallback decision),
   and plan steps themselves never recurse into another fallback.
+
+---
+
+# /loop and scheduled local tasks
+
+## 224. LoopCommand parsing + control (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `LoopCommandTest` passes -- `isLoop` detects `/loop` (not `/loopy`); `parse` extracts a
+  quoted `check=`, an `attempts=` (clamped to the hard max), and the remaining goal; a missing check is
+  null and the default budget is used; `nextPrompt` adds the failure output on retries; `shouldContinue`
+  stops on pass, on no-check, and when the budget is spent.
+
+## 225. Schedule timing (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `ScheduleTest` passes -- `isDue` is true only when enabled and the time is reached;
+  `firstRun`/`nextRun`/`clampSeconds` enforce the 10s minimum; a one-shot's `nextRun` is 0 (done) and a
+  repeating task's is now + interval.
+
+## 226. /loop iterates until the check passes (manual)
+
+- **Setup:** a failing check (e.g. a test) and `/loop check="mvn -q test" attempts=3 fix the failing test`.
+- **Observe:** the trace shows `[loop] attempt k/3` and `[loop] check passed/failed`; it stops as soon as
+  the check exits 0, or after 3 attempts (reporting the last failure). With no `check=`, the goal runs
+  once. The check is Sandbox-screened like `run_command`.
+
+## 227. Scheduled tasks run unattended (manual)
+
+- **Observe:** in the *Scheduled tasks* card (or `POST /schedule`), schedule a prompt with a short delay;
+  after the delay the task runs (AUTO mode) and the list shows `runs` incrementing and `last:` output;
+  a repeating task re-runs every interval; **cancel** removes it. Tasks are in-memory (cleared on
+  restart) and bounded by a 10s minimum interval and the max-tasks limit.

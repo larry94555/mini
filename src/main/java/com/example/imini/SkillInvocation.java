@@ -15,7 +15,7 @@ public final class SkillInvocation {
 
     /** Slash names that are built-in commands, never treated as skill invocations. */
     public static final Set<String> RESERVED = Set.of(
-            "help", "commands", "memory", "init", "skills", "agent", "agents");
+            "help", "commands", "memory", "init", "skills", "agent", "agents", "loop");
 
     /** A parsed slash invocation: the name after {@code /} and the remaining argument text. */
     public record Parsed(String name, String args) {}

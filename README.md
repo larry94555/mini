@@ -94,6 +94,8 @@ No cloud API key is required.
 | `ContextManager.java` | Token counting, compaction, tool-output trimming, durable memory note |
 | `TokenBudget.java` | Pure token estimate + fit-the-prompt-to-a-budget logic |
 | `PlanFallback.java` | Pure decision: auto-switch an over-budget turn to plan mode |
+| `LoopCommand.java` | Pure `/loop` parsing + iterate-until-green prompt/continue logic |
+| `Schedule.java` / `ScheduledTasks.java` | Pure scheduling math + the local task scheduler |
 | `TokenBudgetService.java` | Runtime-configurable per-call token budget (default 8500) |
 | `RetrievalService.java` | Workspace indexing and memory search |
 | `SkillLibrary.java` | Pure parse/index/select/format/merge for skills + repo spec parsing |
@@ -188,6 +190,9 @@ http://localhost:8081
 | `POST /session/fork?sessionId=&title=` | Copy a session (conversation + plans + todos) into a new one you own |
 | `GET /settings/token-budget` | Current token budget, enforced prompt cap, and server `n_ctx` |
 | `POST /settings/token-budget?tokens=` | Set the per-call token budget at runtime (admin) |
+| `GET /schedule` | List scheduled local tasks |
+| `POST /schedule?...` | Schedule a prompt (delay, optional repeat interval, kind run/plan/loop) |
+| `POST /schedule/cancel?id=` | Cancel a scheduled task |
 | `GET /shares?sessionId=` | Who can see a session: owner + shared readers (any reader) |
 | `POST /share` | `{sessionId,user}` grant another user read access (owner/admin) |
 | `POST /unshare` | `{sessionId,user}` revoke read access (owner/admin) |
@@ -556,6 +561,50 @@ In short: memory is *passive and ever-present* (context the agent always has), a
 you reach for* (instructions for a particular kind of task), and a subagent is *a worker you hand a job
 to* (an isolated loop that returns a summary). They compose -- e.g. a `code-review` skill can rely on the
 conventions your `CLAUDE.md` memory establishes.
+
+## `/loop` -- iterate until green
+
+`/loop` makes the agentic *iterate-until-green* pattern a first-class, **bounded** command: make a focused
+change toward a goal, run a check, and repeat until the check passes or an attempt budget is spent (so it
+can never spin forever).
+
+```
+/loop [check=<command>] [attempts=N] <goal>
+```
+
+- `/loop check="mvn -q test" attempts=4 make UserServiceTest pass` -- up to 4 attempts; after each, run
+  `mvn -q test`; stop as soon as it exits 0, or after 4 tries. On a failed check the next attempt is
+  given the failure output to fix.
+- `check=` is optional (omit it and the goal simply runs once); quote a command with spaces.
+- `attempts=` is clamped to `agent.loop.hard-max-attempts` (default 20); the default budget is
+  `agent.loop.max-attempts` (5).
+
+The check runs through the **same Sandbox screening** as `run_command` (off / deny-list / allowlist), in
+the workspace root with a timeout -- success is exit code 0. Each attempt is a normal turn, so it also
+benefits from the token budget and automatic plan-mode fallback. `/loop` supersedes the bundled `loop`
+*skill* (which remains as an example of the same idea expressed as instructions).
+
+## Scheduled local tasks
+
+Run a prompt later, or on a fixed interval, **unattended** -- e.g. "every 10 minutes, run the tests and
+summarize failures." Tasks run in **AUTO** permission mode (there is no user present to answer approval
+prompts) as a normal run, a plan, or a `/loop`.
+
+In the web UI, the **Scheduled tasks** card adds/lists/cancels tasks. Over HTTP:
+
+```
+# run once, 60s from now
+curl -X POST "localhost:8080/schedule?sessionId=proj&prompt=run%20the%20tests&kind=run&delaySeconds=60" -H "X-API-Key: <key>"
+# repeat every 10 minutes as a /loop
+curl -X POST "localhost:8080/schedule?sessionId=proj&prompt=check=mvn%20-q%20test%20keep%20the%20build%20green&kind=loop&delaySeconds=60&repeat=true&intervalSeconds=600" -H "X-API-Key: <key>"
+curl "localhost:8080/schedule" -H "X-API-Key: <key>"                       # list
+curl -X POST "localhost:8080/schedule/cancel?id=task-1" -H "X-API-Key: <key>" # cancel
+```
+
+> Honest scope: scheduling is **in-memory and single-node** -- tasks do not survive a restart (durable
+> scheduling is a roadmap item). A minimum interval/delay (10s) and a max task count bound local load.
+> Scheduled runs use the same sandbox/permission rules; because they run in AUTO mode, only enable them
+> for sessions/workspaces where unattended tool use is acceptable.
 
 ## Token budget and context limits
 

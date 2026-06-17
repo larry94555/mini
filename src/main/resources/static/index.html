@@ -172,6 +172,19 @@
         <span class="muted" id="budgetInfo" style="font-size:11px"></span>
       </div>
     </div>
+    <div class="card" id="scheduleCard">
+      <h3>Scheduled tasks <a class="linklike" id="refreshSchedLink" title="Reload scheduled tasks">refresh</a></h3>
+      <div class="muted" style="font-size:11px">Run a prompt later or on an interval (unattended, AUTO mode). In-memory: tasks don't survive a restart.</div>
+      <div class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap;align-items:center">
+        <input id="schedPrompt" placeholder="prompt / goal" style="min-width:160px;flex:1"/>
+        <select id="schedKind" title="how to run"><option value="run">run</option><option value="plan">plan</option><option value="loop">loop</option></select>
+        <input id="schedDelay" type="number" min="10" value="30" title="delay before first run (s)" style="width:70px"/>
+        <label class="muted" style="font-size:11px"><input type="checkbox" id="schedRepeat"/> repeat every</label>
+        <input id="schedInterval" type="number" min="10" value="300" title="interval (s)" style="width:70px"/>
+        <button id="schedAdd">Schedule</button>
+      </div>
+      <div id="schedList" class="muted" style="margin-top:4px">(none)</div>
+    </div>
     <div class="card" id="projectMemoryCard">
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
       <div class="muted" style="font-size:11px">Files loaded into the system prompt (load order; local overrides win). Run <code>/init</code> to scaffold <code>CLAUDE.md</code>.</div>
@@ -414,6 +427,42 @@ async function doSearch(){
 }
 
 // --- sidebars ---
+async function refreshSchedule(){
+  const el = $("#schedList"); if (!el) return;
+  const rows = await getJson("/schedule");
+  if (!Array.isArray(rows) || !rows.length){ el.innerHTML = "(none)"; return; }
+  el.innerHTML = rows.map(t => {
+    const when = t.nextRunEpochMs ? new Date(t.nextRunEpochMs).toLocaleTimeString() : "-";
+    const rep = t.oneShot ? "once" : ("every " + t.intervalSeconds + "s");
+    return '<div style="font-size:11px;border-top:1px solid var(--border);padding:4px 0;' + (t.enabled?"":"opacity:.6") + '">'
+      + '<b>' + escapeHtml(t.id) + '</b> [' + escapeHtml(t.kind) + ', ' + rep + '] next ' + when
+      + ' · runs ' + t.runs
+      + ' <a class="linklike" onclick="cancelSchedule(\'' + t.id + '\')">cancel</a>'
+      + '<br><span class="muted">' + escapeHtml(String(t.prompt||"")) + '</span>'
+      + (t.lastDetail ? '<br><span class="muted">last: ' + escapeHtml(String(t.lastDetail)) + '</span>' : '')
+      + '</div>';
+  }).join("");
+}
+async function addSchedule(){
+  const prompt = $("#schedPrompt").value.trim();
+  if (!prompt){ appendLog("[schedule] prompt required"); return; }
+  const kind = $("#schedKind").value;
+  const delay = parseInt($("#schedDelay").value,10) || 30;
+  const repeat = $("#schedRepeat").checked;
+  const interval = parseInt($("#schedInterval").value,10) || 300;
+  const qs = "/schedule?sessionId=" + encodeURIComponent(state.session)
+    + "&prompt=" + encodeURIComponent(prompt) + "&kind=" + encodeURIComponent(kind)
+    + "&delaySeconds=" + delay + "&repeat=" + repeat + "&intervalSeconds=" + interval;
+  const r = await post(qs, {});
+  if (r && r.ok){ appendLog("[schedule] added"); $("#schedPrompt").value=""; refreshSchedule(); }
+  else appendLog("[schedule] add failed");
+}
+async function cancelSchedule(id){
+  await post("/schedule/cancel?id=" + encodeURIComponent(id), {});
+  refreshSchedule();
+}
+$("#refreshSchedLink") && ($("#refreshSchedLink").onclick = refreshSchedule);
+$("#schedAdd") && ($("#schedAdd").onclick = addSchedule);
 async function refreshBudget(){
   const j = await getJson("/settings/token-budget");
   if (!j) return;
@@ -894,7 +943,7 @@ async function refreshIdentity(){
 }
 
 // init
-refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget();
+refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
 </script>
