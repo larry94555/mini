@@ -2532,3 +2532,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `-f docker-compose.observability.yml`).
 - **Observe:** imini starts from `ghcr.io/larry94555/imini:latest` with no local build; the app is at
   http://localhost:8080. The image is published by `.github/workflows/docker-publish.yml` on release/tag.
+
+---
+
+# Key-management UI, multi-arch images, and the signed-index registry browser
+
+## 282. Keyring describe() for the key panel (deterministic, no model)
+
+- **Run:** `mvn test`
+- **Observe:** `KeyringTest` passes the new case -- `describe(revoked, now)` reports each key's id, expiry
+  epoch-ms (0 = none), `expired` flag (vs `now`), and `revoked` flag (vs the revoked set), preserving order.
+
+## 283. Key-management panel (manual)
+
+- **Observe:** in the *Plugins* card, click **keys**. `GET /workspace/keys` returns whether signing is
+  enabled, this signer's key id, and the trusted keys. The panel lists each key id with status
+  (**trusted / expires <date> / expired / revoked**, and a **signer** tag for your own key). Adding a key
+  to `bundle.revoked-key-ids` or giving it a past `@<epochMillis>` expiry shows up here after restart.
+
+## 284. Multi-arch published image (manual / CI)
+
+- **Observe:** `.github/workflows/docker-publish.yml` sets up QEMU + Buildx and builds
+  `platforms: linux/amd64,linux/arm64`, pushing a multi-arch manifest to GHCR on release/tag. Pulling
+  `ghcr.io/<owner>/imini` on an arm64 host (e.g. Apple Silicon) runs natively; `docker buildx imagetools
+  inspect ghcr.io/<owner>/imini:latest` shows both platforms.
+
+## 285. Signed-index registry browser (manual)
+
+- **Observe:** **Browse registry** in the *Plugins* card shows an **index signature** banner above the
+  packs: green `verified` when the index is signed by a trusted key, otherwise `unsigned`/`no-key`/`invalid`
+  with a note that packs remain SHA-256 pinned. Browse a signed index (see case 280) to see `verified`.

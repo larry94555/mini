@@ -32,6 +32,9 @@ public class WorkspaceService {
     /** Mint a fresh Ed25519 key pair (base64) for signing/verifying bundles. */
     public Map<String, String> generateKeyPair() { return signing.generateKeyPair(); }
 
+    /** Read-only snapshot of the verifier keyring (trusted keys, expiry/revoked/signer flags). */
+    public Map<String, Object> keysInfo() { return signing.keysInfo(); }
+
     /** The canonical payload that gets signed: the pack's SHA-256 (a stable digest of its content). */
     private String signPayload(String packJson) { return PluginPack.sha256(packJson); }
 

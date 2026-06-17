@@ -28,7 +28,8 @@ docker compose -f docker-compose.published.yml -f docker-compose.observability.y
 ```
 
 `docker-compose.published.yml` pulls `ghcr.io/larry94555/imini:latest` (published by
-`.github/workflows/docker-publish.yml` on each release/tag) rather than building from source.
+`.github/workflows/docker-publish.yml` on each release/tag) rather than building from source. The image is
+**multi-arch** (linux/amd64 + linux/arm64), so it runs natively on Intel/AMD and on ARM (Apple Silicon).
 
 The sections below describe the same setup **without** Docker (pointing the tools at a host install).
 
