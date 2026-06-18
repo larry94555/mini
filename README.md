@@ -166,6 +166,7 @@ No cloud API key is required.
 | `CHANGELOG.md` | Auto-generated changelog (release-please) |
 | `.trivyignore` | Documented CVE exceptions for the CRITICAL scan gate |
 | `docs/SECURITY.md` | Supply-chain severity policy (gate vs. report) |
+| `MemoryStore.java` | Durable cross-session `[MEMORY]` note (per owner) |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
 | `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
@@ -336,6 +337,22 @@ The fold and compact events stream into the web UI activity trace (highlighted) 
 compact, other) so you can isolate just the context timeline -- or hide it. A numeric summary is exposed at
 `GET /metrics` under `context` (`{folds, fold_fallbacks, compactions, trims}`) and as
 `imini_counter{counter="context_fold"|"context_compact"|"context_trim"|...}` at `GET /metrics/prom`.
+
+**Per-run context report.** Each run's folds, compactions, and trims are attributed to that run and shown
+in the admin overview's *recent runs* list (e.g. `2 folds, 1 compact`), and persisted with the run history
+(`GET /admin/runs`, `GET /session/runs`) so you can open a past run and see how its context was managed.
+
+**Durable cross-session memory.** A session's `[MEMORY]` note already survives a restart (it is part of the
+saved conversation). Now it also carries across *different* sessions: after a run compacts, the note is
+written to a durable per-owner store, and a brand-new session is seeded from it. View or clear it in the
+*Project memory* card, or via `GET /memory/durable` and `POST /memory/durable/clear` (admin). Durable memory
+is workspace-local; it is not shared between users.
+
+**Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
+the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is
+backed by `GET /budget/preflight?sessionId=&prompt=`, which returns the estimated tokens, the prompt cap,
+the server context window, and the `wouldCompact` / `wouldTrim` predictions, so you can split a too-large
+request (e.g. into plan mode) before sending it.
 
 ## Common helper scripts
 

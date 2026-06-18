@@ -71,7 +71,13 @@ public class Database {
             "CREATE TABLE scheduled_tasks (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, prompt TEXT NOT NULL, "
                     + "kind TEXT NOT NULL, interval_seconds INTEGER NOT NULL, one_shot INTEGER NOT NULL, "
                     + "next_run INTEGER NOT NULL, enabled INTEGER NOT NULL, owner TEXT, runs INTEGER NOT NULL, "
-                    + "created_at INTEGER NOT NULL)");
+                    + "created_at INTEGER NOT NULL)",
+            // per-run context-management counts for the run-history report
+            "ALTER TABLE run_history ADD COLUMN folds INTEGER",
+            "ALTER TABLE run_history ADD COLUMN compactions INTEGER",
+            "ALTER TABLE run_history ADD COLUMN trims INTEGER",
+            // durable cross-session memory note (one row per owner)
+            "CREATE TABLE memory (owner TEXT PRIMARY KEY, note TEXT NOT NULL, updated_at INTEGER NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

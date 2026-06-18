@@ -51,6 +51,23 @@ public class Metrics {
         counters.computeIfAbsent(name, k -> new LongAdder()).increment();
     }
 
+    // --- per-run context-management tally (folds/compactions/trims attributed to the active run) ---
+    // The run loop, recordRun, and these notes all run on the same thread, so a ThreadLocal cleanly
+    // attributes events to the current run. Sub-agent work on child threads is not attributed (it rolls
+    // up only into the global counters). Index 0=folds, 1=compactions, 2=trims.
+    private final ThreadLocal<long[]> runCtx = ThreadLocal.withInitial(() -> new long[3]);
+
+    private void noteCtx(int idx, String counter) {
+        inc(counter);
+        runCtx.get()[idx]++;
+    }
+    /** A context fold happened on the current run's thread. */
+    public void noteFold() { noteCtx(0, "context_fold"); }
+    /** A history compaction happened on the current run's thread. */
+    public void noteCompact() { noteCtx(1, "context_compact"); }
+    /** A budget trim happened on the current run's thread. */
+    public void noteTrim() { noteCtx(2, "context_trim"); }
+
     public void incTool(String name) {
         inc("tool_calls");
         toolCalls.computeIfAbsent(name, k -> new LongAdder()).increment();
@@ -75,7 +92,10 @@ public class Metrics {
     public void recordRun(String endpoint, String session, String mode, long ms, boolean ok) {
         recordRun(ms, ok);
         if (endpoint != null) byEndpoint.computeIfAbsent(endpoint, k -> new LongAdder()).increment();
-        RunHistory.Record r = new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok);
+        long[] ctx = runCtx.get();
+        runCtx.remove(); // reset for the next run on this (possibly pooled) thread
+        RunHistory.Record r = new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok,
+                (int) ctx[0], (int) ctx[1], (int) ctx[2]);
         history.add(r);
         if (historyStore != null) historyStore.append(r); // durable across restarts
     }

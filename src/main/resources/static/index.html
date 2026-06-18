@@ -54,6 +54,8 @@
   .tracebar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:11px; margin-bottom:6px; }
   .tracebar label { display:inline-flex; gap:3px; align-items:center; cursor:pointer; }
   .tracebar input { margin:0; }
+  .ctxbadge { font-size:10.5px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:0 6px; }
+  #preflight .warn { color:var(--warn); } #preflight .bad { color:var(--bad); }
   ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
   .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
@@ -126,6 +128,7 @@
     </div>
     <div class="composer">
       <div id="sessionRunsPanel" class="muted" style="font-size:11px;margin:4px 0;display:none"></div>
+      <div id="preflight" class="muted" style="font-size:11px;margin:2px 0" title="Estimated prompt size vs the model's window, and which context actions would fire"></div>
       <textarea id="input" placeholder="Ask imini...  (Enter to send, Shift+Enter for newline)"></textarea>
       <div style="display:flex;flex-direction:column;gap:6px">
         <button class="primary" id="send">Send</button>
@@ -281,6 +284,13 @@
       <h3>Project memory <a class="linklike" id="refreshMemLink" title="Reload loaded memory files">refresh</a></h3>
       <div class="muted" style="font-size:11px">Files loaded into the system prompt (load order; local overrides win). Run <code>/init</code> to scaffold <code>CLAUDE.md</code>.</div>
       <div id="memFilesList" class="muted" style="margin-top:4px">(loading...)</div>
+      <div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
+        <b style="font-size:12px">Durable memory</b>
+        <a class="linklike" id="refreshDurableMemLink" style="font-size:11px" title="Reload durable memory">refresh</a>
+        <button id="clearDurableMem" style="font-size:11px;float:right" title="Clear the durable memory note (admin)">clear</button>
+        <div class="muted" style="font-size:11px;margin:2px 0">Facts carried across sessions and restarts; a new session is seeded from this, and it is updated after a run compacts.</div>
+        <pre class="log" id="durableMemOut" style="margin-top:4px;max-height:120px">(loading...)</pre>
+      </div>
     </div>
     <div class="card">
       <h3>Memory search</h3>
@@ -605,7 +615,7 @@ async function installPlugin(){
   if (!j){ appendLog("[plugin] install failed (admin only?)"); return; }
   if (j.error){ appendLog("[plugin] " + j.error); return; }
   appendLog("[plugin] installed " + (j.installed||[]).length + ", skipped " + (j.skipped||[]).length + " (" + (j.summary||"") + ")");
-  refreshPlugins(); refreshMemoryFiles();
+  refreshPlugins(); refreshMemoryFiles(); if (typeof refreshDurableMemory === "function") refreshDurableMemory();
 }
 $("#refreshPluginLink") && ($("#refreshPluginLink").onclick = refreshPlugins);
 $("#pluginExport") && ($("#pluginExport").onclick = exportPlugin);
@@ -621,7 +631,7 @@ async function installPluginUrl(){
   if (!j){ appendLog("[plugin] URL install failed (admin only?)"); return; }
   if (j.error){ appendLog("[plugin] " + j.error + (j.actual ? " (actual " + j.actual.slice(0,16) + "...)" : "")); return; }
   appendLog("[plugin] " + (j.verification||"installed") + "; installed " + (j.installed||[]).length + ", skipped " + (j.skipped||[]).length);
-  refreshPlugins(); refreshMemoryFiles();
+  refreshPlugins(); refreshMemoryFiles(); if (typeof refreshDurableMemory === "function") refreshDurableMemory();
 }
 $("#pluginInstallUrl") && ($("#pluginInstallUrl").onclick = installPluginUrl);
 async function browseRegistry(){
@@ -657,7 +667,7 @@ async function installFromRegistry(nameEnc){
   if (!j){ appendLog("[plugin] registry install failed (admin only?)"); return; }
   if (j.error){ appendLog("[plugin] " + j.error); return; }
   appendLog("[plugin] " + name + ": " + (j.verification||"installed") + "; installed " + (j.installed||[]).length + ", skipped " + (j.skipped||[]).length);
-  refreshPlugins(); refreshMemoryFiles();
+  refreshPlugins(); refreshMemoryFiles(); if (typeof refreshDurableMemory === "function") refreshDurableMemory();
 }
 $("#pluginRegBrowse") && ($("#pluginRegBrowse").onclick = browseRegistry);
 async function buildRegistryEntry(){
@@ -692,7 +702,7 @@ async function importWorkspace(){
   if (j.error){ appendLog("[workspace] " + j.error); return; }
   const pack = j.pack || {};
   appendLog("[workspace] imported: installed " + ((pack.installed||[]).length) + ", skipped " + ((pack.skipped||[]).length) + ", settings " + ((j.settingsApplied||[]).length));
-  refreshPlugins(); refreshMemoryFiles();
+  refreshPlugins(); refreshMemoryFiles(); if (typeof refreshDurableMemory === "function") refreshDurableMemory();
 }
 $("#wsExport") && ($("#wsExport").onclick = exportWorkspace);
 async function previewWorkspace(){
@@ -748,9 +758,14 @@ function runsHtml(runs){
   if (!Array.isArray(runs) || !runs.length) return "(none)";
   return runs.slice(0,10).map(r => {
     const t = r.ts ? new Date(r.ts).toLocaleTimeString() : "";
+    const cx = [];
+    if (r.folds) cx.push(r.folds + ' fold' + (r.folds>1?'s':''));
+    if (r.compactions) cx.push(r.compactions + ' compact' + (r.compactions>1?'s':''));
+    if (r.trims) cx.push(r.trims + ' trim' + (r.trims>1?'s':''));
+    const ctx = cx.length ? ' <span class="ctxbadge" title="context management during this run">' + escapeHtml(cx.join(', ')) + '</span>' : '';
     return '<div style="border-top:1px solid var(--border);padding:2px 0">'
       + escapeHtml(t) + ' · ' + escapeHtml(String(r.endpoint||"")) + ' [' + escapeHtml(String(r.mode||"")) + '] '
-      + (r.ok ? 'ok' : '<span class="muted">failed</span>') + ' ' + (r.ms||0) + 'ms '
+      + (r.ok ? 'ok' : '<span class="muted">failed</span>') + ' ' + (r.ms||0) + 'ms' + ctx + ' '
       + '<span class="muted">' + escapeHtml(String(r.session||"")) + '</span></div>';
   }).join("");
 }
@@ -1350,6 +1365,57 @@ document.querySelectorAll('#traceFilter input[type=checkbox]').forEach(cb => {
     applyTraceFilter();
   };
 });
+
+// ---- durable cross-session memory ----
+async function refreshDurableMemory(){
+  const el = document.getElementById("durableMemOut"); if (!el) return;
+  try {
+    const j = await getJson("/memory/durable");
+    if (!j){ el.textContent = "(unavailable)"; return; }
+    if (j.present) {
+      const when = j.updatedAt ? new Date(j.updatedAt).toLocaleString() : "";
+      el.textContent = (when ? "updated " + when + "\n" : "") + (j.note || "");
+    } else {
+      el.textContent = "(no durable memory yet \u2014 it fills in after a session compacts)";
+    }
+  } catch(e){ el.textContent = "(unavailable)"; }
+}
+{
+  const rl = document.getElementById("refreshDurableMemLink");
+  if (rl) rl.onclick = refreshDurableMemory;
+  const cl = document.getElementById("clearDurableMem");
+  if (cl) cl.onclick = async () => {
+    const r = await post("/memory/durable/clear", {});
+    if (r && r.ok === false){ appendLog("[memory] clear failed (admin only?)"); }
+    refreshDurableMemory();
+  };
+}
+
+// ---- context-budget pre-flight (debounced as you type) ----
+let _preflightTimer = null;
+async function runPreflight(){
+  const el = document.getElementById("preflight"); if (!el) return;
+  const prompt = ($("#input") && $("#input").value || "").trim();
+  const sid = (window.state && state.session) ? state.session : "";
+  try {
+    const qs = "?sessionId=" + encodeURIComponent(sid) + "&prompt=" + encodeURIComponent(prompt);
+    const j = await getJson("/budget/preflight" + qs);
+    if (!j){ el.textContent = ""; return; }
+    const cap = j.promptCap || 0, est = j.estimatedTokens || 0;
+    let s = "~" + est + " tok est / cap " + cap + (j.serverContext ? " (ctx " + j.serverContext + ")" : "");
+    const flags = [];
+    if (j.wouldTrim) flags.push('<span class="bad">would trim</span>');
+    else if (j.wouldCompact) flags.push('<span class="warn">would compact</span>');
+    el.innerHTML = escapeHtml(s) + (flags.length ? " \u00b7 " + flags.join(", ") : " \u00b7 fits");
+  } catch(e){ el.textContent = ""; }
+}
+{
+  const inp = $("#input");
+  if (inp) inp.addEventListener("input", () => {
+    if (_preflightTimer) clearTimeout(_preflightTimer);
+    _preflightTimer = setTimeout(runPreflight, 350);
+  });
+}
 </script>
 </body>
 </html>
