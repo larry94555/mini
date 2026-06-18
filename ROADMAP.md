@@ -340,6 +340,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Session expiry + streaming resilience + persistent rate limiting: a SessionReaper prunes sessions idle past
+  agent.session-ttl-hours (with /sessions/summary + /sessions/prune); the streaming chat path now retries the
+  connection step under the circuit breaker; the rate limiter persists its windows in SQLite so limits
+  survive a restart.
 - Circuit breaker + sandbox hardening + graceful shutdown: a three-state circuit breaker (CLOSED/OPEN/
   HALF_OPEN) wraps all llama-server calls so sustained outages fail fast after the threshold; the
   run_command sandbox now uses the workspace root as working directory and caps output at

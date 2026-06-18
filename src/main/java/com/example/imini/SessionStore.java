@@ -206,4 +206,68 @@ public class SessionStore {
         }
         return new ArrayList<>(cache.keySet());
     }
+
+    /** Pure predicate: a session is expired if it has been idle (no update) for more than ttlMs. */
+    public static boolean isExpired(long updatedAt, long nowMs, long ttlMs) {
+        if (ttlMs <= 0) return false; // ttl disabled
+        return (nowMs - updatedAt) > ttlMs;
+    }
+
+    /**
+     * Delete sessions idle longer than {@code ttlMs}, plus their owner/share/title rows. Returns the number
+     * of sessions pruned. ttlMs <= 0 disables pruning (returns 0). Pinned/owned state travels with the
+     * session id, so removing the session row and its satellites fully retires it.
+     */
+    public synchronized int pruneExpired(long ttlMs, long nowMs) {
+        if (ttlMs <= 0) return 0;
+        long cutoff = nowMs - ttlMs;
+        int pruned = 0;
+        if (db.available()) {
+            List<String> expired = db.query(
+                    "SELECT session_id FROM sessions WHERE updated_at < ?", rs -> rs.getString(1), cutoff);
+            for (String id : expired) {
+                db.update("DELETE FROM sessions WHERE session_id=?", id);
+                db.update("DELETE FROM session_owners WHERE session_id=?", id);
+                db.update("DELETE FROM session_shares WHERE session_id=?", id);
+                db.update("DELETE FROM session_titles WHERE session_id=?", id);
+                cache.remove(id);
+                owners.remove(id);
+                titles.remove(id);
+                shares.remove(id);
+                pruned++;
+            }
+        }
+        if (pruned > 0) log.info("[sessions] pruned " + pruned + " session(s) idle > " + ttlMs + "ms");
+        return pruned;
+    }
+
+    /** Age/size distribution of stored sessions for the /sessions/summary endpoint. */
+    public synchronized Map<String, Object> summary(long nowMs) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        long total = 0, idleOverDay = 0, idleOverWeek = 0;
+        long oldestUpdated = Long.MAX_VALUE, newestUpdated = 0;
+        if (db.available()) {
+            List<long[]> rows = db.query("SELECT updated_at, length(messages) FROM sessions",
+                    rs -> new long[]{rs.getLong(1), rs.getLong(2)});
+            long totalBytes = 0;
+            for (long[] r : rows) {
+                total++;
+                long age = nowMs - r[0];
+                if (age > 86_400_000L) idleOverDay++;
+                if (age > 604_800_000L) idleOverWeek++;
+                if (r[0] < oldestUpdated) oldestUpdated = r[0];
+                if (r[0] > newestUpdated) newestUpdated = r[0];
+                totalBytes += r[1];
+            }
+            out.put("totalBytes", totalBytes);
+        } else {
+            total = cache.size();
+        }
+        out.put("total", total);
+        out.put("idleOverOneDay", idleOverDay);
+        out.put("idleOverOneWeek", idleOverWeek);
+        out.put("oldestUpdatedAt", total == 0 ? 0 : oldestUpdated);
+        out.put("newestUpdatedAt", newestUpdated);
+        return out;
+    }
 }

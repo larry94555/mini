@@ -40,6 +40,7 @@ public class AuthFilter implements Filter {
     @Value("${auth.keys:}") private String keysCfg;
     @Value("${auth.open-paths:/health}") private String openPathsCfg;
     @Value("${auth.rate-limit-per-minute:0}") private int rateLimitPerMinute;
+    @Value("${auth.rate-limit-persistent:true}") private boolean rateLimitPersistent;
     @Value("${auth.principals:}") private String principalsCfg;
     @Value("${auth.admin-paths:/metrics,/audit}") private String adminPathsCfg;
 
@@ -47,10 +48,12 @@ public class AuthFilter implements Filter {
     private Map<String, Principal> keyToPrincipal = Map.of();
     private Set<String> openPaths = Set.of();
     private Set<String> adminPaths = Set.of();
+    private final Database db;
     private RateLimiter limiter;
 
-    public AuthFilter(Metrics metrics) {
+    public AuthFilter(Metrics metrics, Database db) {
         this.metrics = metrics;
+        this.db = db;
     }
 
     @PostConstruct
@@ -66,7 +69,7 @@ public class AuthFilter implements Filter {
         adminPaths = Rbac.parseAdminPaths(adminPathsCfg);
         openPaths = new LinkedHashSet<>();
         for (String p : openPathsCfg.split(",")) if (!p.isBlank()) openPaths.add(p.trim());
-        limiter = new RateLimiter(rateLimitPerMinute);
+        limiter = new RateLimiter(rateLimitPerMinute, 60_000L, rateLimitPersistent ? db : null);
         long admins = keyToPrincipal.values().stream().filter(Principal::isAdmin).count();
         log.info("[auth] enabled=" + enabled + "; principals=" + keyToPrincipal.size()
                 + " (admins=" + admins + "); admin-paths=" + adminPaths

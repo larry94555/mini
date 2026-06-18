@@ -92,7 +92,10 @@ public class Database {
             "ALTER TABLE memory_stats ADD COLUMN first_seen INTEGER",
             // embedding cache: avoid re-embedding identical texts (keyed by model + sha256 of text)
             "CREATE TABLE embed_cache (text_sha TEXT PRIMARY KEY, model TEXT NOT NULL, "
-                    + "embedding TEXT NOT NULL, updated_at INTEGER NOT NULL)");
+                    + "embedding TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+            // persistent per-key rate-limit windows so limits survive a restart
+            "CREATE TABLE rate_limits (rl_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, "
+                    + "count INTEGER NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;
