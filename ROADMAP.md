@@ -340,6 +340,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Per-run context report + durable cross-session memory + budget pre-flight: each run's folds/compactions/
+  trims are attributed (thread-local tally in `Metrics`) and persisted with the run history (new
+  `run_history` columns) and shown in the admin recent-runs list. A durable per-owner `[MEMORY]` note
+  (`MemoryStore`, new `memory` table) now carries across sessions: a new session is seeded from it and it is
+  updated after a run compacts; viewable/clearable in the Project memory card and via `/memory/durable`.
+  A context-budget pre-flight (`/budget/preflight`) estimates prompt size vs the window and predicts
+  compact/trim, shown live under the composer as you type.
 - Unified context timeline + live-fold test + trace filter: compaction now emits a `[compact:<label>]`
   trace event (alongside `[fold:]`) and budget trims increment a `context_trim` counter, so folds,
   compactions and trims form one observable timeline -- summarized at /metrics under `context` and

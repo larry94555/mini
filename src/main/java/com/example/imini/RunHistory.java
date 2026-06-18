@@ -15,7 +15,27 @@ import java.util.Map;
 public final class RunHistory {
 
     /** One finished run: when, which endpoint/session, the resolved mode, duration, and outcome. */
-    public record Record(long ts, String endpoint, String session, String mode, long ms, boolean ok) {}
+    public record Record(long ts, String endpoint, String session, String mode, long ms, boolean ok,
+                         int folds, int compactions, int trims) {
+        /** Backward-compatible constructor for records without context counts. */
+        public Record(long ts, String endpoint, String session, String mode, long ms, boolean ok) {
+            this(ts, endpoint, session, mode, ms, ok, 0, 0, 0);
+        }
+    }
+
+    private static Map<String, Object> toMap(Record r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ts", r.ts());
+        m.put("endpoint", r.endpoint());
+        m.put("session", r.session());
+        m.put("mode", r.mode());
+        m.put("ms", r.ms());
+        m.put("ok", r.ok());
+        m.put("folds", r.folds());
+        m.put("compactions", r.compactions());
+        m.put("trims", r.trims());
+        return m;
+    }
 
     private final int capacity;
     private final Deque<Record> records = new ArrayDeque<>();
@@ -43,16 +63,7 @@ public final class RunHistory {
     /** Recent records as plain maps (newest first), for JSON responses. */
     public synchronized List<Map<String, Object>> recentMaps(int n) {
         List<Map<String, Object>> out = new ArrayList<>();
-        for (Record r : recent(n)) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("ts", r.ts());
-            m.put("endpoint", r.endpoint());
-            m.put("session", r.session());
-            m.put("mode", r.mode());
-            m.put("ms", r.ms());
-            m.put("ok", r.ok());
-            out.add(m);
-        }
+        for (Record r : recent(n)) out.add(toMap(r));
         return out;
     }
 
@@ -64,14 +75,7 @@ public final class RunHistory {
         for (int i = all.size() - 1; i >= 0 && out.size() < want; i--) {
             Record r = all.get(i);
             if (!RunFilter.matches(r, endpoint, outcome, session)) continue;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("ts", r.ts());
-            m.put("endpoint", r.endpoint());
-            m.put("session", r.session());
-            m.put("mode", r.mode());
-            m.put("ms", r.ms());
-            m.put("ok", r.ok());
-            out.add(m);
+            out.add(toMap(r));
         }
         return out;
     }
@@ -84,14 +88,7 @@ public final class RunHistory {
         for (int i = all.size() - 1; i >= 0 && out.size() < want; i--) {
             Record r = all.get(i);
             if (!RunFilter.sessionEquals(r.session(), sessionId)) continue;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("ts", r.ts());
-            m.put("endpoint", r.endpoint());
-            m.put("session", r.session());
-            m.put("mode", r.mode());
-            m.put("ms", r.ms());
-            m.put("ok", r.ok());
-            out.add(m);
+            out.add(toMap(r));
         }
         return out;
     }

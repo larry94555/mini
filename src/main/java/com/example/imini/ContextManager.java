@@ -92,7 +92,7 @@ public class ContextManager {
             try {
                 String folded = foldOversized(result, 0);
                 if (metrics != null) {
-                    metrics.inc("context_fold");
+                    metrics.noteFold();
                     metrics.addModelOutput(0); // fold uses the summary model; runs counted there
                 }
                 log.info("\n[fold] condensed a " + original + "-char input to "
@@ -198,7 +198,7 @@ public class ContextManager {
         List<Map<String, Object>> toFold = messages.subList(bodyStart, keepFrom);
         String newMemory = updateMemory(oldMemory, toFold);
 
-        if (metrics != null) metrics.inc("context_compact");
+        if (metrics != null) metrics.noteCompact();
         log.info("\n[compaction:" + label + "] ~" + tokens + " tokens -> folded "
                 + toFold.size() + " older messages into memory, kept " + (n - keepFrom) + " recent.");
         if (sink != null) {
@@ -270,6 +270,30 @@ public class ContextManager {
 
     private Map<String, Object> memoryMessage(String notes) {
         return role("user", MEMORY_TAG + "\n" + notes);
+    }
+
+    /** The token count above which compaction folds older history into the memory note. */
+    public int compactThreshold() { return threshold; }
+
+    /** The durable [MEMORY] note text in a message list, or null if there is none. Static so callers
+     *  (e.g. cross-session seeding) can read it without a ContextManager instance. */
+    public static String extractMemoryNote(List<Map<String, Object>> messages) {
+        if (messages == null) return null;
+        for (Map<String, Object> m : messages) {
+            if ("user".equals(String.valueOf(m.get("role")))) {
+                String c = String.valueOf(m.get("content"));
+                if (c != null && c.startsWith(MEMORY_TAG)) return c.substring(MEMORY_TAG.length()).trim();
+            }
+        }
+        return null;
+    }
+
+    /** Build a [MEMORY] message from a note (for seeding a fresh session from durable memory). */
+    public static Map<String, Object> memoryMessageFor(String note) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("role", "user");
+        m.put("content", MEMORY_TAG + "\n" + (note == null ? "" : note));
+        return m;
     }
 
     private Map<String, Object> role(String role, String content) {

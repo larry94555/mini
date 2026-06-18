@@ -68,12 +68,14 @@ public class AgentLoop {
     private final PlanHistory history;
     private final SkillService skills;
     private final AgentRegistry agents;
+    private final MemoryStore memory;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, InitService init, ContextRefService refs, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
-                     PlanHistory history, SkillService skills, AgentRegistry agents, VisionSupport vision) {
+                     PlanHistory history, SkillService skills, AgentRegistry agents, VisionSupport vision,
+                     MemoryStore memory) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -91,6 +93,7 @@ public class AgentLoop {
         this.skills = skills;
         this.agents = agents;
         this.vision = vision;
+        this.memory = memory;
     }
 
     private String systemPrompt() {
@@ -225,6 +228,11 @@ public class AgentLoop {
         if (history == null) {
             history = new ArrayList<>();
             history.add(message("system", systemPrompt())); // project instructions captured at session start
+            // seed durable cross-session memory (facts learned in earlier sessions), if any
+            String durable = memory.get(sessions.owner(sessionId));
+            if (durable != null && !durable.isBlank()) {
+                history.add(ContextManager.memoryMessageFor(durable));
+            }
         }
         history.add(message("user", expanded));
 
@@ -234,6 +242,8 @@ public class AgentLoop {
         recorder.beginEdits(sessionId);
         AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());
+        // write the session's current memory note back to durable storage so it carries to future sessions
+        memory.save(sessions.owner(sessionId), ContextManager.extractMemoryNote(result.messages()));
         return withEditTrust(sessionId, result.answer(), mode, sink);
     }
 

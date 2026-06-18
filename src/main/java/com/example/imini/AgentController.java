@@ -71,6 +71,8 @@ public class AgentController {
     private final WorkspaceService workspace;
     private final PreviewStore previews;
     private final BuiltinTools builtins;
+    private final MemoryStore memory;
+    private final ContextManager context;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -81,7 +83,7 @@ public class AgentController {
                            PreviewStore previews, BuiltinTools builtins,
                            TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
                            PluginService plugins, SessionSettings sessionSettings,
-                           WorkspaceService workspace) {
+                           WorkspaceService workspace, MemoryStore memory, ContextManager context) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -107,6 +109,8 @@ public class AgentController {
         this.workspace = workspace;
         this.previews = previews;
         this.builtins = builtins;
+        this.memory = memory;
+        this.context = context;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -845,6 +849,61 @@ public class AgentController {
         int set = tokenBudget.setBudget(tokens);
         audit.record(currentUser(), "settings", "token-budget", "set=" + set);
         return getTokenBudget();
+    }
+
+    /** The durable cross-session memory note for the current user (carried into new sessions). */
+    @GetMapping("/memory/durable")
+    public Map<String, Object> durableMemory() {
+        String owner = currentUser();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        String note = memory.get(owner);
+        out.put("owner", owner);
+        out.put("note", note == null ? "" : note);
+        out.put("present", note != null && !note.isBlank());
+        out.put("updatedAt", memory.updatedAt(owner));
+        return out;
+    }
+
+    /** Clear the current user's durable memory note (admin). */
+    @PostMapping("/memory/durable/clear")
+    public Map<String, Object> clearDurableMemory() {
+        requireAdmin();
+        memory.clear(currentUser());
+        audit.record(currentUser(), "memory", "durable", "cleared");
+        return Map.of("ok", true);
+    }
+
+    /**
+     * Context-budget pre-flight: estimate the prompt size for a prospective message in a session and
+     * predict which context-management actions would fire (compact / trim), before actually sending it.
+     */
+    @GetMapping("/budget/preflight")
+    public Map<String, Object> budgetPreflight(@RequestParam(name = "sessionId", required = false) String sessionId,
+                                               @RequestParam(name = "prompt", required = false) String prompt) {
+        List<Map<String, Object>> messages = new java.util.ArrayList<>();
+        List<Map<String, Object>> existing = sessionId == null ? null : sessions.get(sessionId);
+        if (existing != null) messages.addAll(existing);
+        if (prompt != null && !prompt.isBlank()) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("role", "user");
+            m.put("content", prompt);
+            messages.add(m);
+        }
+        int estimated = TokenBudget.estimateMessages(messages);
+        int ctx = llama.serverContext();
+        int cap = tokenBudget.promptCap(ctx);
+        int compactThreshold = context.compactThreshold();
+
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("estimatedTokens", estimated);
+        out.put("messageCount", messages.size());
+        out.put("promptCap", cap);
+        out.put("serverContext", ctx);              // 0 = unknown
+        out.put("tokenBudget", tokenBudget.budget());
+        out.put("compactThreshold", compactThreshold);
+        out.put("wouldCompact", estimated >= compactThreshold);
+        out.put("wouldTrim", estimated > cap);
+        return out;
     }
 
     /** A session's durable settings (e.g. its default mode). Readable by anyone who can read the session. */

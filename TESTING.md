@@ -2832,3 +2832,38 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** `ContextFoldConfigTest` (renamed from `ContextFoldConfigIT`) now matches Surefire's default
   `*Test` pattern, so `./mvnw test` actually executes it in CI (the `*IT` name was silently skipped).
+
+---
+
+# Per-run context report, durable memory, budget pre-flight
+
+## 320. Per-run context attribution (RunContextStatsTest)
+
+- **Run:** `./mvnw -Dtest=RunContextStatsTest test`.
+- **Observe:** folds/compactions/trims noted during a run are recorded on that run's `RunHistory.Record`
+  (visible in `recentRuns`) and reset for the next run on the same thread; global `context` totals
+  accumulate. Sub-agent work on child threads rolls up only into the global counters (documented).
+
+## 321. Per-run report in the admin UI + persistence (manual)
+
+- **Observe:** the admin overview's *recent runs* shows a context badge per run (e.g. `2 folds, 1 compact`).
+  `GET /admin/runs` and `GET /session/runs` include `folds`/`compactions`/`trims`; the `run_history` table
+  has the new columns and they survive a restart (old rows read back as 0 via `COALESCE`).
+
+## 322. Cross-session memory helpers (ContextMemoryTest)
+
+- **Run:** `./mvnw -Dtest=ContextMemoryTest test`.
+- **Observe:** `ContextManager.extractMemoryNote` / `memoryMessageFor` round-trip a `[MEMORY]` note and
+  return null when absent.
+
+## 323. Durable memory across sessions (manual)
+
+- **Observe:** have a long conversation until it compacts (a `[compact:]` event), then start a NEW session
+  and ask about an earlier durable fact -- it is seeded from `MemoryStore`. The *Project memory* card shows
+  the durable note; `clear` empties it (admin). It survives a restart (SQLite `memory` table).
+
+## 324. Context-budget pre-flight (manual + endpoint)
+
+- **Observe:** typing in the composer shows `~N tok est / cap C \u00b7 fits|would compact|would trim`.
+  `GET /budget/preflight?sessionId=<id>&prompt=<text>` returns `estimatedTokens`, `promptCap`,
+  `serverContext`, `compactThreshold`, `wouldCompact`, `wouldTrim`.
