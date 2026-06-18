@@ -2901,3 +2901,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** type a very large prompt; when the preflight shows "would trim", a *use plan mode* link
   appears. Clicking it sets the mode selector to plan. `GET /budget/preflight` returns
   `recommendPlanMode=true` in that case.
+
+---
+
+# Promote-to-pin, per-workspace memory, quality guard
+
+## 330. Workspace-scoped memory id (MemoryWorkspaceTest)
+
+- **Run:** `./mvnw -Dtest=MemoryWorkspaceTest test`.
+- **Observe:** `MemoryStore.workspaceId()` is stable within a process and is a 12-char hex id; durable
+  memory keys are `owner@<workspaceId>`, so two different working directories get separate notes.
+
+## 331. Memory quality guard (MemoryConsolidateTest)
+
+- **Run:** `./mvnw -Dtest=MemoryConsolidateTest test`.
+- **Observe:** `ContextManager.consolidateMemoryIfNeeded` returns a small note unchanged (no model call);
+  an oversized note (over `agent.memory-max-chars`) is consolidated via the summary model and hard-capped;
+  null is safe. On model failure it falls back to a head+tail trim.
+
+## 332. Promote-to-pin in the UI (manual)
+
+- **Observe:** in the *Project memory* card, after the auto note fills in, a *Promote to pin* row shows the
+  note's facts that aren't pinned yet as `+pin` candidate chips. Clicking one pins it (and it disappears
+  from the candidates). The card meta line shows the current `workspace <id>`.
+
+## 333. Per-workspace isolation (manual)
+
+- **Observe:** run imini from two different working directories; durable memory (and pins) in one does not
+  appear in the other. Within one workspace it persists across sessions and restarts.

@@ -864,6 +864,7 @@ public class AgentController {
         out.put("effective", memory.effective(owner));
         out.put("present", (note != null && !note.isBlank()) || (pinned != null && !pinned.isBlank()));
         out.put("updatedAt", memory.updatedAt(owner));
+        out.put("workspace", MemoryStore.workspaceId()); // memory is scoped per workspace + owner
         return out;
     }
 

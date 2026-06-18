@@ -16,6 +16,7 @@ public class MemoryStore {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MemoryStore.class);
 
     static final String DEFAULT_OWNER = "local";
+    private static volatile String WS_ID; // cached workspace id (hash of the working directory)
 
     private final Database db;
 
@@ -23,8 +24,31 @@ public class MemoryStore {
         this.db = db;
     }
 
-    private static String owner(String owner) {
-        return (owner == null || owner.isBlank()) ? DEFAULT_OWNER : owner;
+    /**
+     * A stable, short id for the current workspace (derived from the working directory), so durable memory
+     * is scoped per project rather than shared across every repo a single owner touches.
+     */
+    public static String workspaceId() {
+        String v = WS_ID;
+        if (v != null) return v;
+        String path = java.nio.file.Path.of("").toAbsolutePath().normalize().toString();
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(path.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 6; i++) sb.append(String.format("%02x", h[i]));
+            v = sb.toString();
+        } catch (Exception e) {
+            v = Integer.toHexString(path.hashCode());
+        }
+        WS_ID = v;
+        return v;
+    }
+
+    /** The storage key: owner scoped to the current workspace, e.g. {@code local@1a2b3c4d5e6f}. */
+    private static String key(String owner) {
+        String o = (owner == null || owner.isBlank()) ? DEFAULT_OWNER : owner;
+        return o + "@" + workspaceId();
     }
 
     /** The auto durable memory note for an owner (updated from compactions), or null if none. */
@@ -32,7 +56,7 @@ public class MemoryStore {
         if (!db.available()) return null;
         try {
             List<String> rows = db.query("SELECT note FROM memory WHERE owner=?",
-                    rs -> rs.getString(1), owner(owner));
+                    rs -> rs.getString(1), key(owner));
             return rows.isEmpty() ? null : rows.get(0);
         } catch (Exception e) {
             log.warn("[memory] load failed: " + e.getMessage());
@@ -45,7 +69,7 @@ public class MemoryStore {
         if (!db.available()) return "";
         try {
             List<String> rows = db.query("SELECT pinned FROM memory WHERE owner=?",
-                    rs -> rs.getString(1), owner(owner));
+                    rs -> rs.getString(1), key(owner));
             String p = rows.isEmpty() ? null : rows.get(0);
             return p == null ? "" : p;
         } catch (Exception e) {
@@ -92,7 +116,7 @@ public class MemoryStore {
         try {
             db.update("INSERT INTO memory(owner, note, updated_at) VALUES(?,?,?) "
                             + "ON CONFLICT(owner) DO UPDATE SET note=excluded.note, updated_at=excluded.updated_at",
-                    owner(owner), note, System.currentTimeMillis());
+                    key(owner), note, System.currentTimeMillis());
         } catch (Exception e) {
             log.warn("[memory] save failed: " + e.getMessage());
         }
@@ -124,7 +148,7 @@ public class MemoryStore {
             // ensure a row exists, then update pinned (note defaults to empty if new)
             db.update("INSERT INTO memory(owner, note, updated_at, pinned) VALUES(?,?,?,?) "
                             + "ON CONFLICT(owner) DO UPDATE SET pinned=excluded.pinned, updated_at=excluded.updated_at",
-                    owner(owner), "", System.currentTimeMillis(), pinned == null ? "" : pinned);
+                    key(owner), "", System.currentTimeMillis(), pinned == null ? "" : pinned);
         } catch (Exception e) {
             log.warn("[memory] pin failed: " + e.getMessage());
         }
@@ -135,7 +159,7 @@ public class MemoryStore {
         if (!db.available()) return 0;
         try {
             List<Long> rows = db.query("SELECT updated_at FROM memory WHERE owner=?",
-                    rs -> rs.getLong(1), owner(owner));
+                    rs -> rs.getLong(1), key(owner));
             return rows.isEmpty() ? 0 : rows.get(0);
         } catch (Exception e) {
             return 0;
@@ -146,7 +170,7 @@ public class MemoryStore {
     public void clear(String owner) {
         if (!db.available()) return;
         try {
-            db.update("DELETE FROM memory WHERE owner=?", owner(owner));
+            db.update("DELETE FROM memory WHERE owner=?", key(owner));
         } catch (Exception e) {
             log.warn("[memory] clear failed: " + e.getMessage());
         }

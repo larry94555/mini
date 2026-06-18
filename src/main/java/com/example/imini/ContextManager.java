@@ -54,6 +54,8 @@ public class ContextManager {
     private int foldTargetChars;      // stop folding once the digest is at or below this
     @Value("${agent.fold-max-depth:2}")
     private int foldMaxDepth;         // recursion cap so the reduce always terminates
+    @Value("${agent.memory-max-chars:4000}")
+    private int memoryMaxChars;       // durable-memory quality guard: consolidate above this size
 
     public ContextManager(LlamaClient llama, Metrics metrics) {
         this.llama = llama;
@@ -275,6 +277,34 @@ public class ContextManager {
 
     /** The token count above which compaction folds older history into the memory note. */
     public int compactThreshold() { return threshold; }
+
+    /**
+     * Memory-quality guard: if a durable memory note has grown past {@code agent.memory-max-chars}, ask the
+     * cheap summary model to consolidate it -- merge duplicates/near-duplicates, drop redundancy, keep the
+     * concrete durable facts -- so the note stays tight over time instead of accreting. Falls back to a
+     * head+tail trim if the model is unavailable, and hard-caps the result so the bound always holds.
+     */
+    public String consolidateMemoryIfNeeded(String note) {
+        if (note == null || note.length() <= memoryMaxChars) return note;
+        try {
+            List<Map<String, Object>> req = new ArrayList<>();
+            req.add(role("system",
+                    "You consolidate an AI agent's durable memory notes. Merge duplicate and near-duplicate "
+                            + "points, drop redundancy and stale chatter, and keep the concrete durable facts, "
+                            + "decisions, and unfinished goals. Output only the consolidated notes, under "
+                            + memoryMaxChars + " characters."));
+            req.add(role("user", note));
+            Map<String, Object> resp = llama.summaryChat(req);
+            Object c = resp == null ? null : resp.get("content");
+            String out = c == null ? "" : String.valueOf(c).trim();
+            if (out.isBlank()) return headTail(note, memoryMaxChars);
+            log.info("\n[memory] consolidated durable note " + note.length() + " -> " + out.length() + " chars");
+            return out.length() > memoryMaxChars ? headTail(out, memoryMaxChars) : out;
+        } catch (Exception e) {
+            log.warn("[memory] consolidate failed (" + e.getMessage() + "); truncating");
+            return headTail(note, memoryMaxChars);
+        }
+    }
 
     /** The durable [MEMORY] note text in a message list, or null if there is none. Static so callers
      *  (e.g. cross-session seeding) can read it without a ContextManager instance. */

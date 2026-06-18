@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Promote-to-pin + per-workspace memory + quality guard: the Project memory card now suggests unpinned
+  auto-note facts as one-click "promote to pin" candidates. Durable memory is scoped per workspace + owner
+  (keyed by a hash of the working directory via `MemoryStore.workspaceId()`), so different projects keep
+  separate notes. A quality guard (`agent.memory-max-chars`) consolidates an oversized auto note via the
+  summary model (`ContextManager.consolidateMemoryIfNeeded`) before storing, with a head+tail fallback.
 - Editable durable memory + persisted run timeline + preflight what-if: durable memory is now curatable --
   hand-edit the auto note and pin facts (kept verbatim, never overwritten, deduped on seed) via the Project
   memory card and `/memory/durable` (edit/pin/unpin). Each run now persists its actual context-event lines

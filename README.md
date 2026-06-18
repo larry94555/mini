@@ -347,8 +347,9 @@ saved conversation). Now it also carries across *different* sessions: after a ru
 written to a durable per-owner store, and a brand-new session is seeded from it. The *Project memory* card lets you **curate** it: hand-edit the auto note, and **pin** facts that always seed
 every new session and are never overwritten by compaction. Pinned facts plus the auto note are de-duplicated
 when a session is seeded. Endpoints (admin): `GET /memory/durable`, `POST /memory/durable` (edit note),
-`POST /memory/durable/pin` / `unpin`, `POST /memory/durable/clear`. Durable memory is workspace-local; it is
-not shared between users.
+`POST /memory/durable/pin` / `unpin`, `POST /memory/durable/clear`.
+
+The card also offers **promote to pin**: facts in the auto note that aren't pinned yet appear as one-click candidates, so curating durable memory is a quick review rather than retyping. Durable memory is scoped **per workspace and owner** (keyed by a short hash of the working directory shown in the card), so different projects don't share one note. A **quality guard** keeps the note tight: when the auto note grows past `agent.memory-max-chars` (default 4000), the summary model consolidates it -- merging duplicates and dropping redundancy -- before it is stored (with a head+tail fallback if the model is unavailable). Durable memory is not shared between users.
 
 **Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
 the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is
