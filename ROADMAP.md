@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Operationalized readiness + degradation tests + trace export: the Docker image and compose service now
+  wire a `HEALTHCHECK` to `/healthz`, the admin card shows a green/amber/red health dot, and `docs/DEPLOY.md`
+  documents Docker/k8s probes. `GracefulDegradationTest` covers the DB-down / llama-unreachable paths
+  (stores no-op, readiness reports degraded/down). New `GET /admin/runs.ndjson` exports the per-run trace as
+  newline-delimited JSON for external tooling.
 - Persistence coverage + readiness probe: a real-SQLite `PersistenceRoundTripTest` round-trips sessions
   (history/ownership/sharing), run history (context counts + event timeline), and plans; a
   `WorkspaceBundleRoundTripTest` round-trips a signed bundle (settings + durable memory) through real HMAC

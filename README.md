@@ -167,6 +167,7 @@ No cloud API key is required.
 | `.trivyignore` | Documented CVE exceptions for the CRITICAL scan gate |
 | `docs/SECURITY.md` | Supply-chain severity policy (gate vs. report) |
 | `docs/MEMORY.md` | Durable-memory subsystem pipeline + config |
+| `docs/DEPLOY.md` | Deployment: health probes, Docker/k8s, observability |
 | `MemoryStore.java` | Durable cross-session `[MEMORY]` note (per owner) |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
@@ -358,7 +359,7 @@ Ranking can be **semantic**: set `retrieval.embeddings=true` and injection (and 
 
 ### Health & observability
 
-`GET /health` is a bare liveness check. `GET /healthz` is a **readiness** probe (open, no auth) for deployment and monitoring: it reports overall `status` (`ok` / `degraded` / `down`), database availability, llama-server reachability and its context window, uptime, the context-management summary (folds/compactions/trims), and durable-memory presence. The admin dashboard (`GET /admin/overview`) now also folds in the context-management totals and durable-memory state alongside the recent-runs timeline, so run activity and memory are visible together.
+`GET /health` is a bare liveness check. `GET /healthz` is a **readiness** probe (open, no auth) for deployment and monitoring: it reports overall `status` (`ok` / `degraded` / `down`), database availability, llama-server reachability and its context window, uptime, the context-management summary (folds/compactions/trims), and durable-memory presence. The admin dashboard (`GET /admin/overview`) now also folds in the context-management totals and durable-memory state alongside the recent-runs timeline, so run activity and memory are visible together. The admin card shows a **health dot** (green `ok` / amber `degraded` / red `down`) and a `runs.ndjson` download; `GET /admin/runs.ndjson` (admin) streams recent runs as newline-delimited JSON (one run per line, with per-run fold/compact/trim counts and the event timeline) for external log/trace tooling. The Docker image and `docker-compose.yml` wire a `HEALTHCHECK` to `/healthz`; Kubernetes probe snippets and the full deployment guide are in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 **Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
 the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is
