@@ -69,17 +69,19 @@ public class RunService {
     public void stop() {
         draining = true;
         log.info("[runs] draining in-flight runs (up to " + drainSeconds + "s) ...");
-        if (async != null) {
-            async.shutdown();
-            try {
-                if (!async.awaitTermination(drainSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
-                    log.warn("[runs] drain timeout; forcing shutdown (" + active() + " runs still active)");
-                    async.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                async.shutdownNow();
+        // Wait for all in-flight permits to be released (i.e. all runBounded calls to finish).
+        // This covers both direct runBounded callers and tasks submitted via submitAsync.
+        long deadline = System.currentTimeMillis() + drainSeconds * 1000L;
+        while (active() > 0 && System.currentTimeMillis() < deadline) {
+            try { Thread.sleep(20); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt(); break;
             }
+        }
+        if (active() > 0) {
+            log.warn("[runs] drain timeout; " + active() + " run(s) still active — forcing shutdown");
+        }
+        if (async != null) {
+            async.shutdownNow();
         }
         log.info("[runs] shutdown complete.");
     }
