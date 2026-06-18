@@ -340,6 +340,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Unified context timeline + live-fold test + trace filter: compaction now emits a `[compact:<label>]`
+  trace event (alongside `[fold:]`) and budget trims increment a `context_trim` counter, so folds,
+  compactions and trims form one observable timeline -- summarized at /metrics under `context` and
+  filterable in the web UI by event category (tools/guards/plan/fold/compact/other). Added
+  `ContextFoldLiveTest` (real fold over an in-process HTTP stub server, no external model) and fixed the
+  prior `*IT` test name so Surefire actually runs it (renamed to `ContextFoldConfigTest`). Removed the
+  stale `PermissionGate.java` again (it had reappeared on the branch).
 - Fold trace events in the UI + release dry-run smoke + repo cleanup: a fold during a run now streams a
   `[fold:<label>]` trace event (size in -> out) that renders highlighted in the web UI activity trace and in
   CLI output (`ContextManager.condenseToolResultTraced` + `AgentEngine`); `release.yml` gained a

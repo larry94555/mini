@@ -177,7 +177,7 @@ public class ContextManager {
     }
 
     public List<Map<String, Object>> compactIfNeeded(List<Map<String, Object>> messages,
-                                                     String label) throws Exception {
+                                                     String label, RunSink sink) throws Exception {
         int tokens = countTokens(messages);
         if (tokens < threshold || messages.size() <= keepRecent + 2) {
             return messages;
@@ -198,8 +198,13 @@ public class ContextManager {
         List<Map<String, Object>> toFold = messages.subList(bodyStart, keepFrom);
         String newMemory = updateMemory(oldMemory, toFold);
 
+        if (metrics != null) metrics.inc("context_compact");
         log.info("\n[compaction:" + label + "] ~" + tokens + " tokens -> folded "
                 + toFold.size() + " older messages into memory, kept " + (n - keepFrom) + " recent.");
+        if (sink != null) {
+            sink.log("[compact:" + label + "] folded " + toFold.size() + " older messages (~" + tokens
+                    + " tokens) into the memory note, kept " + (n - keepFrom) + " recent");
+        }
 
         List<Map<String, Object>> out = new ArrayList<>();
         out.add(system);

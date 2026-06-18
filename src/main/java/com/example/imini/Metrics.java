@@ -130,6 +130,14 @@ public class Metrics {
 
         out.put("approx_output_tokens", approxOutputChars.get() / 4); // ~4 chars/token, approximate
 
+        // Unified context-management summary (folds, compactions, budget trims) for the timeline view.
+        Map<String, Object> ctx = new LinkedHashMap<>();
+        ctx.put("folds", c.getOrDefault("context_fold", 0L));
+        ctx.put("fold_fallbacks", c.getOrDefault("context_fold_fallback", 0L));
+        ctx.put("compactions", c.getOrDefault("context_compact", 0L));
+        ctx.put("trims", c.getOrDefault("context_trim", 0L));
+        out.put("context", ctx);
+
         if (runService != null) {
             Map<String, Object> conc = new LinkedHashMap<>();
             conc.put("limit", runService.limit());

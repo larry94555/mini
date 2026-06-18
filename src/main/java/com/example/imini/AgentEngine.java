@@ -137,7 +137,7 @@ public class AgentEngine {
                 }
             }
 
-            messages = context.compactIfNeeded(messages, label);
+            messages = context.compactIfNeeded(messages, label, sink);
 
             final String sid = sessionId;
             BooleanSupplier cancel = interactive ? () -> interrupt.isStopRequested(sid) : () -> false;
