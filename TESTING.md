@@ -2699,3 +2699,12 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   (`anchore/sbom-action`, uploaded as artifact `imini-sbom.cdx.json`) and runs a Trivy filesystem scan
   (`HIGH,CRITICAL`) whose SARIF is uploaded to GitHub code scanning. The scan is report-only (`exit-code: 0`)
   so findings surface in the Security tab without failing the build. Also runs weekly via cron.
+
+## 303. Supply-chain action pins resolve (regression)
+
+- **Symptom guarded against:** Supply-chain workflow failing with "Unable to resolve action
+  `aquasecurity/trivy-action@0.28.0`, unable to find version" -- a non-existent tag.
+- **Fix:** pin `aquasecurity/trivy-action@v0.36.0` (the project migrated all tags to a `v` prefix after a
+  supply-chain incident; bare `0.x` tags are not used for new releases).
+- **Observe:** the `scan` job in `supply-chain.yml` resolves the action and uploads SARIF. Dependabot
+  (github-actions ecosystem) will propose future bumps.
