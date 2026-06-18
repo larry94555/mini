@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# imini pre-commit guard: blocks commits where a required script lost its executable bit or where a
+# POSIX script has CRLF endings. Install with: sh scripts/install-hooks.sh  (sets core.hooksPath).
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+if ! "$HERE/check-scripts.sh"; then
+  echo "pre-commit: blocked by script hygiene check (fix the items above, then re-commit)."
+  exit 1
+fi

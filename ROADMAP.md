@@ -340,6 +340,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Windows in CI + pinned wrapper checksum + script-hygiene guard: the smoke workflow now also runs on
+  `windows-latest` (exercising `mvnw.cmd`/`get-maven.ps1` and a PowerShell `/health` probe); the wrapper
+  can verify its Maven download against a SHA-256 (`scripts/pin-maven-checksum.sh` writes a verified value;
+  `mvnw`/`mvnw.cmd`/`get-maven.ps1` all check it); and a `.gitattributes` + `.githooks/pre-commit` guard
+  (shared `check-scripts.sh`, also run advisory in CI) keep scripts executable and LF so the earlier
+  "Permission denied" regression cannot recur silently.
 - Maven wrapper + cross-platform CI smoke test: added a lightweight `./mvnw` / `mvnw.cmd` (with
   `.mvn/wrapper/maven-wrapper.properties`) so the project builds with no system Maven (prefers a system
   `mvn`, else downloads a pinned Apache Maven into `.maven/`); `run.sh`/`run.bat` and `ci.yml` now use it.

@@ -1,0 +1,15 @@
+# Cross-platform line-ending policy for scripts. A stray CR breaks a Unix shebang
+# (e.g. "/usr/bin/env sh\r: bad interpreter"), so POSIX scripts must be LF and Windows
+# scripts must be CRLF. (Git attributes cannot set the executable bit -- that is enforced
+# by the pre-commit hook in .githooks and `git update-index --chmod=+x`.)
+*.sh   text eol=lf
+mvnw   text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Keep binaries untouched.
+*.jar   binary
+*.gguf  binary
+*.png   binary
+*.zip   binary
