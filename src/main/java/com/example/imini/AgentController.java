@@ -857,14 +857,44 @@ public class AgentController {
         String owner = currentUser();
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         String note = memory.get(owner);
+        String pinned = memory.pinned(owner);
         out.put("owner", owner);
         out.put("note", note == null ? "" : note);
-        out.put("present", note != null && !note.isBlank());
+        out.put("pinned", pinned == null ? "" : pinned);
+        out.put("effective", memory.effective(owner));
+        out.put("present", (note != null && !note.isBlank()) || (pinned != null && !pinned.isBlank()));
         out.put("updatedAt", memory.updatedAt(owner));
         return out;
     }
 
-    /** Clear the current user's durable memory note (admin). */
+    /** Hand-edit the current user's auto memory note (admin). Empty clears the auto part; pins are kept. */
+    @PostMapping("/memory/durable")
+    public Map<String, Object> setDurableMemory(@RequestBody Map<String, String> body) {
+        requireAdmin();
+        memory.setNote(currentUser(), body == null ? "" : body.getOrDefault("note", ""));
+        audit.record(currentUser(), "memory", "durable", "edited");
+        return durableMemory();
+    }
+
+    /** Pin a curated fact that always seeds new sessions and is never overwritten by compaction (admin). */
+    @PostMapping("/memory/durable/pin")
+    public Map<String, Object> pinDurableMemory(@RequestBody Map<String, String> body) {
+        requireAdmin();
+        memory.addPin(currentUser(), body == null ? "" : body.getOrDefault("text", ""));
+        audit.record(currentUser(), "memory", "durable", "pinned");
+        return durableMemory();
+    }
+
+    /** Remove a pinned fact (admin). */
+    @PostMapping("/memory/durable/unpin")
+    public Map<String, Object> unpinDurableMemory(@RequestBody Map<String, String> body) {
+        requireAdmin();
+        memory.removePin(currentUser(), body == null ? "" : body.getOrDefault("text", ""));
+        audit.record(currentUser(), "memory", "durable", "unpinned");
+        return durableMemory();
+    }
+
+    /** Clear the current user's durable memory note (admin). Pinned facts are preserved. */
     @PostMapping("/memory/durable/clear")
     public Map<String, Object> clearDurableMemory() {
         requireAdmin();
@@ -903,6 +933,8 @@ public class AgentController {
         out.put("compactThreshold", compactThreshold);
         out.put("wouldCompact", estimated >= compactThreshold);
         out.put("wouldTrim", estimated > cap);
+        // a too-large single request is best split: plan mode breaks it into steps that each fit the window
+        out.put("recommendPlanMode", estimated > cap);
         return out;
     }
 

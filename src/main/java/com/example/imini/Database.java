@@ -77,7 +77,10 @@ public class Database {
             "ALTER TABLE run_history ADD COLUMN compactions INTEGER",
             "ALTER TABLE run_history ADD COLUMN trims INTEGER",
             // durable cross-session memory note (one row per owner)
-            "CREATE TABLE memory (owner TEXT PRIMARY KEY, note TEXT NOT NULL, updated_at INTEGER NOT NULL)");
+            "CREATE TABLE memory (owner TEXT PRIMARY KEY, note TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+            // curated/pinned durable facts (never overwritten by auto write-back) + persisted per-run timeline
+            "ALTER TABLE memory ADD COLUMN pinned TEXT",
+            "ALTER TABLE run_history ADD COLUMN events TEXT");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

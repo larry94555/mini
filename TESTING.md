@@ -2867,3 +2867,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** typing in the composer shows `~N tok est / cap C \u00b7 fits|would compact|would trim`.
   `GET /budget/preflight?sessionId=<id>&prompt=<text>` returns `estimatedTokens`, `promptCap`,
   `serverContext`, `compactThreshold`, `wouldCompact`, `wouldTrim`.
+
+---
+
+# Editable durable memory, persisted run timeline, preflight what-if
+
+## 325. Durable-memory de-dup on seed (MemoryDedupeTest)
+
+- **Run:** `./mvnw -Dtest=MemoryDedupeTest test`.
+- **Observe:** `MemoryStore.dedupeLines` drops blank and case-insensitive duplicate lines while preserving
+  first-occurrence order; null/empty safe. This is what merges pinned facts with the auto note when seeding.
+
+## 326. Persisted per-run timeline events (RunEventsTest)
+
+- **Run:** `./mvnw -Dtest=RunEventsTest test`.
+- **Observe:** event lines noted during a run (`[fold]`/`[compact]`/`[trim]`) are captured on that run's
+  record (`events`) and reset for the next run; a run with no context activity has an empty list.
+
+## 327. Curated durable memory in the UI (manual)
+
+- **Observe:** in the *Project memory* card, edit the auto note and *Save note*; *Pin* a fact and see it as a
+  chip (with x to unpin). Start a new session and confirm pinned facts seed it. Edit endpoints:
+  `POST /memory/durable`, `/memory/durable/pin`, `/memory/durable/unpin` (admin).
+
+## 328. Expandable per-run timeline in admin (manual)
+
+- **Observe:** in the admin *recent runs* list, a run with context activity shows an expandable
+  "N context events" disclosure listing the `[fold]`/`[compact]`/`[trim]` lines. `GET /admin/runs` and
+  `GET /session/runs` include an `events` array per run; it survives a restart (`run_history.events`).
+
+## 329. Preflight "use plan mode" what-if (manual)
+
+- **Observe:** type a very large prompt; when the preflight shows "would trim", a *use plan mode* link
+  appears. Clicking it sets the mode selector to plan. `GET /budget/preflight` returns
+  `recommendPlanMode=true` in that case.

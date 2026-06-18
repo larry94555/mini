@@ -157,7 +157,8 @@ public class LlamaClient {
         int measured = real >= 0 ? real : TokenBudget.estimateMessages(messages);
         if (measured <= cap) return messages;
         TokenBudget.Fitted fitted = TokenBudget.fit(messages, cap, TokenBudget::estimate);
-        if (metrics != null && fitted.changed()) metrics.noteTrim();
+        if (metrics != null && fitted.changed()) metrics.noteTrim("[trim] ~" + measured + " tok > cap " + cap
+                + "; trimmed " + fitted.truncated() + ", dropped " + fitted.dropped() + " -> ~" + fitted.afterTokens() + " tok");
         log.warn("[token-budget] prompt ~" + measured + " tok > cap " + cap
                 + " (budget " + budget.budget() + ", server n_ctx " + serverContext()
                 + "); trimmed " + fitted.truncated() + " message(s), dropped " + fitted.dropped()

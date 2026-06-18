@@ -19,19 +19,38 @@ public class RunHistoryStore {
     @Value("${agent.run-history.persist-max:500}") private int persistMax;
 
     private final Database db;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public RunHistoryStore(Database db) {
         this.db = db;
+    }
+
+    private String toJson(List<String> events) {
+        try {
+            return mapper.writeValueAsString(events == null ? List.of() : events);
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> fromJson(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return mapper.readValue(json, List.class);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /** Persist one record, then prune to the most recent {@code persistMax} rows. */
     public void append(RunHistory.Record r) {
         if (!db.available() || r == null) return;
         try {
-            db.update("INSERT INTO run_history(ts, endpoint, session, mode, ms, ok, folds, compactions, trims) "
-                            + "VALUES(?,?,?,?,?,?,?,?,?)",
+            db.update("INSERT INTO run_history(ts, endpoint, session, mode, ms, ok, folds, compactions, trims, events) "
+                            + "VALUES(?,?,?,?,?,?,?,?,?,?)",
                     r.ts(), r.endpoint(), r.session(), r.mode(), r.ms(), r.ok() ? 1 : 0,
-                    r.folds(), r.compactions(), r.trims());
+                    r.folds(), r.compactions(), r.trims(), toJson(r.events()));
             int cap = Math.max(1, persistMax);
             // keep only the newest `cap` rows (SQLite rowid orders by insertion)
             db.update("DELETE FROM run_history WHERE rowid NOT IN "
@@ -48,11 +67,11 @@ public class RunHistoryStore {
         try {
             List<RunHistory.Record> newestFirst = db.query(
                     "SELECT ts, endpoint, session, mode, ms, ok, "
-                            + "COALESCE(folds,0), COALESCE(compactions,0), COALESCE(trims,0) "
+                            + "COALESCE(folds,0), COALESCE(compactions,0), COALESCE(trims,0), events "
                             + "FROM run_history ORDER BY ts DESC, rowid DESC LIMIT ?",
                     rs -> new RunHistory.Record(rs.getLong(1), rs.getString(2), rs.getString(3),
                             rs.getString(4), rs.getLong(5), rs.getInt(6) == 1,
-                            rs.getInt(7), rs.getInt(8), rs.getInt(9)),
+                            rs.getInt(7), rs.getInt(8), rs.getInt(9), fromJson(rs.getString(10))),
                     Math.max(1, n));
             for (int i = newestFirst.size() - 1; i >= 0; i--) out.add(newestFirst.get(i)); // -> oldest first
         } catch (Exception e) {

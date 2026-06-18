@@ -56,6 +56,9 @@
   .tracebar input { margin:0; }
   .ctxbadge { font-size:10.5px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:0 6px; }
   #preflight .warn { color:var(--warn); } #preflight .bad { color:var(--bad); }
+  .pinchip { display:inline-flex; gap:4px; align-items:center; font-size:10.5px; border:1px solid var(--line); border-radius:999px; padding:1px 7px; margin:2px 3px 2px 0; }
+  .pinchip a { cursor:pointer; color:var(--bad); }
+  #preflight a.planlink { color:var(--accent); cursor:pointer; text-decoration:underline; }
   ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
   .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
@@ -289,7 +292,12 @@
         <a class="linklike" id="refreshDurableMemLink" style="font-size:11px" title="Reload durable memory">refresh</a>
         <button id="clearDurableMem" style="font-size:11px;float:right" title="Clear the durable memory note (admin)">clear</button>
         <div class="muted" style="font-size:11px;margin:2px 0">Facts carried across sessions and restarts; a new session is seeded from this, and it is updated after a run compacts.</div>
-        <pre class="log" id="durableMemOut" style="margin-top:4px;max-height:120px">(loading...)</pre>
+        <div id="durableMemMeta" class="muted" style="font-size:10.5px;margin:2px 0"></div>
+        <textarea id="durableMemNote" placeholder="auto memory note (editable) — facts the agent learned" style="width:100%;height:70px;font-size:11px"></textarea>
+        <div class="row" style="margin-top:3px"><button id="saveDurableMem" style="font-size:11px">Save note</button></div>
+        <div style="margin-top:6px"><b style="font-size:11px">Pinned facts</b> <span class="muted" style="font-size:10.5px">(always kept; seed every session)</span></div>
+        <div id="durablePins" style="margin:2px 0"></div>
+        <div class="row"><input id="pinInput" placeholder="pin a fact (e.g. prefers metric units)" style="flex:1;font-size:11px"/><button id="addPin" style="font-size:11px">Pin</button></div>
       </div>
     </div>
     <div class="card">
@@ -763,10 +771,17 @@ function runsHtml(runs){
     if (r.compactions) cx.push(r.compactions + ' compact' + (r.compactions>1?'s':''));
     if (r.trims) cx.push(r.trims + ' trim' + (r.trims>1?'s':''));
     const ctx = cx.length ? ' <span class="ctxbadge" title="context management during this run">' + escapeHtml(cx.join(', ')) + '</span>' : '';
+    const ev = Array.isArray(r.events) ? r.events : [];
+    const evHtml = ev.length
+      ? '<details style="margin:1px 0 1px 14px"><summary class="muted" style="cursor:pointer;font-size:10.5px">'
+        + ev.length + ' context event' + (ev.length>1?'s':'') + '</summary>'
+        + ev.map(e => '<div class="muted" style="font-size:10.5px">' + escapeHtml(String(e)) + '</div>').join('')
+        + '</details>'
+      : '';
     return '<div style="border-top:1px solid var(--border);padding:2px 0">'
       + escapeHtml(t) + ' · ' + escapeHtml(String(r.endpoint||"")) + ' [' + escapeHtml(String(r.mode||"")) + '] '
       + (r.ok ? 'ok' : '<span class="muted">failed</span>') + ' ' + (r.ms||0) + 'ms' + ctx + ' '
-      + '<span class="muted">' + escapeHtml(String(r.session||"")) + '</span></div>';
+      + '<span class="muted">' + escapeHtml(String(r.session||"")) + '</span>' + evHtml + '</div>';
   }).join("");
 }
 async function refreshAdmin(){
@@ -1366,23 +1381,52 @@ document.querySelectorAll('#traceFilter input[type=checkbox]').forEach(cb => {
   };
 });
 
-// ---- durable cross-session memory ----
+// ---- editable / curated durable cross-session memory ----
+function renderPins(pinned){
+  const el = document.getElementById("durablePins"); if (!el) return;
+  const lines = (pinned||"").split("\n").map(x=>x.trim()).filter(Boolean);
+  el.innerHTML = lines.length
+    ? lines.map(l => '<span class="pinchip">' + escapeHtml(l)
+        + ' <a title="unpin" data-pin="' + escapeHtml(l) + '">\u00d7</a></span>').join("")
+    : '<span class="muted" style="font-size:10.5px">(none pinned)</span>';
+  el.querySelectorAll("a[data-pin]").forEach(a => a.onclick = async () => {
+    await post("/memory/durable/unpin", {text: a.getAttribute("data-pin")});
+    refreshDurableMemory();
+  });
+}
 async function refreshDurableMemory(){
-  const el = document.getElementById("durableMemOut"); if (!el) return;
+  const meta = document.getElementById("durableMemMeta");
+  const ta = document.getElementById("durableMemNote");
+  if (!meta || !ta) return;
   try {
     const j = await getJson("/memory/durable");
-    if (!j){ el.textContent = "(unavailable)"; return; }
-    if (j.present) {
-      const when = j.updatedAt ? new Date(j.updatedAt).toLocaleString() : "";
-      el.textContent = (when ? "updated " + when + "\n" : "") + (j.note || "");
-    } else {
-      el.textContent = "(no durable memory yet \u2014 it fills in after a session compacts)";
-    }
-  } catch(e){ el.textContent = "(unavailable)"; }
+    if (!j){ meta.textContent = "(unavailable)"; return; }
+    const when = j.updatedAt ? new Date(j.updatedAt).toLocaleString() : "";
+    meta.textContent = j.present ? ("updated " + when) : "(no durable memory yet \u2014 fills in after a session compacts; pin facts to keep them)";
+    if (document.activeElement !== ta) ta.value = j.note || "";
+    renderPins(j.pinned);
+  } catch(e){ meta.textContent = "(unavailable)"; }
 }
 {
   const rl = document.getElementById("refreshDurableMemLink");
   if (rl) rl.onclick = refreshDurableMemory;
+  const sv = document.getElementById("saveDurableMem");
+  if (sv) sv.onclick = async () => {
+    const ta = document.getElementById("durableMemNote");
+    const r = await post("/memory/durable", {note: ta ? ta.value : ""});
+    if (r && r.ok === false){ appendLog("[memory] save failed (admin only?)"); }
+    refreshDurableMemory();
+  };
+  const ap = document.getElementById("addPin");
+  if (ap) ap.onclick = async () => {
+    const inp = document.getElementById("pinInput");
+    const t = inp ? inp.value.trim() : "";
+    if (!t) return;
+    const r = await post("/memory/durable/pin", {text: t});
+    if (r && r.ok === false){ appendLog("[memory] pin failed (admin only?)"); }
+    if (inp) inp.value = "";
+    refreshDurableMemory();
+  };
   const cl = document.getElementById("clearDurableMem");
   if (cl) cl.onclick = async () => {
     const r = await post("/memory/durable/clear", {});
@@ -1406,7 +1450,8 @@ async function runPreflight(){
     const flags = [];
     if (j.wouldTrim) flags.push('<span class="bad">would trim</span>');
     else if (j.wouldCompact) flags.push('<span class="warn">would compact</span>');
-    el.innerHTML = escapeHtml(s) + (flags.length ? " \u00b7 " + flags.join(", ") : " \u00b7 fits");
+    const whatif = j.recommendPlanMode ? ' \u00b7 <a class="planlink" title="split this into steps that each fit the window">use plan mode</a>' : '';
+    el.innerHTML = escapeHtml(s) + (flags.length ? " \u00b7 " + flags.join(", ") : " \u00b7 fits") + whatif;
   } catch(e){ el.textContent = ""; }
 }
 {
@@ -1414,6 +1459,13 @@ async function runPreflight(){
   if (inp) inp.addEventListener("input", () => {
     if (_preflightTimer) clearTimeout(_preflightTimer);
     _preflightTimer = setTimeout(runPreflight, 350);
+  });
+  const pf = document.getElementById("preflight");
+  if (pf) pf.addEventListener("click", (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains("planlink")) {
+      const m = $("#mode"); if (m) m.value = "plan";
+      runPreflight();
+    }
   });
 }
 </script>
