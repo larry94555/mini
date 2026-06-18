@@ -26,12 +26,16 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Cache wrapper Maven distribution
+        uses: actions/cache@v4
+        with:
+          path: .maven
+          key: ${{ runner.os }}-mvnwrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
       # ---------- Script hygiene guard (Linux only; advisory so it never wedges the build) ----------
-      - name: Guard - scripts executable + LF
+      - name: Guard - scripts executable + LF (hard fail)
         if: runner.os == 'Linux'
-        run: |
-          bash .githooks/check-scripts.sh || \
-            echo "::warning::script hygiene issues above -- run 'sh scripts/install-hooks.sh' and the listed 'git update-index --chmod=+x' commands"
+        run: bash .githooks/check-scripts.sh
 
       # ---------- POSIX path (Linux / macOS) ----------
       - name: Make wrapper + scripts executable

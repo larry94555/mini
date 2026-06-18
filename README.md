@@ -161,6 +161,8 @@ No cloud API key is required.
 | `.github/workflows/smoke.yml` | CI: cross-platform build + boot smoke test (Linux + macOS + Windows) |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
+| `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
+| `scripts/pin-maven-checksum.sh` | Re-pin the wrapper's Maven SHA-512 after a version bump |
 | `mvnw` / `mvnw.cmd` / `.mvn/` | Maven wrapper — build with no system Maven installed |
 
 ## Run on Windows
@@ -222,15 +224,17 @@ mvnw.cmd -version      # Windows
 ./mvnw test            # run the unit tests
 ```
 
-**Pin the download (optional, recommended for teams).** The wrapper can verify the Maven it downloads
-against a SHA-256 in `.mvn/wrapper/maven-wrapper.properties`. It ships blank (no unverified hash); pin a
-verified value once with:
+**Pinned download (integrity-checked).** The wrapper downloads the official Apache Maven `.tar.gz` and
+verifies it against `distributionSha512Sum` in `.mvn/wrapper/maven-wrapper.properties` -- this ships pinned
+to the official 3.9.9 SHA-512, so `./mvnw` and `mvnw.cmd` abort on any mismatch. After a version bump,
+re-pin with a verified value in one command:
 
 ```sh
-sh scripts/pin-maven-checksum.sh   # downloads, hashes, writes distributionSha256Sum=, then commit it
+sh scripts/pin-maven-checksum.sh   # downloads, hashes, rewrites distributionSha512Sum=, then commit it
 ```
 
-After that, both `./mvnw` and `mvnw.cmd` reject a download whose hash doesn't match.
+CI caches the wrapper's downloaded Maven (`actions/cache` on `.maven`, keyed to the wrapper properties), so
+the no-system-Maven path doesn't re-download on every run.
 
 **Contributor setup (one time).** Enable the repo's pre-commit guard so scripts can't silently lose their
 executable bit or pick up Windows line endings:
@@ -241,8 +245,15 @@ sh scripts/install-hooks.sh        # Windows: scripts\install-hooks.cmd
 
 The guard (`.githooks/pre-commit`) blocks a commit if a required script is not executable in git
 (`100755`) or if a `*.sh`/`mvnw` file contains CRLF, and prints the exact `git update-index --chmod=+x`
-fix. `.gitattributes` keeps line endings correct on checkout. CI runs the same hygiene check (advisory) and
-the cross-platform smoke test covers Linux, macOS, and Windows.
+fix. `.gitattributes` keeps line endings correct on checkout. **CI now enforces the same check as a hard
+failure** (Linux job in `smoke.yml`), and the cross-platform smoke test covers Linux, macOS, and Windows.
+
+If the scripts ever show up non-executable in git (e.g. after importing from an archive, which cannot carry
+the bit), fix them all in one shot, then commit:
+
+```sh
+sh scripts/git-mark-exec.sh        # runs the git update-index --chmod=+x for every script
+```
 
 ## Common helper scripts
 

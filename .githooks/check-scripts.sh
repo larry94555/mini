@@ -3,7 +3,7 @@
 # LF-only files contain no CR. Used by the pre-commit hook and by CI. Exit non-zero on any problem.
 set -eu
 
-EXEC_SCRIPTS="mvnw run.sh ask.sh chat.sh plan.sh stream.sh rewind.sh interrupt.sh runs.sh steer.sh eval.sh scripts/common.sh scripts/install-hooks.sh scripts/pin-maven-checksum.sh"
+EXEC_SCRIPTS="mvnw run.sh ask.sh chat.sh plan.sh stream.sh rewind.sh interrupt.sh runs.sh steer.sh eval.sh scripts/common.sh scripts/install-hooks.sh scripts/pin-maven-checksum.sh scripts/git-mark-exec.sh"
 fail=0
 
 for f in $EXEC_SCRIPTS; do

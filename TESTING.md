@@ -2651,3 +2651,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   POSIX runners chmod + `sh -n` + `./mvnw` build + bash `/health` probe; the Windows runner uses
   `mvnw.cmd` (exercising `get-maven.ps1`) and a PowerShell `Invoke-WebRequest` `/health` probe. All three
   must build and boot.
+
+---
+
+# Hard-fail guard, pinned SHA-512, and CI Maven cache
+
+## 297. CI hygiene guard is a hard failure (CI)
+
+- **Observe:** `.github/workflows/smoke.yml` runs `bash .githooks/check-scripts.sh` with no `|| warning`
+  fallback, so a non-executable (`!= 100755`) or CRLF script fails the Linux job. Requires the scripts to be
+  marked executable in git (`sh scripts/git-mark-exec.sh`, then commit).
+
+## 298. Wrapper verifies the pinned SHA-512 (deterministic)
+
+- **Run:** build with no system Maven so the wrapper downloads Apache Maven.
+- **Observe:** `.mvn/wrapper/maven-wrapper.properties` pins `distributionUrl` to the official 3.9.9
+  `.tar.gz` and `distributionSha512Sum` to its official SHA-512. `mvnw` (`sha512sum`/`shasum -a 512`) and
+  `mvnw.cmd` -> `get-maven.ps1 -Sha512` (`Get-FileHash -Algorithm SHA512`) verify the download and abort on
+  mismatch. `scripts/pin-maven-checksum.sh` recomputes and rewrites the value after a version bump.
+
+## 299. CI caches the wrapper Maven download (CI)
+
+- **Observe:** both `ci.yml` and `smoke.yml` add `actions/cache@v4` on path `.maven`, keyed
+  `${{ runner.os }}-mvnwrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}`, so the
+  no-system-Maven path (notably the Windows job) reuses the cached distribution instead of re-downloading.
