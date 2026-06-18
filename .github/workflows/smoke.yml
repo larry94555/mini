@@ -26,6 +26,9 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Make wrapper + scripts executable
+        run: chmod +x mvnw *.sh scripts/*.sh
+
       - name: POSIX scripts parse cleanly (sh -n)
         run: |
           for f in *.sh scripts/*.sh; do sh -n "$f"; done

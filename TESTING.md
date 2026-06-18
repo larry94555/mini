@@ -2614,3 +2614,14 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** `eval.sh` now honors both `expect_contains` and `expect_not_contains` (matching the
   PowerShell runner), tolerating cases that omit either field. Requires `jq`.
+
+## 293. Wrapper/script executable bit (regression — deterministic, no model)
+
+- **Symptom this guards against:** CI failing with `./mvnw: Permission denied` (exit 126) because the
+  wrapper was committed non-executable (git mode `100644`).
+- **Fix shipped:** both workflows `chmod +x mvnw` (smoke also chmods the `*.sh`) before invoking it, and
+  `run.sh` detects the wrapper by existence and runs it via `sh ./mvnw` rather than requiring the bit.
+- **Permanent repo fix:** mark the files executable in git so `./mvnw` / `./run.sh` work for humans too:
+  `git update-index --chmod=+x mvnw run.sh ask.sh chat.sh plan.sh stream.sh rewind.sh interrupt.sh runs.sh steer.sh eval.sh scripts/common.sh`
+- **Observe:** `git ls-files --stage mvnw` should read `100755` after the fix; CI builds via `./mvnw`
+  without permission errors.

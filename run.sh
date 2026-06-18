@@ -43,17 +43,20 @@ fi
 echo
 
 echo "[3/4] Locating Maven (the build tool)..."
-if [ -x "./mvnw" ]; then
-  MVN_CMD="./mvnw"
+# Prefer the bundled wrapper. Invoke it via 'sh' so it works even if the file's executable bit was lost
+# (e.g. checked into git as non-executable); fall back to a system Maven.
+if [ -f "./mvnw" ]; then
+  USE_WRAPPER=1
+  echo "  Using Maven: ./mvnw (wrapper)"
 elif command -v mvn >/dev/null 2>&1; then
-  MVN_CMD="mvn"
+  USE_WRAPPER=0
+  echo "  Using Maven: mvn"
 else
   echo
   echo "  [ERROR] Maven was not found. Install it, then run this again."
   echo "      $PKG_MVN"
   exit 1
 fi
-echo "  Using Maven: $MVN_CMD"
 echo
 
 echo "[4/4] Building and starting imini..."
@@ -66,4 +69,8 @@ echo "  When you see 'llama-server is ready.' and 'Started MiniAgentApplication 
 echo "  the app is running at http://localhost:8080 -- leave this window open."
 echo "  Press Ctrl+C to stop it later."
 echo
-exec "$MVN_CMD" spring-boot:run
+if [ "$USE_WRAPPER" = "1" ]; then
+  exec sh ./mvnw spring-boot:run
+else
+  exec mvn spring-boot:run
+fi
