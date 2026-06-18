@@ -244,7 +244,12 @@ public class AgentEngine {
                 }
 
                 // trim, then fence untrusted (web / MCP) content against prompt injection
-                String finalResult = context.condenseToolResult(result);
+                ContextManager.Condensed condensed = context.condenseToolResultTraced(result);
+                String finalResult = condensed.text();
+                if (condensed.folded()) {
+                    sink.log("[fold:" + label + "] condensed a large " + ci.name + " result: "
+                            + condensed.originalChars() + " -> " + condensed.resultChars() + " chars");
+                }
                 if (ci.tool != null && ci.tool.untrusted) {
                     finalResult = Untrusted.wrap(ci.name, finalResult);
                 }

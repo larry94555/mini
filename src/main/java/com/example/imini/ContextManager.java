@@ -60,8 +60,20 @@ public class ContextManager {
         this.metrics = metrics;
     }
 
+    /** Outcome of condensing a tool result: the (possibly reduced) text plus what happened, for trace
+     *  events. {@code folded} is true only when the RLM-style fold ran (not for a plain head+tail trim). */
+    public record Condensed(String text, boolean folded, int originalChars, int resultChars) {}
+
     /**
-     * Trim an oversized tool result before it enters the conversation.
+     * Trim an oversized tool result before it enters the conversation. See {@link #condenseToolResultTraced}
+     * for details and trace metadata; this convenience overload returns just the text.
+     */
+    public String condenseToolResult(String result) {
+        return condenseToolResultTraced(result).text();
+    }
+
+    /**
+     * Condense like {@link #condenseToolResult} but report what happened.
      *
      * <p>For moderately large results this is a cheap head+tail trim (the middle is dropped). For inputs
      * that vastly exceed the window ({@code > agent.fold-threshold-chars}, when folding is enabled), it
@@ -70,8 +82,12 @@ public class ContextManager {
      * input (every region is read once) at the cost of resolution. If the fold fails for any reason, it
      * degrades gracefully to the head+tail trim.
      */
-    public String condenseToolResult(String result) {
-        if (result == null || result.length() <= maxToolChars) return result;
+    public Condensed condenseToolResultTraced(String result) {
+        if (result == null || result.length() <= maxToolChars) {
+            int n = result == null ? 0 : result.length();
+            return new Condensed(result, false, n, n);
+        }
+        int original = result.length();
         if (foldEnabled && result.length() > foldThresholdChars) {
             try {
                 String folded = foldOversized(result, 0);
@@ -79,15 +95,16 @@ public class ContextManager {
                     metrics.inc("context_fold");
                     metrics.addModelOutput(0); // fold uses the summary model; runs counted there
                 }
-                log.info("\n[fold] condensed a " + result.length() + "-char input to "
+                log.info("\n[fold] condensed a " + original + "-char input to "
                         + folded.length() + " chars");
-                return folded;
+                return new Condensed(folded, true, original, folded.length());
             } catch (Exception e) {
                 if (metrics != null) metrics.inc("context_fold_fallback");
                 log.warn("[fold] failed (" + e.getMessage() + "); falling back to head+tail trim");
             }
         }
-        return headTail(result, maxToolChars);
+        String trimmed = headTail(result, maxToolChars);
+        return new Condensed(trimmed, false, original, trimmed.length());
     }
 
     /** Cheap, LM-free condense: keep the head and tail, drop the middle with a marker. */

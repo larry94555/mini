@@ -2769,3 +2769,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   larger than `context.refs.max-file-kb`).
 - **Observe:** the trace shows the file attached as folded; the answer reflects content from across the
   whole file (not just the head); `context_fold` increments. CI cannot host a model, so this is manual.
+
+---
+
+# Fold trace events, release dry-run smoke, repo cleanup
+
+## 312. Fold trace event in the run trace (ContextFoldTest + manual UI)
+
+- **Run (logic):** `./mvnw -Dtest=ContextFoldTest test` -- `condenseToolResultTraced` reports
+  `folded=true` with original/result sizes for a folded input, and `folded=false` for a head+tail trim or a
+  small result.
+- **Observe (UI):** with a real model, ask the agent to read a very large tool result (e.g. a big web page
+  or file). The activity trace shows a highlighted line
+  `[fold:<label>] condensed a large <tool> result: N -> M chars`, and the same line appears in the run log
+  / streamed CLI output.
+
+## 313. release.yml dry-run smoke on PRs (CI)
+
+- **Observe:** open a PR that changes `pom.xml` (or `release.yml` / `release-please-config.json` /
+  `.release-please-manifest.json`). The `Release` workflow runs as a dry run: it builds `imini.jar` and the
+  `.sha256`, skips the tag-verify and publish steps (gated on a `v*` tag), and uploads an
+  `imini-dry-run-jar` artifact. No GitHub Release is created. A real `v*` tag still builds and publishes.
+
+## 314. Repo cleanup: PermissionGate.java removed (build)
+
+- **Observe:** `src/main/java/com/example/imini/PermissionGate.java` no longer exists (superseded by
+  `PermissionService`); `grep -rn PermissionGate src` returns nothing; the project compiles (100 main
+  classes) and all tests pass.
