@@ -3109,3 +3109,30 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** wire `livenessProbe` -> `/health` and `readinessProbe` -> `/healthz` per `docs/DEPLOY.md`;
   `/healthz` returns 200 while `degraded` (model warming up), so HTTP-code readiness treats "serving but
   degraded" as ready.
+
+---
+
+# Full-history export, JSON-log correlation, SLO panel
+
+## 359. Latency percentiles (PercentileTest)
+
+- **Run:** `./mvnw -Dtest=PercentileTest test`.
+- **Observe:** `Metrics.percentile` is nearest-rank (p50 of 10..100 = 50, p95 = 100), 0 for empty/null, and
+  returns the only element for a single sample.
+
+## 360. SLO snapshot (manual / harness)
+
+- **Observe:** after some runs, `GET /metrics` `run_latency` includes `p50_ms`/`p95_ms` and a top-level `slo`
+  block (`success_rate`, `p50_ms`, `p95_ms`); `GET /metrics/prom` exposes `imini_run_latency_p50_ms`,
+  `imini_run_latency_p95_ms`, and `imini_run_success_rate`. The admin card shows an SLO line.
+
+## 361. Full persisted run-history NDJSON (manual)
+
+- **Observe:** `GET /admin/runs/history.ndjson?since=0&limit=1000` returns the entire run_history
+  oldest-first, one JSON run per line; page forward by setting `since` to the last line's `ts`. Distinct from
+  `/admin/runs.ndjson` (in-memory tail). Admin-only.
+
+## 362. JSON logging + correlation (manual)
+
+- **Observe:** start with `--spring.profiles.active=json`; logs become one JSON object per line and each
+  request carries MDC `reqId`, `path`, and (when authed) `user`. Default profile keeps the plain console.

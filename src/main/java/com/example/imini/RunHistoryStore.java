@@ -79,4 +79,26 @@ public class RunHistoryStore {
         }
         return out;
     }
+
+    /**
+     * A page of the FULL persisted history, oldest-first, starting at {@code sinceTs} (inclusive). Callers
+     * page forward by passing the last returned {@code ts} as the next {@code sinceTs}. Unlike loadRecent
+     * (the bounded in-memory tail), this reaches the entire run_history table.
+     */
+    public List<RunHistory.Record> loadPage(long sinceTs, int limit) {
+        if (!db.available()) return new ArrayList<>();
+        try {
+            return db.query(
+                    "SELECT ts, endpoint, session, mode, ms, ok, "
+                            + "COALESCE(folds,0), COALESCE(compactions,0), COALESCE(trims,0), events "
+                            + "FROM run_history WHERE ts >= ? ORDER BY ts ASC, rowid ASC LIMIT ?",
+                    rs -> new RunHistory.Record(rs.getLong(1), rs.getString(2), rs.getString(3),
+                            rs.getString(4), rs.getLong(5), rs.getInt(6) == 1,
+                            rs.getInt(7), rs.getInt(8), rs.getInt(9), fromJson(rs.getString(10))),
+                    Math.max(0, sinceTs), Math.max(1, limit));
+        } catch (Exception e) {
+            log.warn("[run-history] page load failed: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
 }

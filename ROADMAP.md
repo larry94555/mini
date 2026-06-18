@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Full-history NDJSON + JSON-log correlation + SLO panel: `GET /admin/runs/history.ndjson?since=&limit=`
+  streams the entire persisted run_history (paginated), beyond the in-memory tail. The `json` Spring profile
+  now also stamps MDC correlation fields (`reqId`/`path`/`user`) onto structured logs. `Metrics` computes
+  p50/p95 latency + success rate, surfaced in the admin SLO line and as Prometheus gauges
+  (`imini_run_latency_p50_ms`/`_p95_ms`/`imini_run_success_rate`).
 - Operationalized readiness + degradation tests + trace export: the Docker image and compose service now
   wire a `HEALTHCHECK` to `/healthz`, the admin card shows a green/amber/red health dot, and `docs/DEPLOY.md`
   documents Docker/k8s probes. `GracefulDegradationTest` covers the DB-down / llama-unreachable paths

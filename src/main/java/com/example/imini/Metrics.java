@@ -31,6 +31,12 @@ public class Metrics {
     private final AtomicLong runLatencyCount = new AtomicLong();
     private final AtomicLong runLatencyTotalMs = new AtomicLong();
     private final AtomicLong runLatencyMaxMs = new AtomicLong();
+    // bounded ring of recent latencies for percentile (p50/p95) SLO reporting
+    private static final int LAT_RING = 1024;
+    private final long[] latRing = new long[LAT_RING];
+    private int latPos = 0;
+    private boolean latWrapped = false;
+    private final Object latLock = new Object();
     private final AtomicLong approxOutputChars = new AtomicLong();
     private final RunHistory history = new RunHistory(200);
 
@@ -97,6 +103,11 @@ public class Metrics {
         runLatencyCount.incrementAndGet();
         runLatencyTotalMs.addAndGet(ms);
         runLatencyMaxMs.accumulateAndGet(ms, Math::max);
+        synchronized (latLock) {
+            latRing[latPos] = ms;
+            latPos = (latPos + 1) % LAT_RING;
+            if (latPos == 0) latWrapped = true;
+        }
     }
 
     /** Record a run AND append it to the run-history ring buffer (endpoint/session/mode for the dashboard). */
@@ -134,6 +145,34 @@ public class Metrics {
                 + " key=" + (keyLabel == null ? "-" : keyLabel) + " ms=" + ms + " ok=" + ok);
     }
 
+    private long[] latencySamplesSorted() {
+        long[] copy;
+        synchronized (latLock) {
+            int len = latWrapped ? LAT_RING : latPos;
+            copy = new long[len];
+            System.arraycopy(latRing, 0, copy, 0, len);
+        }
+        java.util.Arrays.sort(copy);
+        return copy;
+    }
+
+    /** Nearest-rank percentile of an ascending-sorted array; 0 when empty. q in [0,1]. */
+    static long percentile(long[] sortedAsc, double q) {
+        if (sortedAsc == null || sortedAsc.length == 0) return 0;
+        int idx = (int) Math.ceil(q * sortedAsc.length) - 1;
+        if (idx < 0) idx = 0;
+        if (idx >= sortedAsc.length) idx = sortedAsc.length - 1;
+        return sortedAsc[idx];
+    }
+
+    /** A page of the FULL persisted run history (oldest-first from {@code sinceTs}), as plain maps. */
+    public java.util.List<Map<String, Object>> historyPage(long sinceTs, int limit) {
+        java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+        if (historyStore == null) return out;
+        for (RunHistory.Record r : historyStore.loadPage(sinceTs, limit)) out.add(RunHistory.asMap(r));
+        return out;
+    }
+
     public Map<String, Object> snapshot() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("uptime_ms", Instant.now().toEpochMilli() - start.toEpochMilli());
@@ -159,7 +198,24 @@ public class Metrics {
         lat.put("count", n);
         lat.put("avg_ms", n == 0 ? 0 : runLatencyTotalMs.get() / n);
         lat.put("max_ms", runLatencyMaxMs.get());
+        long[] samples = latencySamplesSorted();
+        long p50 = percentile(samples, 0.50);
+        long p95 = percentile(samples, 0.95);
+        lat.put("p50_ms", p50);
+        lat.put("p95_ms", p95);
         out.put("run_latency", lat);
+
+        // Service-level signals for the readiness/SLO panel: success rate + tail latency.
+        long okRuns = c.getOrDefault("runs_ok", 0L);
+        long failedRuns = c.getOrDefault("runs_failed", 0L);
+        long totalRuns = okRuns + failedRuns;
+        double successRate = totalRuns == 0 ? 100.0 : Math.round(1000.0 * okRuns / totalRuns) / 10.0;
+        Map<String, Object> slo = new LinkedHashMap<>();
+        slo.put("runs", totalRuns);
+        slo.put("success_rate", successRate);
+        slo.put("p50_ms", p50);
+        slo.put("p95_ms", p95);
+        out.put("slo", slo);
 
         out.put("approx_output_tokens", approxOutputChars.get() / 4); // ~4 chars/token, approximate
 

@@ -489,6 +489,31 @@ public class AgentController {
                 .body(sb.toString());
     }
 
+    /**
+     * The FULL persisted run history as newline-delimited JSON, paginated: up to {@code limit} runs
+     * (oldest-first) with {@code ts >= since}. Page forward by passing the last line's {@code ts} as the
+     * next {@code since}. Reaches the entire run_history table, not just the in-memory tail. Admin only.
+     */
+    @GetMapping(value = "/admin/runs/history.ndjson", produces = "application/x-ndjson")
+    public ResponseEntity<String> adminRunHistoryNdjson(
+            @RequestParam(name = "since", defaultValue = "0") long since,
+            @RequestParam(name = "limit", defaultValue = "1000") int limit) {
+        requireAdmin();
+        int cap = Math.max(1, Math.min(10000, limit));
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> run : metrics.historyPage(since, cap)) {
+            try {
+                sb.append(mapper.writeValueAsString(run)).append('\n');
+            } catch (Exception e) {
+                // skip an unserializable row rather than failing the export
+            }
+        }
+        return ResponseEntity.ok()
+                .header("Content-Type", "application/x-ndjson")
+                .header("Content-Disposition", "attachment; filename=\"imini-run-history.ndjson\"")
+                .body(sb.toString());
+    }
+
     /** Recent runs for one session (newest first): endpoint, mode, latency, outcome. Session read access. */
     @GetMapping("/session/runs")
     public List<Map<String, Object>> sessionRuns(
