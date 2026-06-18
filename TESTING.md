@@ -2796,3 +2796,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `src/main/java/com/example/imini/PermissionGate.java` no longer exists (superseded by
   `PermissionService`); `grep -rn PermissionGate src` returns nothing; the project compiles (100 main
   classes) and all tests pass.
+
+---
+
+# Unified context timeline, live-fold test, trace filter
+
+## 315. Compaction trace event (CompactionTraceTest)
+
+- **Run:** `./mvnw -Dtest=CompactionTraceTest test`.
+- **Observe:** when history grows past the threshold, `compactIfNeeded` emits a
+  `[compact:<label>] folded N older messages (~T tokens) into the memory note, kept R recent` event to the
+  run sink (and increments `context_compact`); under threshold it emits nothing.
+
+## 316. Live fold over real HTTP (ContextFoldLiveTest)
+
+- **Run:** `./mvnw -Dtest=ContextFoldLiveTest test` (starts an in-process OpenAI-compatible stub server;
+  no external model needed).
+- **Observe:** a ~100KB input is folded by a real `LlamaClient` calling the stub over HTTP -- the digest
+  starts `[folded summary`, contains the model's text, and the summary endpoint is hit once per chunk.
+  This exercises real JSON request/response handling, unlike the fake-model unit tests.
+
+## 317. Context-timeline metrics summary (manual)
+
+- **Observe:** `GET /metrics` includes a `context` object `{folds, fold_fallbacks, compactions, trims}`;
+  the same counters appear at `GET /metrics/prom` as `imini_counter{counter="context_fold"}`,
+  `"context_compact"`, `"context_trim"`, `"context_fold_fallback"`.
+
+## 318. Trace filter in the UI (manual)
+
+- **Observe:** the "trace:" filter bar above the conversation has checkboxes for tools / guards / plan /
+  fold / compact / other. Unchecking a category hides those activity-trace lines (live and for new lines);
+  re-checking shows them. Fold and compact lines are highlighted.
+
+## 319. Surefire runs the renamed integration test (CI)
+
+- **Observe:** `ContextFoldConfigTest` (renamed from `ContextFoldConfigIT`) now matches Surefire's default
+  `*Test` pattern, so `./mvnw test` actually executes it in CI (the `*IT` name was silently skipped).

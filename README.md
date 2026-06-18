@@ -320,6 +320,23 @@ bundled Grafana dashboard. When a fold happens during a run, a trace event
 the web UI's activity trace (highlighted) and in the streamed CLI output, so you can see exactly when and
 how much context was compressed.
 
+### The context timeline
+
+Folding is one of three context-management actions imini takes during a run; together they form a
+**context timeline** you can watch live:
+
+- **fold** -- a single oversized tool result or `@file` is summarized (`[fold:<label>]`).
+- **compact** -- older history is folded into the durable `[MEMORY]` note when the conversation grows past
+  `agent.compact-token-threshold` (`[compact:<label>]`).
+- **trim** -- a last-resort per-call budget fit truncates/drops messages so a prompt never exceeds the
+  window (counted in metrics; logged as `[token-budget]`).
+
+The fold and compact events stream into the web UI activity trace (highlighted) and the run log. A
+**trace filter** above the conversation lets you show/hide event categories (tools, guards, plan, fold,
+compact, other) so you can isolate just the context timeline -- or hide it. A numeric summary is exposed at
+`GET /metrics` under `context` (`{folds, fold_fallbacks, compactions, trims}`) and as
+`imini_counter{counter="context_fold"|"context_compact"|"context_trim"|...}` at `GET /metrics/prom`.
+
 ## Common helper scripts
 
 Every script ships in two forms: `*.bat` for native Windows, and `*.sh` for macOS/Linux/WSL (and Git Bash).

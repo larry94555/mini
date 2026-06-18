@@ -21,7 +21,7 @@ class ContextFoldTest {
     static class FakeLlama extends LlamaClient {
         int calls = 0;
         boolean fail = false;
-        FakeLlama() { super(null); }
+        FakeLlama() { super(null, null); }
 
         @Override public int countTokens(String t) { return t == null ? 0 : t.length() / 4; }
 

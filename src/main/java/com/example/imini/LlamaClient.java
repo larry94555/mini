@@ -67,11 +67,13 @@ public class LlamaClient {
     private long retryBackoffMs;
 
     private final TokenBudgetService budget;
+    private final Metrics metrics;   // optional; null in unit tests
     private volatile int serverCtxCache = 0; // 0 = unknown / not yet fetched
     private volatile int serverVisionCache = 0; // 0 unknown, 1 yes, -1 no
 
-    public LlamaClient(TokenBudgetService budget) {
+    public LlamaClient(TokenBudgetService budget, Metrics metrics) {
         this.budget = budget;
+        this.metrics = metrics;
     }
 
     private String base() { return "http://" + clientHost + ":" + port; }
@@ -149,6 +151,7 @@ public class LlamaClient {
         int measured = real >= 0 ? real : TokenBudget.estimateMessages(messages);
         if (measured <= cap) return messages;
         TokenBudget.Fitted fitted = TokenBudget.fit(messages, cap, TokenBudget::estimate);
+        if (metrics != null && fitted.changed()) metrics.inc("context_trim");
         log.warn("[token-budget] prompt ~" + measured + " tok > cap " + cap
                 + " (budget " + budget.budget() + ", server n_ctx " + serverContext()
                 + "); trimmed " + fitted.truncated() + " message(s), dropped " + fitted.dropped()

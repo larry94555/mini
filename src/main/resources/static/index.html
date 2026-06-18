@@ -49,6 +49,11 @@
   .activity div::before { content:"\2039 "; color:var(--accent); }
   .activity div.fold { color:var(--accent); opacity:1; font-weight:600; }
   .activity div.fold::before { content:"\229F "; }
+  .activity div.compact { color:var(--accent); opacity:1; font-weight:600; }
+  .activity div.compact::before { content:"\229E "; }
+  .tracebar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:11px; margin-bottom:6px; }
+  .tracebar label { display:inline-flex; gap:3px; align-items:center; cursor:pointer; }
+  .tracebar input { margin:0; }
   ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
   .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
@@ -100,6 +105,15 @@
 
 <div class="layout">
   <div class="chat card">
+    <div id="traceFilter" class="tracebar muted" title="Show/hide context-timeline and other trace events">
+      <span>trace:</span>
+      <label><input type="checkbox" data-cat="tool" checked> tools</label>
+      <label><input type="checkbox" data-cat="guard" checked> guards</label>
+      <label><input type="checkbox" data-cat="plan" checked> plan</label>
+      <label><input type="checkbox" data-cat="fold" checked> fold</label>
+      <label><input type="checkbox" data-cat="compact" checked> compact</label>
+      <label><input type="checkbox" data-cat="other" checked> other</label>
+    </div>
     <div id="messages"></div>
     <div id="approval" class="card" style="display:none;border-color:var(--warn);margin-top:8px">
       <h3 style="color:var(--warn)">Approval needed</h3>
@@ -359,9 +373,26 @@ function addTurn(){
   return { body: wrap.querySelector(".body"), activity: wrap.querySelector(".activity"),
            plan: wrap.querySelector(".plan") };
 }
+const TRACE_HIDDEN = new Set();
+function categoryOf(line){
+  if (line.indexOf("[fold:") === 0) return "fold";
+  if (line.indexOf("[compact:") === 0) return "compact";
+  if (line.indexOf("[guard:") === 0 || line.indexOf("[deadline:") === 0 || line.indexOf("[interrupt") === 0) return "guard";
+  if (line.indexOf(":plan]") >= 0 || line.indexOf("[steer:") === 0) return "plan";
+  if (line.indexOf(":tool]") >= 0 || line.indexOf(":invalid]") >= 0 || line.indexOf("[hook:") === 0) return "tool";
+  return "other";
+}
+function applyTraceFilter(){
+  document.querySelectorAll('.activity div[data-cat]').forEach(d => {
+    d.style.display = TRACE_HIDDEN.has(d.dataset.cat) ? "none" : "";
+  });
+}
 function addActivity(turn, line){
   const d = document.createElement("div"); d.textContent = line;
-  if (line.indexOf("[fold:") === 0) d.className = "fold";
+  const cat = categoryOf(line);
+  d.dataset.cat = cat;
+  if (cat !== "other") d.classList.add(cat);
+  if (TRACE_HIDDEN.has(cat)) d.style.display = "none";
   turn.activity.appendChild(d);
   $("#messages").scrollTop = $("#messages").scrollHeight;
 }
@@ -1312,6 +1343,13 @@ async function refreshIdentity(){
 refreshSessions(); refreshTodos(); refreshCheckpoints(); refreshPlanHistory(); refreshSharing(); refreshSessionActivity(); refreshPreviews(); refreshMemoryFiles(); refreshBudget(); refreshSchedule(); refreshPlugins(); refreshAdmin(); refreshSessionMode();
 refreshIdentity();
 setInterval(refreshIdentity, 15000);
+
+document.querySelectorAll('#traceFilter input[type=checkbox]').forEach(cb => {
+  cb.onchange = () => {
+    if (cb.checked) TRACE_HIDDEN.delete(cb.dataset.cat); else TRACE_HIDDEN.add(cb.dataset.cat);
+    applyTraceFilter();
+  };
+});
 </script>
 </body>
 </html>
