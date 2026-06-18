@@ -3241,3 +3241,41 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `GET /healthz` response includes `llama.circuitBreaker` field (`closed`/`open`/`half_open`).
   Force-open it by stopping the llama-server; after `llama.circuit-breaker-threshold` failures the field
   changes to `open` and calls return immediately.
+
+---
+
+# Session expiry, streaming resilience, persistent rate limiting
+
+## 378. Session expiry predicate (SessionExpiryTest)
+
+- **Run:** `./mvnw -Dtest=SessionExpiryTest test`.
+- **Observe:** `SessionStore.isExpired` is true only when idle beyond the TTL; ttl <= 0 disables expiry.
+
+## 379. Session pruning + summary (SessionPersistencePruneTest)
+
+- **Run:** `./mvnw -Dtest=SessionPersistencePruneTest test` (real SQLite; self-skips otherwise).
+- **Observe:** a 10-day-old session is pruned at a 7-day TTL while a fresh one is kept; `summary` reports the
+  remaining total.
+
+## 380. Rate limiter (RateLimiterTest)
+
+- **Run:** `./mvnw -Dtest=RateLimiterTest test`.
+- **Observe:** `step` increments within a window and resets on a new one; `allow` permits up to the limit then
+  blocks until the window rolls; limit 0 disables; `pruneStale` removes elapsed windows.
+
+## 381. Session reaper + endpoints (manual)
+
+- **Observe:** set `agent.session-ttl-hours=168` (7 days); the reaper logs prune passes. `GET /sessions/summary`
+  returns `{total, idleOverOneDay, idleOverOneWeek, oldestUpdatedAt, newestUpdatedAt, totalBytes, ttlHours}`;
+  `POST /sessions/prune` returns `{pruned, ttlHours}`.
+
+## 382. Persistent rate limit (manual)
+
+- **Observe:** with `auth.rate-limit-per-minute` set and `auth.rate-limit-persistent=true`, exceeding the
+  limit returns 429; restarting the server preserves the current window's count (rows in the `rate_limits`
+  table) rather than resetting it.
+
+## 383. Streaming connection retry (manual)
+
+- **Observe:** if the llama-server is briefly unavailable when a `/chat/stream` starts, the connection step
+  retries with backoff under the circuit breaker; once tokens are flowing a failure is surfaced (not retried).

@@ -268,7 +268,27 @@ public class LlamaClient {
                                           BooleanSupplier cancelled) throws Exception {
         messages = enforceBudget(messages);
         HttpRequest req = buildRequest(endpoint(), model, messages, tools, true);
-        HttpResponse<Stream<String>> resp = http.send(req, HttpResponse.BodyHandlers.ofLines());
+        // Establishing the stream is safe to retry (no tokens have been emitted yet); once the stream is
+        // flowing we do NOT retry, since the caller has already received partial output. The circuit
+        // breaker still guards this connect step.
+        if (breaker != null && !breaker.allowCall()) {
+            throw new CircuitBreaker.OpenException("[circuit:llama] open — llama-server unavailable");
+        }
+        HttpResponse<Stream<String>> resp;
+        try {
+            resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
+                HttpResponse<Stream<String>> r = http.send(req, HttpResponse.BodyHandlers.ofLines());
+                if (r.statusCode() / 100 == 5) {
+                    String b = r.body().collect(Collectors.joining("\n"));
+                    throw new java.io.IOException("llama-server " + r.statusCode() + ": " + b);
+                }
+                return r;
+            });
+            if (breaker != null) breaker.recordSuccess();
+        } catch (java.io.IOException e) {
+            if (breaker != null) breaker.recordFailure();
+            throw e;
+        }
         if (resp.statusCode() / 100 != 2) {
             String body = resp.body().collect(Collectors.joining("\n"));
             throw new RuntimeException("llama-server error " + resp.statusCode() + ": " + body);

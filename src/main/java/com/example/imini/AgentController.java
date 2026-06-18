@@ -74,6 +74,7 @@ public class AgentController {
     private final MemoryStore memory;
     private final ContextManager context;
     private final Database db;
+    private final SessionReaper reaper;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -85,7 +86,7 @@ public class AgentController {
                            TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
                            PluginService plugins, SessionSettings sessionSettings,
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
-                           Database db) {
+                           Database db, SessionReaper reaper) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -114,6 +115,7 @@ public class AgentController {
         this.memory = memory;
         this.context = context;
         this.db = db;
+        this.reaper = reaper;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -315,6 +317,23 @@ public class AgentController {
         return sessions.list().stream()
                 .filter(id -> Ownership.canRead(caller, sessions.owner(id), sessions.readers(id)))
                 .toList();
+    }
+
+    /** Age/size distribution of stored sessions, plus the configured TTL. Admin only. */
+    @GetMapping("/sessions/summary")
+    public Map<String, Object> sessionsSummary() {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>(sessions.summary(System.currentTimeMillis()));
+        out.put("ttlHours", reaper.ttlMs() / 3_600_000L);
+        return out;
+    }
+
+    /** Run a session-pruning pass immediately (respects the configured TTL). Returns how many were pruned. Admin only. */
+    @PostMapping("/sessions/prune")
+    public Map<String, Object> sessionsPrune() {
+        requireAdmin();
+        int pruned = reaper.reap();
+        return Map.of("pruned", pruned, "ttlHours", reaper.ttlMs() / 3_600_000L);
     }
 
     /** A single session's stored messages (for the UI to render prior history on switch). */
