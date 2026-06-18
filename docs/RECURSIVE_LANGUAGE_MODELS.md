@@ -139,6 +139,12 @@ to write code.
 
 ### How the fold would differ from imini's current behavior
 
+> **Now implemented.** As of the context-fold change, this bounded fold ships in imini:
+> `ContextManager.condenseToolResult` folds a single tool result larger than `agent.fold-threshold-chars`
+> by chunking it, summarizing each chunk with the cheap summary model, and recursing until the digest fits
+> (`agent.fold-*` settings; `agent.fold-enabled=false` restores the prior head+tail-only behavior). It
+> degrades to head+tail if the summary model is unavailable. The rest of this section describes the design.
+
 The narrow, concrete delta over what the code does today:
 
 - **Coverage of a single oversized input.** Today an over-budget single item (a huge `@file` or a tool

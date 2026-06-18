@@ -1,0 +1,22 @@
+name: Release Please
+
+# On pushes to main, maintain a "release PR" that bumps the pom.xml version and updates CHANGELOG.md from
+# Conventional Commits. Merging that PR tags vX.Y.Z and creates the GitHub Release -- which triggers
+# release.yml (attaches the jar + checksum) and docker-publish.yml (publishes the image).
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

@@ -52,11 +52,13 @@ jobs:
           sha256sum imini.jar > imini.jar.sha256
           cat imini.jar.sha256
 
-      - name: Publish GitHub Release
+      - name: Attach build artifacts to the release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            target/imini.jar
-            target/imini.jar.sha256
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          # release-please creates the GitHub Release when its PR merges and the tag is pushed; attach the
+          # jar + checksum to it. If the release does not exist yet (e.g. a manually pushed tag), create it.
+          gh release upload "$TAG" target/imini.jar target/imini.jar.sha256 --clobber \
+            || gh release create "$TAG" target/imini.jar target/imini.jar.sha256 --generate-notes --title "$TAG"

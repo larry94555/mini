@@ -50,7 +50,8 @@ jobs:
       security-events: write   # upload SARIF to code scanning
     steps:
       - uses: actions/checkout@v4
-      - name: Trivy filesystem scan (dependencies)
+      # 1) Report HIGH+CRITICAL into the Security tab (non-blocking, full visibility).
+      - name: Trivy scan -> SARIF (report)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -58,8 +59,21 @@ jobs:
           severity: HIGH,CRITICAL
           format: sarif
           output: trivy-results.sarif
-          exit-code: "0"   # report-only; do not fail the build on findings
+          exit-code: "0"
       - name: Upload results to GitHub code scanning
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
+
+      # 2) Gate: FAIL the build on a fixable CRITICAL. ignore-unfixed avoids blocking on CVEs with no
+      #    upstream fix yet; document intentional exceptions in .trivyignore.
+      - name: Trivy gate (fail on fixable CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          format: table
+          exit-code: "1"

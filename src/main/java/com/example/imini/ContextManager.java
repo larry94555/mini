@@ -38,19 +38,115 @@ public class ContextManager {
     @Value("${agent.max-tool-result-chars:4000}")
     private int maxToolChars;
 
+    // --- RLM-style bounded context fold (chunk -> summarize -> reduce -> recurse) ---
+    // For inputs that VASTLY exceed the window, head+tail truncation loses the middle entirely. The fold
+    // instead summarizes every chunk with the cheap summary model so all of it is read at least once
+    // (lossy by COMPRESSION, not by DELETION). Off => prior head+tail behavior. See
+    // docs/RECURSIVE_LANGUAGE_MODELS.md.
+    @Value("${agent.fold-enabled:true}")
+    private boolean foldEnabled;
+    @Value("${agent.fold-threshold-chars:24000}")
+    private int foldThresholdChars;   // only fold inputs larger than this (else cheap head+tail)
+    @Value("${agent.fold-chunk-chars:8000}")
+    private int foldChunkChars;       // size of each chunk fed to the summary model
+    @Value("${agent.fold-target-chars:4000}")
+    private int foldTargetChars;      // stop folding once the digest is at or below this
+    @Value("${agent.fold-max-depth:2}")
+    private int foldMaxDepth;         // recursion cap so the reduce always terminates
+
     public ContextManager(LlamaClient llama) {
         this.llama = llama;
     }
 
-    /** Trim an oversized tool result to head + tail before it enters the conversation. */
+    /**
+     * Trim an oversized tool result before it enters the conversation.
+     *
+     * <p>For moderately large results this is a cheap head+tail trim (the middle is dropped). For inputs
+     * that vastly exceed the window ({@code > agent.fold-threshold-chars}, when folding is enabled), it
+     * instead performs a bounded RLM-style fold: chunk the input, summarize each chunk with the cheap
+     * summary model, concatenate, and recurse until the digest fits. That keeps coverage of the whole
+     * input (every region is read once) at the cost of resolution. If the fold fails for any reason, it
+     * degrades gracefully to the head+tail trim.
+     */
     public String condenseToolResult(String result) {
         if (result == null || result.length() <= maxToolChars) return result;
-        int head = (int) (maxToolChars * 0.7);
-        int tail = maxToolChars - head;
+        if (foldEnabled && result.length() > foldThresholdChars) {
+            try {
+                return foldOversized(result, 0);
+            } catch (Exception e) {
+                log.warn("[fold] failed (" + e.getMessage() + "); falling back to head+tail trim");
+            }
+        }
+        return headTail(result, maxToolChars);
+    }
+
+    /** Cheap, LM-free condense: keep the head and tail, drop the middle with a marker. */
+    private String headTail(String result, int budgetChars) {
+        if (result == null || result.length() <= budgetChars) return result;
+        int head = (int) (budgetChars * 0.7);
+        int tail = budgetChars - head;
         int omitted = result.length() - head - tail;
         return result.substring(0, head)
                 + "\n...[" + omitted + " chars of tool output trimmed to save context]...\n"
                 + result.substring(result.length() - tail);
+    }
+
+    /**
+     * Bounded fold: chunk -> summarize each chunk with the summary model -> concatenate -> recurse if the
+     * digest is still too big (up to {@code foldMaxDepth}). Returns a digest no larger than
+     * {@code foldTargetChars} (a final head+tail trim guarantees the bound even if the model overruns).
+     */
+    private String foldOversized(String text, int depth) throws Exception {
+        if (text.length() <= foldTargetChars) return text;
+        if (depth >= foldMaxDepth) return headTail(text, foldTargetChars);
+
+        List<String> chunks = chunkBy(text, foldChunkChars > 0 ? foldChunkChars : 8000);
+        int perChunkTarget = Math.max(200, foldTargetChars / Math.max(1, chunks.size()));
+        StringBuilder reduced = new StringBuilder();
+        for (int i = 0; i < chunks.size(); i++) {
+            reduced.append(summarizeChunk(chunks.get(i), i + 1, chunks.size(), perChunkTarget)).append('\n');
+        }
+        String out = reduced.toString().trim();
+        log.info("\n[fold] depth " + depth + ": " + text.length() + " chars -> "
+                + chunks.size() + " chunks -> " + out.length() + " chars");
+
+        if (out.length() > foldTargetChars && depth + 1 < foldMaxDepth) {
+            out = foldOversized(out, depth + 1);
+        }
+        String body = out.length() > foldTargetChars ? headTail(out, foldTargetChars) : out;
+        if (depth == 0) {
+            return "[folded summary of a large tool result (" + text.length()
+                    + " chars condensed; detail reduced)]\n" + body;
+        }
+        return body;
+    }
+
+    /** Summarize one chunk with the cheap summary model, asking it to preserve concrete facts. */
+    private String summarizeChunk(String chunk, int idx, int total, int targetChars) throws Exception {
+        List<Map<String, Object>> req = new ArrayList<>();
+        req.add(role("system",
+                "You compress one slice of a large tool result for an AI agent. Preserve concrete facts, "
+                        + "names, numbers, code identifiers, and error messages; drop boilerplate and "
+                        + "repetition. Be terse -- aim for about " + targetChars + " characters. Output only "
+                        + "the compressed text, no preamble."));
+        req.add(role("user", "SLICE " + idx + " of " + total + ":\n" + chunk));
+        Map<String, Object> resp = llama.summaryChat(req);
+        Object c = resp == null ? null : resp.get("content");
+        String s = c == null ? "" : String.valueOf(c).trim();
+        // If the model returns nothing usable, fall back to a head+tail trim of this chunk so we never
+        // silently drop a whole region.
+        return s.isBlank() ? headTail(chunk, targetChars) : s;
+    }
+
+    /** Pure helper: split {@code text} into consecutive chunks of at most {@code size} characters. */
+    static List<String> chunkBy(String text, int size) {
+        List<String> out = new ArrayList<>();
+        if (text == null || text.isEmpty()) return out;
+        int n = Math.max(1, size);
+        for (int i = 0; i < text.length(); i += n) {
+            out.add(text.substring(i, Math.min(text.length(), i + n)));
+        }
+        return out;
     }
 
     public List<Map<String, Object>> compactIfNeeded(List<Map<String, Object>> messages,

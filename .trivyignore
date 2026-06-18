@@ -1,0 +1,4 @@
+# Trivy ignore file. List CVE IDs (one per line) to suppress in the CRITICAL gate, with a comment
+# explaining why (e.g. not exploitable in this context, or accepted risk). Keep this list short and
+# reviewed. Example:
+#   CVE-2024-12345  # not reachable: the vulnerable codec is never invoked by imini
