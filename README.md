@@ -159,6 +159,9 @@ No cloud API key is required.
 | `docker-compose.yml` | One-command local app + llama server setup |
 | `.github/workflows/ci.yml` | CI: unit tests (via `./mvnw`) and Docker build |
 | `.github/workflows/smoke.yml` | CI: cross-platform build + boot smoke test (Linux + macOS + Windows) |
+| `.github/workflows/release.yml` | On a `v*` tag: build the jar, checksum it, publish a GitHub Release |
+| `.github/workflows/supply-chain.yml` | SBOM (CycloneDX) + dependency vulnerability scan (Trivy -> Security tab) |
+| `.github/dependabot.yml` | Weekly dependency-update PRs (Maven, GitHub Actions, Docker) |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
 | `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
@@ -254,6 +257,29 @@ the bit), fix them all in one shot, then commit:
 ```sh
 sh scripts/git-mark-exec.sh        # runs the git update-index --chmod=+x for every script
 ```
+
+## Releases, dependency updates, and supply chain
+
+**Cutting a release.** Set the version in `pom.xml`, then push a matching tag:
+
+```sh
+./mvnw -q versions:set -DnewVersion=0.3.0    # or edit <version> in pom.xml
+git commit -am "Release 0.3.0" && git tag v0.3.0 && git push --tags
+```
+
+The `release.yml` workflow verifies the tag matches the pom version, builds `target/imini.jar`, attaches it
+and its `.sha256` to an auto-generated **GitHub Release**. (`docker-publish.yml` publishes the container
+image for the same tag.) `workflow_dispatch` runs a build-only dry run without publishing.
+
+**Dependency updates.** `.github/dependabot.yml` opens weekly PRs for Maven dependencies, the GitHub
+Actions used by the workflows, and the Dockerfile base image. (Renovate is an equivalent alternative;
+Dependabot is used here because it is built into GitHub.) When Dependabot bumps the pinned Maven version,
+re-pin the wrapper checksum with `sh scripts/pin-maven-checksum.sh`.
+
+**SBOM + vulnerability scan.** `supply-chain.yml` runs on pushes, PRs, and weekly: it generates a
+**CycloneDX SBOM** (uploaded as a build artifact) and runs a **Trivy** dependency scan whose results appear
+in the repository's **Security -> Code scanning** tab. The scan is report-only (it does not fail the build)
+so a newly disclosed CVE is surfaced without blocking unrelated work.
 
 ## Common helper scripts
 

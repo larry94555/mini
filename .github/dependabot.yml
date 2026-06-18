@@ -1,0 +1,23 @@
+# Automated dependency-update PRs. Covers Maven deps (pom.xml), the GitHub Actions used by the workflows,
+# and the base image in the Dockerfile. (Renovate is a popular alternative; either tool fits -- this repo
+# uses Dependabot because it is built into GitHub and needs no extra service.)
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [ "dependencies", "java" ]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [ "dependencies", "ci" ]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [ "dependencies", "docker" ]

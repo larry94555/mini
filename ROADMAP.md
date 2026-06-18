@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Release workflow + Dependabot + SBOM/supply-chain scan: a `v*` tag now builds the jar, checksums it, and
+  publishes a GitHub Release (`release.yml`, with a tag-vs-pom version guard); `.github/dependabot.yml`
+  opens weekly update PRs for Maven, GitHub Actions, and Docker; and `supply-chain.yml` generates a
+  CycloneDX SBOM (Syft) and runs a Trivy dependency scan that reports into the Security tab. No app logic
+  changed.
 - Hard-fail hygiene guard + verified checksum pin + CI Maven cache: the script-hygiene check in CI is now a
   hard failure (not advisory); the wrapper downloads the official Apache Maven `.tar.gz` and verifies it
   against the pinned official SHA-512 (`scripts/pin-maven-checksum.sh` re-pins after a bump;
