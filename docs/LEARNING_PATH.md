@@ -327,3 +327,8 @@ You have completed this learning path when you can explain:
 - why codebase navigation tools matter,
 - how prompt-injection fencing works,
 - and what would be required to make this production-grade.
+
+For that last point in depth — the popular harness topics imini omits on purpose (Recursive Language
+Models, meta-harnesses, a genuinely sandboxed code-execution tool, distributed state, real auth, and
+more) — read [`WHATS_NOT_INCLUDED.md`](WHATS_NOT_INCLUDED.md), with a focused deep dive in
+[`RECURSIVE_LANGUAGE_MODELS.md`](RECURSIVE_LANGUAGE_MODELS.md).

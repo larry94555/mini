@@ -21,6 +21,8 @@ No cloud API key is required.
 - Guided 90-minute workshop (labs + test checkpoints): [`docs/WORKSHOP.md`](docs/WORKSHOP.md)
 - End-to-end edit trace: [`docs/TRACE_EDIT.md`](docs/TRACE_EDIT.md)
 - Claude Code concept map: [`docs/CONCEPT_MAP.md`](docs/CONCEPT_MAP.md)
+- What imini deliberately leaves out (and where you'd go next): [`docs/WHATS_NOT_INCLUDED.md`](docs/WHATS_NOT_INCLUDED.md)
+- Recursive Language Models — concept note (why imini doesn't use them, when they fit): [`docs/RECURSIVE_LANGUAGE_MODELS.md`](docs/RECURSIVE_LANGUAGE_MODELS.md)
 - Feature tests and manual scenarios: [`TESTING.md`](TESTING.md)
 - Future work: [`ROADMAP.md`](ROADMAP.md)
 
@@ -1467,6 +1469,8 @@ Newcomers should start with **[`GettingStarted.md`](GettingStarted.md)**, which 
 4. Work through `docs/LEARNING_PATH.md` (14 modules) — or run `docs/WORKSHOP.md` as a guided ~90-minute
    session with labs and `mvn test` checkpoints.
 5. Read `docs/TRACE_EDIT.md`, run `mvn test`, then read `docs/CONCEPT_MAP.md`.
+6. Understand the boundaries: `docs/WHATS_NOT_INCLUDED.md` (popular harness topics imini omits on
+   purpose, including Recursive Language Models, meta-harnesses, and a real code sandbox).
 
 ## Current best next engineering step
 

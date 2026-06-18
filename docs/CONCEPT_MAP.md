@@ -107,3 +107,17 @@ This map connects common Claude Code-style harness concepts to the files in `imi
 ## How to use this map
 
 When studying the repo, start with the concept you care about and read the matching file. Then run the related test if one exists. The goal is to understand the harness layer one piece at a time instead of treating the agent as a black box.
+
+
+## Concepts deliberately not demonstrated
+
+Some popular harness ideas are intentionally out of scope for a small learning project. These are not
+mapped to files because imini does not implement them; they are catalogued, with the reasoning and what
+adding them would involve, in [`WHATS_NOT_INCLUDED.md`](WHATS_NOT_INCLUDED.md).
+
+| Concept | Why it's not here | Where to read more |
+|---|---|---|
+| Recursive Language Models (RLM) | Needs a code sandbox + a strong model; heavier than imini's token-budget need | [`RECURSIVE_LANGUAGE_MODELS.md`](RECURSIVE_LANGUAGE_MODELS.md) |
+| Genuinely sandboxed code execution | "pattern sandbox != syscall" — real isolation is its own systems project | [`WHATS_NOT_INCLUDED.md`](WHATS_NOT_INCLUDED.md) |
+| Meta-harnesses (multi-agent orchestration) | imini shows one delegation example (`SubAgent`), not a full orchestrator | [`WHATS_NOT_INCLUDED.md`](WHATS_NOT_INCLUDED.md) |
+| Distributed state, real auth, vector RAG, agent evals, model routing, ... | Out of scope for a single-node teaching harness | [`WHATS_NOT_INCLUDED.md`](WHATS_NOT_INCLUDED.md) |

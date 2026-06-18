@@ -194,6 +194,13 @@ well beyond a teaching-grade Claude Code clone, e.g.:
 Recommendation: call the project complete. These ideas are listed only for completeness; none is
 needed to finish the educational story, which is now closed end to end.
 
+
+For a fuller catalogue of popular harness topics imini omits on purpose (and what adding each
+would involve) — Recursive Language Models, meta-harnesses, a genuinely sandboxed code-execution
+tool, distributed state, real auth, semantic retrieval, agent evals, and more — see
+[`docs/WHATS_NOT_INCLUDED.md`](docs/WHATS_NOT_INCLUDED.md), with a deep dive on RLM in
+[`docs/RECURSIVE_LANGUAGE_MODELS.md`](docs/RECURSIVE_LANGUAGE_MODELS.md).
+
 ## 3. Guidance for AI implementers
 
 When asked to pick the next task, follow this priority order:
