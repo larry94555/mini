@@ -69,13 +69,14 @@ public class AgentLoop {
     private final SkillService skills;
     private final AgentRegistry agents;
     private final MemoryStore memory;
+    private final ContextManager context;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, InitService init, ContextRefService refs, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
                      PlanHistory history, SkillService skills, AgentRegistry agents, VisionSupport vision,
-                     MemoryStore memory) {
+                     MemoryStore memory, ContextManager context) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -94,6 +95,7 @@ public class AgentLoop {
         this.agents = agents;
         this.vision = vision;
         this.memory = memory;
+        this.context = context;
     }
 
     private String systemPrompt() {
@@ -243,7 +245,8 @@ public class AgentLoop {
         AgentResult result = engine.converse(history, registry.tools(), mode, "main", sessionId, sink);
         sessions.save(sessionId, result.messages());
         // write the session's current memory note back to durable storage so it carries to future sessions
-        memory.save(sessions.owner(sessionId), ContextManager.extractMemoryNote(result.messages()));
+        String durableNote = ContextManager.extractMemoryNote(result.messages());
+        memory.save(sessions.owner(sessionId), context.consolidateMemoryIfNeeded(durableNote));
         return withEditTrust(sessionId, result.answer(), mode, sink);
     }
 

@@ -58,6 +58,8 @@
   #preflight .warn { color:var(--warn); } #preflight .bad { color:var(--bad); }
   .pinchip { display:inline-flex; gap:4px; align-items:center; font-size:10.5px; border:1px solid var(--line); border-radius:999px; padding:1px 7px; margin:2px 3px 2px 0; }
   .pinchip a { cursor:pointer; color:var(--bad); }
+  .candchip { display:inline-flex; gap:4px; align-items:center; font-size:10.5px; border:1px dashed var(--line); border-radius:999px; padding:1px 7px; margin:2px 3px 2px 0; }
+  .candchip a { cursor:pointer; color:var(--accent); }
   #preflight a.planlink { color:var(--accent); cursor:pointer; text-decoration:underline; }
   ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
@@ -295,6 +297,10 @@
         <div id="durableMemMeta" class="muted" style="font-size:10.5px;margin:2px 0"></div>
         <textarea id="durableMemNote" placeholder="auto memory note (editable) — facts the agent learned" style="width:100%;height:70px;font-size:11px"></textarea>
         <div class="row" style="margin-top:3px"><button id="saveDurableMem" style="font-size:11px">Save note</button></div>
+        <div id="pinSuggestWrap" style="margin-top:6px;display:none">
+          <b style="font-size:11px">Promote to pin</b> <span class="muted" style="font-size:10.5px">(facts from the auto note not yet pinned)</span>
+          <div id="pinCandidates" style="margin:2px 0"></div>
+        </div>
         <div style="margin-top:6px"><b style="font-size:11px">Pinned facts</b> <span class="muted" style="font-size:10.5px">(always kept; seed every session)</span></div>
         <div id="durablePins" style="margin:2px 0"></div>
         <div class="row"><input id="pinInput" placeholder="pin a fact (e.g. prefers metric units)" style="flex:1;font-size:11px"/><button id="addPin" style="font-size:11px">Pin</button></div>
@@ -1394,6 +1400,22 @@ function renderPins(pinned){
     refreshDurableMemory();
   });
 }
+function renderPinCandidates(note, pinned){
+  const wrap = document.getElementById("pinSuggestWrap");
+  const el = document.getElementById("pinCandidates");
+  if (!wrap || !el) return;
+  const pinnedSet = new Set((pinned||"").split("\n").map(x=>x.trim().toLowerCase()).filter(Boolean));
+  const cands = (note||"").split("\n").map(x=>x.trim()).filter(Boolean)
+    .filter(l => !pinnedSet.has(l.toLowerCase()));
+  if (!cands.length){ wrap.style.display = "none"; el.innerHTML = ""; return; }
+  wrap.style.display = "";
+  el.innerHTML = cands.map(l => '<span class="candchip">' + escapeHtml(l)
+    + ' <a title="pin this fact" data-cand="' + escapeHtml(l) + '">+pin</a></span>').join("");
+  el.querySelectorAll("a[data-cand]").forEach(a => a.onclick = async () => {
+    await post("/memory/durable/pin", {text: a.getAttribute("data-cand")});
+    refreshDurableMemory();
+  });
+}
 async function refreshDurableMemory(){
   const meta = document.getElementById("durableMemMeta");
   const ta = document.getElementById("durableMemNote");
@@ -1402,9 +1424,11 @@ async function refreshDurableMemory(){
     const j = await getJson("/memory/durable");
     if (!j){ meta.textContent = "(unavailable)"; return; }
     const when = j.updatedAt ? new Date(j.updatedAt).toLocaleString() : "";
-    meta.textContent = j.present ? ("updated " + when) : "(no durable memory yet \u2014 fills in after a session compacts; pin facts to keep them)";
+    const ws = j.workspace ? (" \u00b7 workspace " + j.workspace) : "";
+    meta.textContent = (j.present ? ("updated " + when) : "(no durable memory yet \u2014 fills in after a session compacts; pin facts to keep them)") + ws;
     if (document.activeElement !== ta) ta.value = j.note || "";
     renderPins(j.pinned);
+    renderPinCandidates(j.note, j.pinned);
   } catch(e){ meta.textContent = "(unavailable)"; }
 }
 {
