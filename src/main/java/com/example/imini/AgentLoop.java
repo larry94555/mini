@@ -228,8 +228,8 @@ public class AgentLoop {
         if (history == null) {
             history = new ArrayList<>();
             history.add(message("system", systemPrompt())); // project instructions captured at session start
-            // seed durable cross-session memory (facts learned in earlier sessions), if any
-            String durable = memory.get(sessions.owner(sessionId));
+            // seed durable cross-session memory (pinned facts + auto note, deduped), if any
+            String durable = memory.effective(sessions.owner(sessionId));
             if (durable != null && !durable.isBlank()) {
                 history.add(ContextManager.memoryMessageFor(durable));
             }

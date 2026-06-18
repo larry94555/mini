@@ -16,10 +16,18 @@ public final class RunHistory {
 
     /** One finished run: when, which endpoint/session, the resolved mode, duration, and outcome. */
     public record Record(long ts, String endpoint, String session, String mode, long ms, boolean ok,
-                         int folds, int compactions, int trims) {
+                         int folds, int compactions, int trims, List<String> events) {
+        public Record {
+            events = events == null ? List.of() : List.copyOf(events);
+        }
+        /** Record with context counts but no captured event lines. */
+        public Record(long ts, String endpoint, String session, String mode, long ms, boolean ok,
+                      int folds, int compactions, int trims) {
+            this(ts, endpoint, session, mode, ms, ok, folds, compactions, trims, List.of());
+        }
         /** Backward-compatible constructor for records without context counts. */
         public Record(long ts, String endpoint, String session, String mode, long ms, boolean ok) {
-            this(ts, endpoint, session, mode, ms, ok, 0, 0, 0);
+            this(ts, endpoint, session, mode, ms, ok, 0, 0, 0, List.of());
         }
     }
 
@@ -34,6 +42,7 @@ public final class RunHistory {
         m.put("folds", r.folds());
         m.put("compactions", r.compactions());
         m.put("trims", r.trims());
+        m.put("events", r.events());
         return m;
     }
 

@@ -340,6 +340,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Editable durable memory + persisted run timeline + preflight what-if: durable memory is now curatable --
+  hand-edit the auto note and pin facts (kept verbatim, never overwritten, deduped on seed) via the Project
+  memory card and `/memory/durable` (edit/pin/unpin). Each run now persists its actual context-event lines
+  (`[fold]`/`[compact]`/`[trim]`, new `run_history.events` column) so a past run can be expanded to show its
+  timeline, not just counts. The budget pre-flight gained a "use plan mode" what-if that switches to plan
+  mode when a prompt would be trimmed.
 - Per-run context report + durable cross-session memory + budget pre-flight: each run's folds/compactions/
   trims are attributed (thread-local tally in `Metrics`) and persisted with the run history (new
   `run_history` columns) and shown in the admin recent-runs list. A durable per-owner `[MEMORY]` note

@@ -56,17 +56,28 @@ public class Metrics {
     // attributes events to the current run. Sub-agent work on child threads is not attributed (it rolls
     // up only into the global counters). Index 0=folds, 1=compactions, 2=trims.
     private final ThreadLocal<long[]> runCtx = ThreadLocal.withInitial(() -> new long[3]);
+    private final ThreadLocal<java.util.List<String>> runEvents = ThreadLocal.withInitial(java.util.ArrayList::new);
+    private static final int MAX_RUN_EVENTS = 100; // cap so one pathological run can't grow unbounded
 
     private void noteCtx(int idx, String counter) {
         inc(counter);
         runCtx.get()[idx]++;
     }
+    /** Append a context-timeline event line for the current run (persisted with the run record). */
+    public void noteEvent(String line) {
+        if (line == null) return;
+        java.util.List<String> ev = runEvents.get();
+        if (ev.size() < MAX_RUN_EVENTS) ev.add(line);
+    }
     /** A context fold happened on the current run's thread. */
     public void noteFold() { noteCtx(0, "context_fold"); }
+    public void noteFold(String event) { noteFold(); noteEvent(event); }
     /** A history compaction happened on the current run's thread. */
     public void noteCompact() { noteCtx(1, "context_compact"); }
+    public void noteCompact(String event) { noteCompact(); noteEvent(event); }
     /** A budget trim happened on the current run's thread. */
     public void noteTrim() { noteCtx(2, "context_trim"); }
+    public void noteTrim(String event) { noteTrim(); noteEvent(event); }
 
     public void incTool(String name) {
         inc("tool_calls");
@@ -93,9 +104,11 @@ public class Metrics {
         recordRun(ms, ok);
         if (endpoint != null) byEndpoint.computeIfAbsent(endpoint, k -> new LongAdder()).increment();
         long[] ctx = runCtx.get();
-        runCtx.remove(); // reset for the next run on this (possibly pooled) thread
+        java.util.List<String> events = runEvents.get();
+        runCtx.remove();    // reset for the next run on this (possibly pooled) thread
+        runEvents.remove();
         RunHistory.Record r = new RunHistory.Record(System.currentTimeMillis(), endpoint, session, mode, ms, ok,
-                (int) ctx[0], (int) ctx[1], (int) ctx[2]);
+                (int) ctx[0], (int) ctx[1], (int) ctx[2], new java.util.ArrayList<>(events));
         history.add(r);
         if (historyStore != null) historyStore.append(r); // durable across restarts
     }

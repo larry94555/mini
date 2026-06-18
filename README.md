@@ -340,19 +340,23 @@ compact, other) so you can isolate just the context timeline -- or hide it. A nu
 
 **Per-run context report.** Each run's folds, compactions, and trims are attributed to that run and shown
 in the admin overview's *recent runs* list (e.g. `2 folds, 1 compact`), and persisted with the run history
-(`GET /admin/runs`, `GET /session/runs`) so you can open a past run and see how its context was managed.
+(`GET /admin/runs`, `GET /session/runs`) so you can open a past run and see how its context was managed -- expand a run in the admin *recent runs* list to see the actual `[fold]`/`[compact]`/`[trim]` event lines from that run, not just the counts.
 
 **Durable cross-session memory.** A session's `[MEMORY]` note already survives a restart (it is part of the
 saved conversation). Now it also carries across *different* sessions: after a run compacts, the note is
-written to a durable per-owner store, and a brand-new session is seeded from it. View or clear it in the
-*Project memory* card, or via `GET /memory/durable` and `POST /memory/durable/clear` (admin). Durable memory
-is workspace-local; it is not shared between users.
+written to a durable per-owner store, and a brand-new session is seeded from it. The *Project memory* card lets you **curate** it: hand-edit the auto note, and **pin** facts that always seed
+every new session and are never overwritten by compaction. Pinned facts plus the auto note are de-duplicated
+when a session is seeded. Endpoints (admin): `GET /memory/durable`, `POST /memory/durable` (edit note),
+`POST /memory/durable/pin` / `unpin`, `POST /memory/durable/clear`. Durable memory is workspace-local; it is
+not shared between users.
 
 **Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
 the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is
 backed by `GET /budget/preflight?sessionId=&prompt=`, which returns the estimated tokens, the prompt cap,
 the server context window, and the `wouldCompact` / `wouldTrim` predictions, so you can split a too-large
-request (e.g. into plan mode) before sending it.
+request before sending it. When the estimate exceeds the window (`recommendPlanMode`), the readout shows a
+**use plan mode** link that switches the run to plan mode in one click -- plan mode breaks the request into
+steps that each fit, turning the prediction into a remedy.
 
 ## Common helper scripts
 

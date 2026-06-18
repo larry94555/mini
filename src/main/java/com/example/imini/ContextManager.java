@@ -92,7 +92,7 @@ public class ContextManager {
             try {
                 String folded = foldOversized(result, 0);
                 if (metrics != null) {
-                    metrics.noteFold();
+                    metrics.noteFold("[fold] condensed " + original + " -> " + folded.length() + " chars");
                     metrics.addModelOutput(0); // fold uses the summary model; runs counted there
                 }
                 log.info("\n[fold] condensed a " + original + "-char input to "
@@ -198,7 +198,8 @@ public class ContextManager {
         List<Map<String, Object>> toFold = messages.subList(bodyStart, keepFrom);
         String newMemory = updateMemory(oldMemory, toFold);
 
-        if (metrics != null) metrics.noteCompact();
+        if (metrics != null) metrics.noteCompact("[compact] folded " + toFold.size()
+                + " older messages (~" + tokens + " tokens) into memory, kept " + (n - keepFrom) + " recent");
         log.info("\n[compaction:" + label + "] ~" + tokens + " tokens -> folded "
                 + toFold.size() + " older messages into memory, kept " + (n - keepFrom) + " recent.");
         if (sink != null) {
