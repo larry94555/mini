@@ -80,36 +80,45 @@ public class AuthFilter implements Filter {
         HttpServletResponse res = (HttpServletResponse) response;
         String path = req.getRequestURI();
 
-        metrics.inc("requests");
-
-        if (!enabled || openPaths.contains(path)) {
-            chain.doFilter(request, response);
-            return;
-        }
-
-        String key = extractKey(req.getHeader(header), req.getHeader("Authorization"));
-        Principal principal = matchPrincipal(key);
-        if (principal == null) {
-            metrics.inc("auth_rejected");
-            deny(res, 401, "missing or invalid API key");
-            return;
-        }
-        if (!limiter.allow(principal.user(), System.currentTimeMillis())) {
-            metrics.inc("rate_limited");
-            deny(res, 429, "rate limit exceeded");
-            return;
-        }
-        if (!Rbac.allows(principal, path, adminPaths)) {
-            metrics.inc("auth_forbidden");
-            deny(res, 403, "'" + principal.role() + "' role may not access " + path + " (admin only)");
-            return;
-        }
-        metrics.incKey(principal.user());
-        RequestContext.set(principal);
+        // correlation fields for structured (JSON) logs: a short request id + the path, plus the user once known
+        String reqId = Long.toHexString(System.nanoTime());
+        org.slf4j.MDC.put("reqId", reqId);
+        org.slf4j.MDC.put("path", path == null ? "" : path);
         try {
-            chain.doFilter(request, response);
+            metrics.inc("requests");
+
+            if (!enabled || openPaths.contains(path)) {
+                chain.doFilter(request, response);
+                return;
+            }
+
+            String key = extractKey(req.getHeader(header), req.getHeader("Authorization"));
+            Principal principal = matchPrincipal(key);
+            if (principal == null) {
+                metrics.inc("auth_rejected");
+                deny(res, 401, "missing or invalid API key");
+                return;
+            }
+            if (!limiter.allow(principal.user(), System.currentTimeMillis())) {
+                metrics.inc("rate_limited");
+                deny(res, 429, "rate limit exceeded");
+                return;
+            }
+            if (!Rbac.allows(principal, path, adminPaths)) {
+                metrics.inc("auth_forbidden");
+                deny(res, 403, "'" + principal.role() + "' role may not access " + path + " (admin only)");
+                return;
+            }
+            metrics.incKey(principal.user());
+            org.slf4j.MDC.put("user", principal.user());
+            RequestContext.set(principal);
+            try {
+                chain.doFilter(request, response);
+            } finally {
+                RequestContext.clear();
+            }
         } finally {
-            RequestContext.clear();
+            org.slf4j.MDC.clear();
         }
     }
 

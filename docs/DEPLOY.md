@@ -53,3 +53,15 @@ HTTP-code probe above treats "serving but degraded" as ready, which is usually w
 - `GET /admin/runs.ndjson` (admin) streams recent runs as newline-delimited JSON (one run per line, with
   per-run fold/compact/trim counts and the event timeline) for piping into external log/trace tooling.
 - The admin card shows a health dot (green `ok` / amber `degraded` / red `down`) and a `runs.ndjson` download.
+
+## SLO signals
+
+`GET /metrics` (and the admin dashboard) report run **success rate** and **p50/p95 latency**. Prometheus gauges: `imini_run_success_rate`, `imini_run_latency_p50_ms`, `imini_run_latency_p95_ms` (plus the existing avg/max). Alert on success rate dropping or p95 rising.
+
+## Full run-history export
+
+`GET /admin/runs.ndjson` exports the recent in-memory tail; `GET /admin/runs/history.ndjson?since=<ts>&limit=<n>` exports the **full persisted** history (oldest-first) -- page forward by passing the last line's `ts` as the next `since`. Both are admin-only, `application/x-ndjson`.
+
+## Structured (JSON) logging
+
+Run with the `json` Spring profile (`--spring.profiles.active=json` or `SPRING_PROFILES_ACTIVE=json`) to emit one JSON object per log line via Logback's built-in `JsonEncoder` (no extra dependency). Each request adds MDC correlation fields `reqId`, `path`, and (when authenticated) `user`, so logs are correlatable in a log pipeline. The default profile keeps the human-readable console format.

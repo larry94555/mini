@@ -54,6 +54,11 @@ public final class PromFormat {
             number(sb, "run_latency_count", "Completed runs measured for latency", "gauge", lat.get("count"));
             number(sb, "run_latency_avg_ms", "Average run latency (ms)", "gauge", lat.get("avg_ms"));
             number(sb, "run_latency_max_ms", "Max run latency (ms)", "gauge", lat.get("max_ms"));
+            number(sb, "run_latency_p50_ms", "Median (p50) run latency (ms)", "gauge", lat.get("p50_ms"));
+            number(sb, "run_latency_p95_ms", "p95 run latency (ms)", "gauge", lat.get("p95_ms"));
+        }
+        if (snapshot.get("slo") instanceof Map<?, ?> slo) {
+            number(sb, "run_success_rate", "Run success rate (percent)", "gauge", slo.get("success_rate"));
         }
         if (snapshot.get("approx_output_tokens") instanceof Number tok) {
             gauge(sb, "approx_output_tokens", "Approximate model output tokens", tok.doubleValue(), "");

@@ -31,6 +31,11 @@ public final class RunHistory {
         }
     }
 
+    /** Public view of a record as a plain map (same shape as the dashboard rows) for NDJSON export. */
+    public static Map<String, Object> asMap(Record r) {
+        return toMap(r);
+    }
+
     private static Map<String, Object> toMap(Record r) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("ts", r.ts());
