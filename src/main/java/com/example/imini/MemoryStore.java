@@ -1,8 +1,10 @@
 package com.example.imini;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Durable, cross-session memory: one persistent {@code [MEMORY]} note per owner, stored in the
@@ -19,6 +21,7 @@ public class MemoryStore {
     private static volatile String WS_ID; // cached workspace id (hash of the working directory)
 
     private final Database db;
+    @Value("${agent.memory-inject-max:12}") private int injectMax; // max durable facts seeded per session
 
     public MemoryStore(Database db) {
         this.db = db;
@@ -68,12 +71,31 @@ public class MemoryStore {
     public String pinned(String owner) {
         if (!db.available()) return "";
         try {
-            List<String> rows = db.query("SELECT pinned FROM memory WHERE owner=?",
+            List<String> facts = db.query(
+                    "SELECT fact FROM memory_pins WHERE scope=? ORDER BY created_at, rowid",
                     rs -> rs.getString(1), key(owner));
-            String p = rows.isEmpty() ? null : rows.get(0);
-            return p == null ? "" : p;
+            return String.join("\n", facts);
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /** Pinned facts with provenance: {@code [{fact, source, createdAt}]}, oldest first. */
+    public java.util.List<Map<String, Object>> pinsDetailed(String owner) {
+        java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+        if (!db.available()) return out;
+        try {
+            return db.query(
+                    "SELECT fact, source, created_at FROM memory_pins WHERE scope=? ORDER BY created_at, rowid",
+                    rs -> {
+                        Map<String, Object> m = new java.util.LinkedHashMap<>();
+                        m.put("fact", rs.getString(1));
+                        m.put("source", rs.getString(2));
+                        m.put("createdAt", rs.getLong(3));
+                        return m;
+                    }, key(owner));
+        } catch (Exception e) {
+            return out;
         }
     }
 
@@ -122,36 +144,82 @@ public class MemoryStore {
         }
     }
 
-    /** Pin a fact (added to the curated set if not already present, case-insensitive). */
-    public void addPin(String owner, String fact) {
+    /** Pin a fact with provenance (no-op if already pinned, case-insensitive on the fact). */
+    public void addPin(String owner, String fact, String source) {
         if (!db.available() || fact == null || fact.isBlank()) return;
-        String merged = dedupeLines(pinned(owner) + "\n" + fact.strip());
-        setPinned(owner, merged);
+        String src = (source == null || source.isBlank()) ? "manual" : source.strip();
+        try {
+            db.update("INSERT OR IGNORE INTO memory_pins(scope, fact, source, created_at) VALUES(?,?,?,?)",
+                    key(owner), fact.strip(), src, System.currentTimeMillis());
+        } catch (Exception e) {
+            log.warn("[memory] pin failed: " + e.getMessage());
+        }
     }
 
     /** Remove a pinned fact (exact line match, case-insensitive). */
     public void removePin(String owner, String fact) {
         if (!db.available() || fact == null) return;
-        String target = fact.strip().toLowerCase(java.util.Locale.ROOT);
-        StringBuilder kept = new StringBuilder();
-        for (String line : pinned(owner).split("\n")) {
-            if (line.strip().toLowerCase(java.util.Locale.ROOT).equals(target)) continue;
-            if (!line.isBlank()) kept.append(line.strip()).append("\n");
+        try {
+            db.update("DELETE FROM memory_pins WHERE scope=? AND lower(fact)=lower(?)", key(owner), fact.strip());
+        } catch (Exception e) {
+            log.warn("[memory] unpin failed: " + e.getMessage());
         }
-        setPinned(owner, kept.toString().strip());
     }
 
-    /** Replace the whole pinned set (used by addPin/removePin and a direct edit). */
-    public void setPinned(String owner, String pinned) {
-        if (!db.available()) return;
-        try {
-            // ensure a row exists, then update pinned (note defaults to empty if new)
-            db.update("INSERT INTO memory(owner, note, updated_at, pinned) VALUES(?,?,?,?) "
-                            + "ON CONFLICT(owner) DO UPDATE SET pinned=excluded.pinned, updated_at=excluded.updated_at",
-                    key(owner), "", System.currentTimeMillis(), pinned == null ? "" : pinned);
-        } catch (Exception e) {
-            log.warn("[memory] pin failed: " + e.getMessage());
+    /** Merge in a list of pins with provenance (used by bundle import); existing pins are kept. */
+    public void importPins(String owner, java.util.List<Map<String, Object>> pins) {
+        if (!db.available() || pins == null) return;
+        for (Map<String, Object> p : pins) {
+            Object f = p.get("fact");
+            if (f == null || String.valueOf(f).isBlank()) continue;
+            Object src = p.get("source");
+            Object ts = p.get("createdAt");
+            long created = (ts instanceof Number) ? ((Number) ts).longValue() : System.currentTimeMillis();
+            try {
+                db.update("INSERT OR IGNORE INTO memory_pins(scope, fact, source, created_at) VALUES(?,?,?,?)",
+                        key(owner), String.valueOf(f).strip(),
+                        src == null ? "imported" : String.valueOf(src), created);
+            } catch (Exception e) {
+                log.warn("[memory] import pin failed: " + e.getMessage());
+            }
         }
+    }
+
+    /**
+     * The memory to seed into a new session, RELEVANCE-RANKED to a query: all pinned facts (always kept),
+     * plus the top auto-note facts scored by lexical overlap with the query, capped at
+     * {@code agent.memory-inject-max} total and de-duplicated. Reuses {@link RetrievalService}'s pure
+     * lexical scorer so it needs no embedding server. With a blank query (or no overlap) it keeps the
+     * first auto facts in note order.
+     */
+    public String relevantSeed(String owner, String query) {
+        java.util.List<String> pins = splitLines(pinned(owner));
+        java.util.Set<String> pinSet = new java.util.HashSet<>();
+        for (String p : pins) pinSet.add(p.toLowerCase(java.util.Locale.ROOT));
+
+        java.util.List<String> auto = new java.util.ArrayList<>();
+        for (String l : splitLines(get(owner))) {
+            if (!pinSet.contains(l.toLowerCase(java.util.Locale.ROOT))) auto.add(l);
+        }
+        java.util.List<String> qt = RetrievalService.tokenize(query == null ? "" : query);
+        if (!qt.isEmpty()) {
+            auto.sort((a, b) -> Double.compare(
+                    RetrievalService.lexicalScore(qt, b), RetrievalService.lexicalScore(qt, a)));
+        }
+        int room = Math.max(0, injectMax - pins.size());
+        java.util.List<String> combined = new java.util.ArrayList<>(pins);
+        combined.addAll(auto.subList(0, Math.min(room, auto.size())));
+        return dedupeLines(String.join("\n", combined));
+    }
+
+    private static java.util.List<String> splitLines(String text) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (text == null) return out;
+        for (String l : text.split("\n")) {
+            String s = l.strip();
+            if (!s.isEmpty()) out.add(s);
+        }
+        return out;
     }
 
     /** When the durable note for an owner was last updated (epoch ms), or 0 if none. */

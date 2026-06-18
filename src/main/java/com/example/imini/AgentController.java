@@ -861,6 +861,7 @@ public class AgentController {
         out.put("owner", owner);
         out.put("note", note == null ? "" : note);
         out.put("pinned", pinned == null ? "" : pinned);
+        out.put("pins", memory.pinsDetailed(owner)); // with provenance: fact/source/createdAt
         out.put("effective", memory.effective(owner));
         out.put("present", (note != null && !note.isBlank()) || (pinned != null && !pinned.isBlank()));
         out.put("updatedAt", memory.updatedAt(owner));
@@ -881,7 +882,8 @@ public class AgentController {
     @PostMapping("/memory/durable/pin")
     public Map<String, Object> pinDurableMemory(@RequestBody Map<String, String> body) {
         requireAdmin();
-        memory.addPin(currentUser(), body == null ? "" : body.getOrDefault("text", ""));
+        memory.addPin(currentUser(), body == null ? "" : body.getOrDefault("text", ""),
+                body == null ? "manual" : body.getOrDefault("source", "manual"));
         audit.record(currentUser(), "memory", "durable", "pinned");
         return durableMemory();
     }

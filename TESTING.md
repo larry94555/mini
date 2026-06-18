@@ -2929,3 +2929,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** run imini from two different working directories; durable memory (and pins) in one does not
   appear in the other. Within one workspace it persists across sessions and restarts.
+
+---
+
+# Relevance-ranked injection, memory provenance, bundle export/import
+
+## 334. Relevance ranking primitives (MemoryRankTest)
+
+- **Run:** `./mvnw -Dtest=MemoryRankTest test`.
+- **Observe:** `RetrievalService.lexicalScore`/`tokenize` rank a query-relevant fact above an unrelated one
+  and tokenize case-insensitively; a blank query yields no tokens. This is what `MemoryStore.relevantSeed`
+  uses to pick the top `agent.memory-inject-max` auto facts (pins always included).
+
+## 335. Relevance-ranked seeding (manual)
+
+- **Observe:** with several durable facts stored, start a new session whose first message concerns one topic;
+  only the relevant auto facts (plus all pins) are seeded, capped at `agent.memory-inject-max`. Lower the cap
+  in `application.properties` to see fewer facts injected.
+
+## 336. Pin provenance (manual)
+
+- **Observe:** pin a fact manually and via *promote to pin*; hover a pin chip to see "pinned from manual" vs
+  "pinned from auto note" with the date. `GET /memory/durable` returns `pins:[{fact,source,createdAt}]`.
+  Pins are stored in `memory_pins` (scope = owner@workspace).
+
+## 337. Export/import durable memory via the workspace bundle (manual)
+
+- **Observe:** *Export workspace* now includes a `memory:{note,pins:[...]}` section; importing the bundle on
+  another instance restores the note and pins (merged; existing pins kept). The bundle signature still covers
+  the plugin-pack digest -- memory rides alongside settings, so a tampered memory section is not rejected by
+  signature (documented). Import reports `memoryRestored` / `memoryPinsImported`.

@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Relevance-ranked memory injection + provenance + bundle export/import: a new session is seeded with the
+  most relevant durable facts (pins always; top auto facts by `RetrievalService` lexical score to the first
+  message, capped at `agent.memory-inject-max`) instead of the whole note. Pins moved to a `memory_pins`
+  table carrying provenance (source + timestamp), shown on the chips. Durable memory (note + pins) now rides
+  in the signed workspace bundle, so Export/Import workspace carries curated memory between machines.
 - Promote-to-pin + per-workspace memory + quality guard: the Project memory card now suggests unpinned
   auto-note facts as one-click "promote to pin" candidates. Durable memory is scoped per workspace + owner
   (keyed by a hash of the working directory via `MemoryStore.workspaceId()`), so different projects keep

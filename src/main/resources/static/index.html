@@ -293,7 +293,7 @@
         <b style="font-size:12px">Durable memory</b>
         <a class="linklike" id="refreshDurableMemLink" style="font-size:11px" title="Reload durable memory">refresh</a>
         <button id="clearDurableMem" style="font-size:11px;float:right" title="Clear the durable memory note (admin)">clear</button>
-        <div class="muted" style="font-size:11px;margin:2px 0">Facts carried across sessions and restarts; a new session is seeded from this, and it is updated after a run compacts.</div>
+        <div class="muted" style="font-size:11px;margin:2px 0">Facts carried across sessions and restarts; a new session is seeded with the most <i>relevant</i> facts (pins always included). Included in workspace Export/Import.</div>
         <div id="durableMemMeta" class="muted" style="font-size:10.5px;margin:2px 0"></div>
         <textarea id="durableMemNote" placeholder="auto memory note (editable) — facts the agent learned" style="width:100%;height:70px;font-size:11px"></textarea>
         <div class="row" style="margin-top:3px"><button id="saveDurableMem" style="font-size:11px">Save note</button></div>
@@ -1388,12 +1388,16 @@ document.querySelectorAll('#traceFilter input[type=checkbox]').forEach(cb => {
 });
 
 // ---- editable / curated durable cross-session memory ----
-function renderPins(pinned){
+function renderPins(pins){
   const el = document.getElementById("durablePins"); if (!el) return;
-  const lines = (pinned||"").split("\n").map(x=>x.trim()).filter(Boolean);
-  el.innerHTML = lines.length
-    ? lines.map(l => '<span class="pinchip">' + escapeHtml(l)
-        + ' <a title="unpin" data-pin="' + escapeHtml(l) + '">\u00d7</a></span>').join("")
+  const list = Array.isArray(pins) ? pins.filter(p => p && p.fact) : [];
+  el.innerHTML = list.length
+    ? list.map(p => {
+        const when = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : "";
+        const prov = "pinned from " + (p.source || "manual") + (when ? " on " + when : "");
+        return '<span class="pinchip" title="' + escapeHtml(prov) + '">' + escapeHtml(p.fact)
+          + ' <a title="unpin" data-pin="' + escapeHtml(p.fact) + '">\u00d7</a></span>';
+      }).join("")
     : '<span class="muted" style="font-size:10.5px">(none pinned)</span>';
   el.querySelectorAll("a[data-pin]").forEach(a => a.onclick = async () => {
     await post("/memory/durable/unpin", {text: a.getAttribute("data-pin")});
@@ -1412,7 +1416,7 @@ function renderPinCandidates(note, pinned){
   el.innerHTML = cands.map(l => '<span class="candchip">' + escapeHtml(l)
     + ' <a title="pin this fact" data-cand="' + escapeHtml(l) + '">+pin</a></span>').join("");
   el.querySelectorAll("a[data-cand]").forEach(a => a.onclick = async () => {
-    await post("/memory/durable/pin", {text: a.getAttribute("data-cand")});
+    await post("/memory/durable/pin", {text: a.getAttribute("data-cand"), source: "auto note"});
     refreshDurableMemory();
   });
 }
@@ -1427,7 +1431,7 @@ async function refreshDurableMemory(){
     const ws = j.workspace ? (" \u00b7 workspace " + j.workspace) : "";
     meta.textContent = (j.present ? ("updated " + when) : "(no durable memory yet \u2014 fills in after a session compacts; pin facts to keep them)") + ws;
     if (document.activeElement !== ta) ta.value = j.note || "";
-    renderPins(j.pinned);
+    renderPins(j.pins);
     renderPinCandidates(j.note, j.pinned);
   } catch(e){ meta.textContent = "(unavailable)"; }
 }

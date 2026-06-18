@@ -80,7 +80,10 @@ public class Database {
             "CREATE TABLE memory (owner TEXT PRIMARY KEY, note TEXT NOT NULL, updated_at INTEGER NOT NULL)",
             // curated/pinned durable facts (never overwritten by auto write-back) + persisted per-run timeline
             "ALTER TABLE memory ADD COLUMN pinned TEXT",
-            "ALTER TABLE run_history ADD COLUMN events TEXT");
+            "ALTER TABLE run_history ADD COLUMN events TEXT",
+            // durable-memory pins with provenance (scope = owner@workspace)
+            "CREATE TABLE memory_pins (scope TEXT NOT NULL, fact TEXT NOT NULL, source TEXT, "
+                    + "created_at INTEGER NOT NULL, PRIMARY KEY(scope, fact))");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;
