@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
-# Pin the wrapper's Maven download by recording its SHA-256 in .mvn/wrapper/maven-wrapper.properties.
-# Run once (needs network + curl/wget + sha256sum/shasum). After this, ./mvnw and mvnw.cmd verify the
-# download against the recorded hash. This writes a VERIFIED value -- it does not guess.
+# Pin the wrapper's Maven download by recording its SHA-512 in .mvn/wrapper/maven-wrapper.properties.
+# Run once after a version bump (needs network + curl/wget + sha512sum/shasum). Writes a VERIFIED value.
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 PROPS="$ROOT/.mvn/wrapper/maven-wrapper.properties"
@@ -16,12 +15,12 @@ if command -v curl >/dev/null 2>&1; then curl -fsSL "$URL" -o "$TMP"
 elif command -v wget >/dev/null 2>&1; then wget -q "$URL" -O "$TMP"
 else echo "need curl or wget" >&2; rm -f "$TMP"; exit 1; fi
 
-if command -v sha256sum >/dev/null 2>&1; then SUM="$(sha256sum "$TMP" | awk '{print $1}')"
-elif command -v shasum >/dev/null 2>&1; then SUM="$(shasum -a 256 "$TMP" | awk '{print $1}')"
-else echo "need sha256sum or shasum" >&2; rm -f "$TMP"; exit 1; fi
+if command -v sha512sum >/dev/null 2>&1; then SUM="$(sha512sum "$TMP" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then SUM="$(shasum -a 512 "$TMP" | awk '{print $1}')"
+else echo "need sha512sum or shasum" >&2; rm -f "$TMP"; exit 1; fi
 rm -f "$TMP"
 
 TMPP="$(mktemp)"
-sed "s/^distributionSha256Sum=.*/distributionSha256Sum=$SUM/" "$PROPS" > "$TMPP" && mv "$TMPP" "$PROPS"
-echo "pinned distributionSha256Sum=$SUM"
+sed "s/^distributionSha512Sum=.*/distributionSha512Sum=$SUM/" "$PROPS" > "$TMPP" && mv "$TMPP" "$PROPS"
+echo "pinned distributionSha512Sum=$SUM"
 echo "commit $PROPS to enforce it for everyone."

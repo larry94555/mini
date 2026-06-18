@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Hard-fail hygiene guard + verified checksum pin + CI Maven cache: the script-hygiene check in CI is now a
+  hard failure (not advisory); the wrapper downloads the official Apache Maven `.tar.gz` and verifies it
+  against the pinned official SHA-512 (`scripts/pin-maven-checksum.sh` re-pins after a bump;
+  `mvnw`/`mvnw.cmd`/`get-maven.ps1` all enforce it); CI caches the wrapper's `.maven` download; and a
+  one-shot `scripts/git-mark-exec.sh` sets the executable bit on every script.
 - Windows in CI + pinned wrapper checksum + script-hygiene guard: the smoke workflow now also runs on
   `windows-latest` (exercising `mvnw.cmd`/`get-maven.ps1` and a PowerShell `/health` probe); the wrapper
   can verify its Maven download against a SHA-256 (`scripts/pin-maven-checksum.sh` writes a verified value;
