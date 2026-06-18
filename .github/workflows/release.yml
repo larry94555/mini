@@ -2,9 +2,20 @@ name: Release
 
 # On a version tag (vX.Y.Z), build the runnable jar, checksum it, and publish a GitHub Release with
 # auto-generated notes. The container image is published separately by docker-publish.yml on the same tag.
+#
+# On a pull request that touches the release plumbing (pom.xml / this workflow / release-please config), the
+# same build + checksum run as a DRY RUN -- the tag-verify and publish steps are skipped (they are gated on a
+# v* tag ref), and the jar + checksum are uploaded as a workflow artifact so reviewers can catch a broken
+# release build before a tag is ever cut.
 on:
   push:
     tags: [ "v*" ]
+  pull_request:
+    paths:
+      - "pom.xml"
+      - ".github/workflows/release.yml"
+      - "release-please-config.json"
+      - ".release-please-manifest.json"
   workflow_dispatch:   # manual dry run (builds + checksums; only publishes on a real tag)
 
 permissions:
@@ -51,6 +62,16 @@ jobs:
           cd target
           sha256sum imini.jar > imini.jar.sha256
           cat imini.jar.sha256
+
+      - name: Upload dry-run artifact (non-tag builds)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: imini-dry-run-jar
+          path: |
+            target/imini.jar
+            target/imini.jar.sha256
+          retention-days: 7
 
       - name: Attach build artifacts to the release
         if: startsWith(github.ref, 'refs/tags/v')

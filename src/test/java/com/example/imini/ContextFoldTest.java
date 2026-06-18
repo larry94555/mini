@@ -109,4 +109,24 @@ class ContextFoldTest {
         String out = cm.condenseToolResult(big);
         assertTrue(out.contains("trimmed to save context")); // fell back, no exception thrown
     }
+
+    @Test
+    void tracedVariant_reportsFoldAndSizes() throws Exception {
+        ContextManager cm = manager(new FakeLlama(), true);
+        ContextManager.Condensed c = cm.condenseToolResultTraced(repeat('a', 1000));
+        assertTrue(c.folded(), "should report a fold");
+        assertEquals(1000, c.originalChars());
+        assertEquals(c.text().length(), c.resultChars());
+        assertTrue(c.resultChars() < c.originalChars());
+
+        // a head+tail trim (fold disabled) is NOT reported as a fold
+        ContextManager cm2 = manager(new FakeLlama(), false);
+        ContextManager.Condensed t = cm2.condenseToolResultTraced(repeat('b', 1000));
+        assertFalse(t.folded());
+
+        // a small result is unchanged and not a fold
+        ContextManager.Condensed s = cm.condenseToolResultTraced("tiny");
+        assertFalse(s.folded());
+        assertEquals("tiny", s.text());
+    }
 }

@@ -46,7 +46,9 @@
             font-family:var(--mono); font-size:11.5px; color:var(--muted); }
   .activity { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-bottom:5px; }
   .activity div { white-space:pre-wrap; opacity:.85; }
-  .activity div::before { content:"› "; color:var(--accent); }
+  .activity div::before { content:"\2039 "; color:var(--accent); }
+  .activity div.fold { color:var(--accent); opacity:1; font-weight:600; }
+  .activity div.fold::before { content:"\229F "; }
   ul { margin:4px 0; padding-left:18px; } li { margin:2px 0; }
   .pill { font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
   .metrics { font-family:var(--mono); font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; }
@@ -359,6 +361,7 @@ function addTurn(){
 }
 function addActivity(turn, line){
   const d = document.createElement("div"); d.textContent = line;
+  if (line.indexOf("[fold:") === 0) d.className = "fold";
   turn.activity.appendChild(d);
   $("#messages").scrollTop = $("#messages").scrollHeight;
 }

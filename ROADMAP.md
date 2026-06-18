@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Fold trace events in the UI + release dry-run smoke + repo cleanup: a fold during a run now streams a
+  `[fold:<label>]` trace event (size in -> out) that renders highlighted in the web UI activity trace and in
+  CLI output (`ContextManager.condenseToolResultTraced` + `AgentEngine`); `release.yml` gained a
+  pull_request dry-run (builds jar + checksum, uploads as an artifact, no publish) on PRs touching the
+  release plumbing; and the stale `PermissionGate.java` (superseded by `PermissionService`) was removed.
 - Fold observability + @file folding + Trivy severity policy: folds now increment a `context_fold`
   counter (and `context_fold_fallback`) exposed at /metrics and /metrics/prom for the Grafana dashboard,
   and `ContextFoldConfigIT` proves the shipped defaults fold a ~100KB input; the fold is extended to

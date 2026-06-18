@@ -290,7 +290,10 @@ The gate runs on PRs/pushes but is skipped on the weekly schedule (which only re
 (`feat:`, `fix:`, `feat!:` for breaking). `release-please.yml` maintains a "release PR" that bumps the
 `pom.xml` version and updates `CHANGELOG.md`; merging it tags `vX.Y.Z`, which triggers `release.yml`
 (attaches the jar + `.sha256` to the release) and `docker-publish.yml` (publishes the image). You can still
-cut a release manually by bumping `pom.xml` and pushing a matching tag.
+cut a release manually by bumping `pom.xml` and pushing a matching tag. A pull request that touches the release plumbing
+(`pom.xml`, `release.yml`, or the release-please config) triggers a **dry-run** of `release.yml`: it builds
+the jar and checksum and uploads them as a workflow artifact (the verify/publish steps are skipped), so a
+broken release build is caught before a tag is ever cut.
 
 ## Large tool results: the bounded context fold
 
@@ -312,7 +315,10 @@ The fold applies wherever a single oversized input enters context: large **tool 
 being skipped, so its gist still reaches the model. Each fold increments the **`context_fold`** counter
 (and `context_fold_fallback` when it degrades to head+tail), visible at `GET /metrics` and
 `GET /metrics/prom` (`imini_counter{counter="context_fold"}`) -- so you can graph fold activity in the
-bundled Grafana dashboard.
+bundled Grafana dashboard. When a fold happens during a run, a trace event
+`[fold:<label>] condensed a large <tool> result: N -> M chars` is streamed to the run log -- it shows in
+the web UI's activity trace (highlighted) and in the streamed CLI output, so you can see exactly when and
+how much context was compressed.
 
 ## Common helper scripts
 
