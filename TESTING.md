@@ -3080,3 +3080,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `GET /healthz` returns `{status, db, llama:{reachable,contextTokens}, uptimeMs, context, memory}`
   with no auth; status is `degraded` when the llama-server is unreachable. `GET /admin/overview` now includes
   a `context` summary and a `memory` block (workspace, durablePresent, trackedFacts) next to `recentRuns`.
+
+---
+
+# Operational readiness: health wiring, degradation, trace export
+
+## 355. Graceful degradation (GracefulDegradationTest)
+
+- **Run:** `./mvnw -Dtest=GracefulDegradationTest test` (runs fully offline -- persistence disabled).
+- **Observe:** with the DB unavailable, RunHistoryStore append no-ops and loadRecent is empty, every
+  MemoryStore accessor degrades to empty/null without throwing, and SessionStore falls back to its in-memory
+  map; `readinessStatus` reports `degraded` (one dep down) / `down` (both).
+
+## 356. Docker / compose healthcheck (manual)
+
+- **Observe:** `docker build` then `docker run -p 8080:8080 imini`; `docker inspect --format
+  '{{.State.Health.Status}}'` reports `healthy` once `/healthz` returns 200. `docker-compose.yml` sets the
+  same healthcheck on the `imini` service. The image installs `curl` for the probe.
+
+## 357. Admin health dot + NDJSON export (manual)
+
+- **Observe:** the Admin overview card shows a colored dot (green ok / amber degraded / red down) reflecting
+  `/healthz`, plus a context/memory summary line. The `runs.ndjson` link downloads `GET /admin/runs.ndjson`
+  -- one JSON run object per line, with fold/compact/trim counts and the event timeline.
+
+## 358. Kubernetes probes (manual)
+
+- **Observe:** wire `livenessProbe` -> `/health` and `readinessProbe` -> `/healthz` per `docs/DEPLOY.md`;
+  `/healthz` returns 200 while `degraded` (model warming up), so HTTP-code readiness treats "serving but
+  degraded" as ready.

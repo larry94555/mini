@@ -461,6 +461,34 @@ public class AgentController {
         return metrics.recentRuns(Math.max(1, Math.min(200, limit)), endpoint, outcome, session);
     }
 
+    /**
+     * Recent runs as newline-delimited JSON (one run object per line, newest first), for piping into log
+     * pipelines / external trace tooling. Each line carries the run's endpoint, session, mode, latency,
+     * outcome, per-run context counts (folds/compactions/trims), and the captured event timeline. Admin only.
+     */
+    @GetMapping(value = "/admin/runs.ndjson", produces = "application/x-ndjson")
+    public ResponseEntity<String> adminRunsNdjson(
+            @RequestParam(name = "limit", defaultValue = "200") int limit,
+            @RequestParam(name = "endpoint", defaultValue = "") String endpoint,
+            @RequestParam(name = "outcome", defaultValue = "") String outcome,
+            @RequestParam(name = "session", defaultValue = "") String session) {
+        requireAdmin();
+        List<Map<String, Object>> runs = metrics.recentRuns(Math.max(1, Math.min(1000, limit)),
+                endpoint, outcome, session);
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> run : runs) {
+            try {
+                sb.append(mapper.writeValueAsString(run)).append('\n');
+            } catch (Exception e) {
+                // skip a run that can't be serialized rather than failing the whole export
+            }
+        }
+        return ResponseEntity.ok()
+                .header("Content-Type", "application/x-ndjson")
+                .header("Content-Disposition", "attachment; filename=\"imini-runs.ndjson\"")
+                .body(sb.toString());
+    }
+
     /** Recent runs for one session (newest first): endpoint, mode, latency, outcome. Session read access. */
     @GetMapping("/session/runs")
     public List<Map<String, Object>> sessionRuns(
