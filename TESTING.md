@@ -2562,3 +2562,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** **Browse registry** in the *Plugins* card shows an **index signature** banner above the
   packs: green `verified` when the index is signed by a trusted key, otherwise `unsigned`/`no-key`/`invalid`
   with a note that packs remain SHA-256 pinned. Browse a signed index (see case 280) to see `verified`.
+
+---
+
+# Cross-platform run scripts (macOS / Linux / WSL)
+
+## 286. POSIX scripts pass a shell syntax check (deterministic, no model)
+
+- **Run:** `for f in *.sh scripts/*.sh; do sh -n "$f" || echo "BAD $f"; done`
+- **Observe:** every script parses cleanly (no output). All are marked executable.
+
+## 287. JSON escaping is safe for tricky input (deterministic, no model)
+
+- **Run:** source `scripts/common.sh` and call `json_escape` on strings containing `"` and `\`, then wrap
+  in `{"question":"..."}`.
+- **Observe:** the result is well-formed JSON (quotes and backslashes are escaped), matching what the
+  `.bat` files send. A stubbed `curl` shows `api_post`/`api_get` target `$IMINI_URL` with the right verb.
+
+## 288. OS-aware llama binary default (deterministic, no model)
+
+- **Run:** start with `llama.binary` blank.
+- **Observe:** on Windows the launched command uses `llama-server.exe`; on macOS/Linux/WSL it uses
+  `llama-server`. An explicit `llama.binary=/path/to/server` still overrides on every OS.
+
+## 289. Same flow on macOS/Linux/WSL (manual)
+
+- **Run:** `chmod +x *.sh scripts/*.sh`, then `./run.sh`; in another terminal `./ask.sh "Say hi"`.
+- **Observe:** the app builds and serves at http://localhost:8080 exactly as on Windows; the `.sh`
+  wrappers return the same responses as their `.bat` counterparts. `IMINI_URL=...` retargets them.

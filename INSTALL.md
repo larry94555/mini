@@ -131,3 +131,86 @@ To stop the app, go back to the first window and press **Ctrl+C**.
 - **"port already in use".** Something else is using port 8080 or 8081. Close other
   apps, or change the ports (8080 in `application.properties`, 8081 in
   `LlamaServerManager.java`).
+
+---
+
+# Running on macOS, Linux, or WSL
+
+imini is plain Java, so the same code runs on any system with a JDK 17+. The steps mirror the Windows
+walkthrough above; only the install commands and the launch script differ. Use the `.sh` scripts instead
+of the `.bat` files.
+
+## Step 1 — Install Java 17+
+
+- **macOS (Homebrew):** `brew install temurin@17` (or any JDK 17+).
+- **Debian/Ubuntu/WSL:** `sudo apt update && sudo apt install openjdk-17-jdk`
+- **Fedora:** `sudo dnf install java-17-openjdk-devel`
+- **Any (SDKMAN!):** `curl -s "https://get.sdkman.io" | bash`, then `sdk install java 17-tem`
+
+Verify: `java -version` should print 17 or higher.
+
+## Step 2 — Install Maven
+
+- **macOS:** `brew install maven`
+- **Debian/Ubuntu/WSL:** `sudo apt install maven`
+- **Fedora:** `sudo dnf install maven`
+- **Any (SDKMAN!):** `sdk install maven`
+
+Verify: `mvn -version`.
+
+## Step 3 — Install llama-server
+
+The model engine is [llama.cpp](https://github.com/ggml-org/llama.cpp). On these systems the binary is
+named `llama-server` (no `.exe`); imini detects this automatically.
+
+- **macOS:** `brew install llama.cpp` (provides `llama-server` on your PATH).
+- **Linux/WSL:** download a release binary from the llama.cpp releases page, or build from source
+  (`cmake -B build && cmake --build build --config Release`); then put `llama-server` on your PATH or in
+  the imini folder.
+- You do **not** need to download the model yourself — imini tells llama-server to fetch it on first run
+  (about 2 GB; progress goes to `llama-server.log`).
+
+If you already run llama-server elsewhere, set `llama.manage-server=false` and point imini at it
+(`llama.client-host` / `llama.port`).
+
+## Step 4 — Start it
+
+From the imini folder, make the scripts executable once, then launch:
+
+```sh
+chmod +x *.sh scripts/*.sh
+./run.sh
+```
+
+Wait for `llama-server is ready.` and `Started MiniAgentApplication ...`. The app is at
+http://localhost:8080. Leave the terminal open; press Ctrl+C to stop.
+
+## Step 5 — Ask it something
+
+In another terminal, from the same folder:
+
+```sh
+./ask.sh "Say hello in one sentence."
+```
+
+## Docker alternative (any OS)
+
+If you would rather not install Java/Maven/llama.cpp at all, use the container stack (Docker Desktop on
+macOS/Windows, Docker Engine on Linux):
+
+```sh
+docker compose -f docker-compose.yml up --build
+# or, no local build, from the published multi-arch image:
+docker compose -f docker-compose.published.yml up
+```
+
+See [`docs/observability/`](docs/observability/) to add the metrics dashboards.
+
+## Troubleshooting (macOS/Linux/WSL)
+
+- **`java: command not found`** — finish Step 1 and open a new terminal.
+- **`llama-server` not found** — finish Step 3, or set `llama.manage-server=false` to use an external one.
+- **`permission denied: ./run.sh`** — run `chmod +x *.sh scripts/*.sh` once.
+- **macOS "cannot be opened because the developer cannot be verified"** for `llama-server` — clear the
+  quarantine attribute: `xattr -d com.apple.quarantine /path/to/llama-server`.
+- **WSL** — run everything inside the WSL shell; reach the app from Windows at `http://localhost:8080`.
