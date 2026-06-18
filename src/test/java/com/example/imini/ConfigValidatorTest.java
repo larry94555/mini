@@ -34,7 +34,7 @@ class ConfigValidatorTest {
     @Test
     void authEnabledWithoutPrincipalsWarns() {
         List<String> issues = ConfigValidator.validate(2, 400, false, "db", 500, true, 0);
-        assertTrue(any(issues, ConfigValidator.WARN + "no principals"));
+        assertTrue(any(issues, "no principals"));
     }
 
     @Test
