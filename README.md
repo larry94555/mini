@@ -165,6 +165,7 @@ No cloud API key is required.
 | `.github/workflows/release-please.yml` | Conventional-Commit release PRs: bump `pom.xml` + `CHANGELOG.md`, tag |
 | `CHANGELOG.md` | Auto-generated changelog (release-please) |
 | `.trivyignore` | Documented CVE exceptions for the CRITICAL scan gate |
+| `docs/SECURITY.md` | Supply-chain severity policy (gate vs. report) |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
 | `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
@@ -283,7 +284,7 @@ re-pin the wrapper checksum with `sh scripts/pin-maven-checksum.sh`.
 **CycloneDX SBOM** (uploaded as a build artifact) and runs **Trivy** twice: a report step that sends all
 HIGH/CRITICAL findings to the **Security -> Code scanning** tab (non-blocking), and a **gate step that fails
 the build on a fixable CRITICAL** (`ignore-unfixed: true`, so CVEs with no upstream fix don't block).
-Document intentional exceptions in `.trivyignore`.
+The gate runs on PRs/pushes but is skipped on the weekly schedule (which only reports), so a CVE disclosed after a merge surfaces without breaking `main`. Full policy and how to accept an exception via `.trivyignore`: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 **Releases and changelog.** Commit with [Conventional Commits](https://www.conventionalcommits.org/)
 (`feat:`, `fix:`, `feat!:` for breaking). `release-please.yml` maintains a "release PR" that bumps the
@@ -304,6 +305,14 @@ Tune it in `application.properties` (defaults shown): `agent.fold-enabled=true`,
 `agent.fold-threshold-chars=24000`, `agent.fold-chunk-chars=8000`, `agent.fold-target-chars=4000`,
 `agent.fold-max-depth=2`. Set `agent.fold-enabled=false` for the prior head+tail-only behavior. Background:
 [`docs/RECURSIVE_LANGUAGE_MODELS.md`](docs/RECURSIVE_LANGUAGE_MODELS.md).
+
+The fold applies wherever a single oversized input enters context: large **tool results** (including
+`search_memory`/retrieval), and large **`@file` references** -- a referenced file over
+`context.refs.max-file-kb` is now folded (up to `context.refs.max-fold-file-kb`, default 512 KB) instead of
+being skipped, so its gist still reaches the model. Each fold increments the **`context_fold`** counter
+(and `context_fold_fallback` when it degrades to head+tail), visible at `GET /metrics` and
+`GET /metrics/prom` (`imini_counter{counter="context_fold"}`) -- so you can graph fold activity in the
+bundled Grafana dashboard.
 
 ## Common helper scripts
 

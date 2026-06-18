@@ -143,7 +143,7 @@ to write code.
 > `ContextManager.condenseToolResult` folds a single tool result larger than `agent.fold-threshold-chars`
 > by chunking it, summarizing each chunk with the cheap summary model, and recursing until the digest fits
 > (`agent.fold-*` settings; `agent.fold-enabled=false` restores the prior head+tail-only behavior). It
-> degrades to head+tail if the summary model is unavailable. The rest of this section describes the design.
+> degrades to head+tail if the summary model is unavailable. It applies to large tool results (incl. retrieval) and to oversized `@file`/`@directory` references, and each fold is counted via the `context_fold` metric. The rest of this section describes the design.
 
 The narrow, concrete delta over what the code does today:
 

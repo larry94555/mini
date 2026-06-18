@@ -340,6 +340,12 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Fold observability + @file folding + Trivy severity policy: folds now increment a `context_fold`
+  counter (and `context_fold_fallback`) exposed at /metrics and /metrics/prom for the Grafana dashboard,
+  and `ContextFoldConfigIT` proves the shipped defaults fold a ~100KB input; the fold is extended to
+  oversized `@file`/`@directory` references (folded up to `context.refs.max-fold-file-kb` instead of
+  skipped); and the Trivy gate now blocks fixable CRITICALs on PRs/pushes only while the weekly run reports
+  (policy in docs/SECURITY.md).
 - RLM-style bounded context fold + Trivy CRITICAL gate + release-please/CHANGELOG: a single tool result that
   vastly exceeds the window is now FOLDED (chunk -> summarize via the cheap model -> reduce -> recurse) by
   `ContextManager.condenseToolResult` instead of dropping its middle, reading every region once (lossy by

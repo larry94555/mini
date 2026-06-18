@@ -24,8 +24,27 @@ public class ContextRefService {
     @Value("${context.refs.max-file-kb:64}") private int maxFileKb;
     @Value("${context.refs.max-total-kb:256}") private int maxTotalKb;
     @Value("${context.refs.max-dir-entries:100}") private int maxDirEntries;
+    // A file over max-file-kb is normally skipped. With folding on, files up to max-fold-file-kb are
+    // instead read and folded (chunk -> summarize -> reduce via ContextManager) so their gist still enters
+    // context; files larger than max-fold-file-kb are still skipped (a hard read cap).
+    @Value("${context.refs.fold-large-files:true}") private boolean foldLargeFiles;
+    @Value("${context.refs.max-fold-file-kb:512}") private int maxFoldFileKb;
 
     private final Path root = Path.of("").toAbsolutePath().normalize();
+    private final ContextManager context;
+
+    public ContextRefService(ContextManager context) {
+        this.context = context;
+    }
+
+    /** What to do with a referenced file given its size and the configured caps. */
+    enum LargeFileAction { INLINE, FOLD, SKIP }
+
+    static LargeFileAction largeFileAction(long sizeBytes, int maxInlineKb, int maxFoldKb, boolean foldEnabled) {
+        if (sizeBytes <= (long) maxInlineKb * 1024) return LargeFileAction.INLINE;
+        if (foldEnabled && sizeBytes <= (long) maxFoldKb * 1024) return LargeFileAction.FOLD;
+        return LargeFileAction.SKIP;
+    }
 
     /** The augmented message (with a referenced-context block appended) plus trace notes. */
     public record Expansion(String text, List<String> attached, List<String> skipped) {}
@@ -62,18 +81,23 @@ public class ContextRefService {
                     attached.add(ref + " (directory, " + entries + " entries)");
                 } else {
                     long size = Files.size(abs);
-                    if (size > (long) maxFileKb * 1024) {
-                        skipped.add(ref + " (exceeds " + maxFileKb + "KB)");
+                    LargeFileAction action = largeFileAction(size, maxFileKb, maxFoldFileKb, foldLargeFiles);
+                    if (action == LargeFileAction.SKIP) {
+                        skipped.add(ref + " (exceeds " + maxFileKb + "KB"
+                                + (foldLargeFiles ? "; over fold cap " + maxFoldFileKb + "KB" : "") + ")");
                         continue;
                     }
-                    if (totalBytes + size > (long) maxTotalKb * 1024) {
+                    String raw = Files.readString(abs);
+                    String content = action == LargeFileAction.FOLD ? context.condenseToolResult(raw) : raw;
+                    if (totalBytes + content.length() > (long) maxTotalKb * 1024) {
                         skipped.add(ref + " (total budget " + maxTotalKb + "KB exceeded)");
                         continue;
                     }
-                    String content = Files.readString(abs);
                     totalBytes += content.length();
                     resolved.add(new ContextRefs.Resolved(ref, "file", content, content.length(), 0));
-                    attached.add(ref + " (file, " + content.length() + " bytes)");
+                    attached.add(action == LargeFileAction.FOLD
+                            ? ref + " (file, folded from " + size + " bytes -> " + content.length() + ")"
+                            : ref + " (file, " + content.length() + " bytes)");
                 }
             } catch (Exception e) {
                 skipped.add(ref + " (unreadable)");
