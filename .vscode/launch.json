@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-MiniAgentApplication<mini-agent>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.example.imini.MiniAgentApplication",
+            "projectName": "mini-agent",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

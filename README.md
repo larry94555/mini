@@ -157,7 +157,9 @@ No cloud API key is required.
 | `static/index.html` | Browser UI |
 | `Dockerfile` | Container image for the app |
 | `docker-compose.yml` | One-command local app + llama server setup |
-| `.github/workflows/ci.yml` | CI tests and Docker build |
+| `.github/workflows/ci.yml` | CI: unit tests (via `./mvnw`) and Docker build |
+| `.github/workflows/smoke.yml` | CI: cross-platform build + boot smoke test (Linux + macOS) |
+| `mvnw` / `mvnw.cmd` / `.mvn/` | Maven wrapper — build with no system Maven installed |
 
 ## Run on Windows
 
@@ -207,6 +209,16 @@ These run identically on macOS, Linux, WSL, and Git Bash on Windows. The scripts
 `http://localhost:8080` by default; point them at another host/port with the `IMINI_URL` environment
 variable, e.g. `IMINI_URL=http://localhost:9000 ./runs.sh`. On macOS/Linux/WSL the model server binary is
 `llama-server` (no `.exe`); imini detects this automatically, so no configuration change is needed.
+
+**No Maven install needed.** The repo ships a Maven wrapper, so `run.sh`/`run.bat` build with `./mvnw`
+(`mvnw.cmd` on Windows) automatically. The wrapper prefers a Maven already on your PATH; if there is none,
+it downloads a pinned Apache Maven into `.maven/` once and uses that. You can also build directly:
+
+```sh
+./mvnw -version        # macOS/Linux/WSL
+mvnw.cmd -version      # Windows
+./mvnw test            # run the unit tests
+```
 
 ## Common helper scripts
 
