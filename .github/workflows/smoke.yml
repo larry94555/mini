@@ -1,7 +1,7 @@
 name: Smoke (cross-platform)
 
-# Proves the project builds and boots on Linux and macOS, the POSIX scripts parse, and the Maven wrapper
-# works -- catching platform regressions the Windows-only path would miss. Unit tests run in ci.yml.
+# Proves the project builds and boots on Linux, macOS, AND Windows, the POSIX scripts parse, the Maven
+# wrapper works on each OS, and the script hygiene (executable bit + LF) holds. Unit tests run in ci.yml.
 on:
   push:
     branches: [ "main" ]
@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
     steps:
       - uses: actions/checkout@v4
 
@@ -26,21 +26,34 @@ jobs:
           java-version: "21"
           cache: maven
 
+      # ---------- Script hygiene guard (Linux only; advisory so it never wedges the build) ----------
+      - name: Guard - scripts executable + LF
+        if: runner.os == 'Linux'
+        run: |
+          bash .githooks/check-scripts.sh || \
+            echo "::warning::script hygiene issues above -- run 'sh scripts/install-hooks.sh' and the listed 'git update-index --chmod=+x' commands"
+
+      # ---------- POSIX path (Linux / macOS) ----------
       - name: Make wrapper + scripts executable
+        if: runner.os != 'Windows'
         run: chmod +x mvnw *.sh scripts/*.sh
 
       - name: POSIX scripts parse cleanly (sh -n)
+        if: runner.os != 'Windows'
         run: |
           for f in *.sh scripts/*.sh; do sh -n "$f"; done
           echo "all scripts ok"
 
-      - name: Maven wrapper runs
+      - name: Maven wrapper runs (POSIX)
+        if: runner.os != 'Windows'
         run: ./mvnw -B -ntp -version
 
-      - name: Build (skip tests; tests run in ci.yml)
+      - name: Build (POSIX; skip tests -- tests run in ci.yml)
+        if: runner.os != 'Windows'
         run: ./mvnw -B -ntp -DskipTests package
 
-      - name: Boot headless and probe /health
+      - name: Boot headless and probe /health (POSIX)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           JAR="$(ls target/*.jar | grep -v -E 'sources|javadoc' | head -n1)"
@@ -55,3 +68,28 @@ jobs:
           kill "$APP_PID" 2>/dev/null || true
           if [ "$ok" != "1" ]; then echo "::error::app did not become healthy"; tail -n 80 app.log; exit 1; fi
           echo "health OK on ${{ matrix.os }}"
+
+      # ---------- Windows path (exercises mvnw.cmd + get-maven.ps1) ----------
+      - name: Maven wrapper runs (Windows)
+        if: runner.os == 'Windows'
+        run: .\mvnw.cmd -B -ntp -version
+
+      - name: Build (Windows; skip tests)
+        if: runner.os == 'Windows'
+        run: .\mvnw.cmd -B -ntp -DskipTests package
+
+      - name: Boot headless and probe /health (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $jar = Get-ChildItem target\*.jar | Where-Object { $_.Name -notmatch 'sources|javadoc' } | Select-Object -First 1
+          Write-Host "running $($jar.FullName)"
+          $p = Start-Process -FilePath java -ArgumentList @('-jar', $jar.FullName, '--llama.manage-server=false', '--server.port=8080') -PassThru -RedirectStandardOutput app.log -RedirectStandardError apperr.log
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try { Invoke-WebRequest -UseBasicParsing http://localhost:8080/health -TimeoutSec 3 | Out-Null; $ok = $true; break }
+            catch { Start-Sleep -Seconds 2 }
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { Write-Host "::error::app did not become healthy"; if (Test-Path app.log) { Get-Content app.log -Tail 80 }; exit 1 }
+          Write-Host "health OK on windows"

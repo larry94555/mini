@@ -158,7 +158,9 @@ No cloud API key is required.
 | `Dockerfile` | Container image for the app |
 | `docker-compose.yml` | One-command local app + llama server setup |
 | `.github/workflows/ci.yml` | CI: unit tests (via `./mvnw`) and Docker build |
-| `.github/workflows/smoke.yml` | CI: cross-platform build + boot smoke test (Linux + macOS) |
+| `.github/workflows/smoke.yml` | CI: cross-platform build + boot smoke test (Linux + macOS + Windows) |
+| `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
+| `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
 | `mvnw` / `mvnw.cmd` / `.mvn/` | Maven wrapper — build with no system Maven installed |
 
 ## Run on Windows
@@ -219,6 +221,28 @@ it downloads a pinned Apache Maven into `.maven/` once and uses that. You can al
 mvnw.cmd -version      # Windows
 ./mvnw test            # run the unit tests
 ```
+
+**Pin the download (optional, recommended for teams).** The wrapper can verify the Maven it downloads
+against a SHA-256 in `.mvn/wrapper/maven-wrapper.properties`. It ships blank (no unverified hash); pin a
+verified value once with:
+
+```sh
+sh scripts/pin-maven-checksum.sh   # downloads, hashes, writes distributionSha256Sum=, then commit it
+```
+
+After that, both `./mvnw` and `mvnw.cmd` reject a download whose hash doesn't match.
+
+**Contributor setup (one time).** Enable the repo's pre-commit guard so scripts can't silently lose their
+executable bit or pick up Windows line endings:
+
+```sh
+sh scripts/install-hooks.sh        # Windows: scripts\install-hooks.cmd
+```
+
+The guard (`.githooks/pre-commit`) blocks a commit if a required script is not executable in git
+(`100755`) or if a `*.sh`/`mvnw` file contains CRLF, and prints the exact `git update-index --chmod=+x`
+fix. `.gitattributes` keeps line endings correct on checkout. CI runs the same hygiene check (advisory) and
+the cross-platform smoke test covers Linux, macOS, and Windows.
 
 ## Common helper scripts
 

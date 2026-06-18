@@ -2625,3 +2625,29 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `git update-index --chmod=+x mvnw run.sh ask.sh chat.sh plan.sh stream.sh rewind.sh interrupt.sh runs.sh steer.sh eval.sh scripts/common.sh`
 - **Observe:** `git ls-files --stage mvnw` should read `100755` after the fix; CI builds via `./mvnw`
   without permission errors.
+
+---
+
+# Windows CI, pinned wrapper checksum, and script-hygiene guard
+
+## 294. Script-hygiene guard detects a non-executable / CRLF script (deterministic, no model)
+
+- **Run:** `bash .githooks/check-scripts.sh` in a git checkout.
+- **Observe:** it lists any required script whose git mode is not `100755` (with the exact
+  `git update-index --chmod=+x <file>` fix) and any `*.sh`/`mvnw` containing CRLF, exiting non-zero. After
+  `git update-index --chmod=+x ...` the entries clear and it exits 0. The pre-commit hook
+  (`.githooks/pre-commit`, enabled via `sh scripts/install-hooks.sh`) blocks commits on the same checks.
+
+## 295. Wrapper verifies a pinned checksum (deterministic, no model)
+
+- **Run:** `sh scripts/pin-maven-checksum.sh` once (writes a verified `distributionSha256Sum`), then build
+  with no system Maven so the wrapper downloads Maven.
+- **Observe:** `./mvnw` (shasum/sha256sum) and `mvnw.cmd` (`get-maven.ps1 -Sha256`) verify the download and
+  abort on a mismatch. With the field blank, the download proceeds unverified (prior behavior).
+
+## 296. Cross-platform smoke matrix incl. Windows (CI)
+
+- **Observe:** `.github/workflows/smoke.yml` runs `ubuntu-latest`, `macos-latest`, and `windows-latest`.
+  POSIX runners chmod + `sh -n` + `./mvnw` build + bash `/health` probe; the Windows runner uses
+  `mvnw.cmd` (exercising `get-maven.ps1`) and a PowerShell `Invoke-WebRequest` `/health` probe. All three
+  must build and boot.
