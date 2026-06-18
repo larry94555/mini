@@ -29,6 +29,9 @@ public class RunService {
     private ExecutorService async;
     private int limit;
 
+    @Value("${agent.shutdown-drain-seconds:30}") private int drainSeconds;
+    private volatile boolean draining = false;
+
     @PostConstruct
     public void init() {
         limit = maxConcurrentCfg > 0 ? maxConcurrentCfg : Math.max(1, slots);
@@ -44,9 +47,11 @@ public class RunService {
     public int limit() { return limit; }
     public int active() { return limit - permits.availablePermits(); }
     public int queued() { return permits.getQueueLength(); }
+    public boolean isDraining() { return draining; }
 
     /** Run on the CALLING thread, but only once a slot is free (blocks otherwise). */
     public <T> T runBounded(Callable<T> task) throws Exception {
+        if (draining) throw new IllegalStateException("server is shutting down; no new runs accepted");
         permits.acquire();
         try {
             return task.call();
@@ -62,6 +67,20 @@ public class RunService {
 
     @PreDestroy
     public void stop() {
-        if (async != null) async.shutdownNow();
+        draining = true;
+        log.info("[runs] draining in-flight runs (up to " + drainSeconds + "s) ...");
+        if (async != null) {
+            async.shutdown();
+            try {
+                if (!async.awaitTermination(drainSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
+                    log.warn("[runs] drain timeout; forcing shutdown (" + active() + " runs still active)");
+                    async.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                async.shutdownNow();
+            }
+        }
+        log.info("[runs] shutdown complete.");
     }
 }

@@ -3207,3 +3207,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** in the Admin overview, each recent run has a "trace — N events" disclosure; expanding it shows
   the session/endpoint/latency/outcome header and the event timeline with colored type chips
   (fold/compact/trim/tool/error).
+
+---
+
+# Circuit breaker, sandbox hardening, graceful shutdown
+
+## 373. Circuit breaker state machine (CircuitBreakerTest)
+
+- **Run:** `./mvnw -Dtest=CircuitBreakerTest test`.
+- **Observe:** starts CLOSED; opens after `failureThreshold` consecutive failures (calls blocked);
+  `recordSuccess` resets to CLOSED; after cooldown expires `allowCall` transitions to HALF_OPEN and lets a
+  probe through; `call()` throws `OpenException` when open.
+
+## 374. Sandbox output cap + working-dir confinement (SandboxHardenTest)
+
+- **Run:** `./mvnw -Dtest=SandboxHardenTest test`.
+- **Observe:** output is capped at `maxOutputBytes`; denied commands return a `DENIED:` prefix;
+  `maxOutputBytes()` floors at 1024.
+
+## 375. Graceful shutdown drain (GracefulShutdownTest)
+
+- **Run:** `./mvnw -Dtest=GracefulShutdownTest test`.
+- **Observe:** new runs are rejected once draining; in-flight runs complete before shutdown returns;
+  `isDraining()` flips to true after `stop()`.
+
+## 376. ConfigValidator test fix (CI)
+
+- **Observe:** `ConfigValidatorTest.authEnabledWithoutPrincipalsWarns` now passes — parameter order was
+  corrected (was passing `persistenceEnabled=false` instead of `true`).
+
+## 377. Circuit breaker visible in /healthz (manual)
+
+- **Observe:** `GET /healthz` response includes `llama.circuitBreaker` field (`closed`/`open`/`half_open`).
+  Force-open it by stopping the llama-server; after `llama.circuit-breaker-threshold` failures the field
+  changes to `open` and calls return immediately.

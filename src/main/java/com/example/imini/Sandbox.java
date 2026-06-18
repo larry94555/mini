@@ -79,6 +79,10 @@ public class Sandbox {
   @Value("${sandbox.container-command:}")
   private String containerCommand;
 
+  /** Maximum bytes read from a tool process; output beyond this is truncated rather than buffered. */
+  @Value("${sandbox.max-output-bytes:65536}")
+  private int maxOutputBytes;
+
   private Path root;
   private final List<String> allow = new ArrayList<>();
   private final List<String> deny = new ArrayList<>(DEFAULT_DENY);
@@ -206,5 +210,56 @@ public class Sandbox {
       return "";
     }
     return trimmed.split("\\s+")[0];
+  }
+
+  public int maxOutputBytes() { return Math.max(1024, maxOutputBytes); }
+
+  /**
+   * Run {@code cmd} in a sandbox-enforced way: screen the command, launch in the workspace root as
+   * the working directory, cap stdout+stderr to {@link #maxOutputBytes}, and kill the process after
+   * {@code timeoutSeconds}. Returns the (possibly truncated) combined output, or an "ERROR:"/"DENIED:"
+   * string if a guard fires. This consolidates the guards that were previously spread across
+   * BuiltinTools, making them easy to test and extend.
+   */
+  public String executeSandboxed(String cmd, int timeoutSeconds) {
+    String denied = screenCommand(cmd);
+    if (denied != null) return "DENIED: " + denied + ".";
+    boolean win = System.getProperty("os.name", "").toLowerCase().contains("win");
+    try {
+      ProcessBuilder pb = new ProcessBuilder(buildProcess(cmd, win));
+      pb.redirectErrorStream(true);
+      // confine the working directory to the workspace root
+      pb.directory(root != null ? root.toFile() : null);
+      Process proc = pb.start();
+      int cap = maxOutputBytes();
+      // read with a byte cap so a chatty process can't exhaust memory
+      java.util.concurrent.ExecutorService ex =
+          java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "sandbox-reader"); t.setDaemon(true); return t;
+          });
+      java.util.concurrent.Future<String> outF = ex.submit(() -> {
+        byte[] buf = new byte[cap + 1];
+        int total = 0;
+        try (var in = proc.getInputStream()) {
+          int n;
+          while (total < cap && (n = in.read(buf, total, cap - total)) >= 0) total += n;
+          // drain the rest so the process isn't blocked on full pipe
+          in.transferTo(java.io.OutputStream.nullOutputStream());
+        }
+        String result = new String(buf, 0, Math.min(total, cap));
+        return total > cap ? result + "\n[output truncated at " + cap + " bytes]" : result;
+      });
+      boolean done = proc.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+      if (!done) {
+        proc.destroyForcibly();
+        ex.shutdownNow();
+        return "ERROR: command timed out after " + timeoutSeconds + "s and was killed.";
+      }
+      String out = outF.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      ex.shutdown();
+      return out.isBlank() ? "(no output)" : out;
+    } catch (Exception e) {
+      return "ERROR: " + e.getMessage();
+    }
   }
 }

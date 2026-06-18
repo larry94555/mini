@@ -635,29 +635,7 @@ public class BuiltinTools {
                 schema(props, "command"), true, args -> {
             try {
                 String cmd = str(args, "command");
-                String denied = sandbox.screenCommand(cmd);
-                if (denied != null) return "DENIED: " + denied + ".";
-                boolean win = System.getProperty("os.name").toLowerCase().contains("win");
-                ProcessBuilder pb = new ProcessBuilder(sandbox.buildProcess(cmd, win));
-                pb.redirectErrorStream(true);
-                Process proc = pb.start();
-                // read on a separate thread so the timeout is real even if the process is chatty
-                java.util.concurrent.ExecutorService ex = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-                    Thread t = new Thread(r, "run-command-reader");
-                    t.setDaemon(true);
-                    return t;
-                });
-                java.util.concurrent.Future<String> outF =
-                        ex.submit(() -> new String(proc.getInputStream().readAllBytes()));
-                boolean done = proc.waitFor(toolTimeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
-                if (!done) {
-                    proc.destroyForcibly();
-                    ex.shutdownNow();
-                    return "ERROR: command timed out after " + toolTimeoutSeconds + "s and was killed.";
-                }
-                String out = outF.get(5, java.util.concurrent.TimeUnit.SECONDS);
-                ex.shutdown();
-                return truncate(out.isBlank() ? "(no output)" : out, 6000);
+                return sandbox.executeSandboxed(cmd, toolTimeoutSeconds);
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
