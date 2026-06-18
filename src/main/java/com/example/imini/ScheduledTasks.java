@@ -147,6 +147,9 @@ public class ScheduledTasks {
     private void runTask(Task t) {
         long start = System.currentTimeMillis();
         t.lastRunEpochMs = start;
+        org.slf4j.MDC.put("runKind", "scheduled");
+        org.slf4j.MDC.put("taskId", t.id);
+        org.slf4j.MDC.put("session", t.sessionId == null ? "" : t.sessionId);
         try {
             RunSink sink = new ConsoleSink();
             String result = switch (t.kind) {
@@ -163,6 +166,8 @@ public class ScheduledTasks {
             t.lastDetail = "error: " + e.getMessage();
             recordTaskRun(t, System.currentTimeMillis() - start, false);
             log.warn("[schedule] " + t.id + " failed: " + e.getMessage());
+        } finally {
+            org.slf4j.MDC.clear(); // scheduled runs are on a pool thread with no request boundary to clear it
         }
         if (t.oneShot) {
             tasks.remove(t.id);                                  // completed one-shot drops off the list

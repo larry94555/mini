@@ -4,7 +4,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Durable backing for the run-history view: persists finished-run records to the {@code run_history}
@@ -61,6 +63,59 @@ public class RunHistoryStore {
     }
 
     /** The most recent {@code n} records, oldest-first (ready to replay into the in-memory buffer). */
+    /**
+     * Durable SLO over a time window, computed from the PERSISTED run_history (survives restart, unlike the
+     * in-memory latency ring). {@code sinceTs <= 0} means "all". run_history is bounded (persist-max), so the
+     * row scan is bounded. Returns total/ok/failed/successRate/p50/p95/avg/max.
+     */
+    public Map<String, Object> windowStats(long sinceTs) {
+        if (!db.available()) return windowStatsFrom(new ArrayList<>(), sinceTs);
+        try {
+            long since = Math.max(0, sinceTs);
+            List<RunHistory.Record> rows = db.query(
+                    "SELECT ts, endpoint, session, mode, ms, ok, "
+                            + "COALESCE(folds,0), COALESCE(compactions,0), COALESCE(trims,0), events "
+                            + "FROM run_history WHERE ts >= ? ORDER BY ts ASC, rowid ASC",
+                    rs -> new RunHistory.Record(rs.getLong(1), rs.getString(2), rs.getString(3),
+                            rs.getString(4), rs.getLong(5), rs.getInt(6) == 1,
+                            rs.getInt(7), rs.getInt(8), rs.getInt(9), fromJson(rs.getString(10))),
+                    since);
+            return windowStatsFrom(rows, sinceTs);
+        } catch (Exception e) {
+            log.warn("[run-history] windowStats failed: " + e.getMessage());
+            return windowStatsFrom(new ArrayList<>(), sinceTs);
+        }
+    }
+
+    /** Pure aggregation of records into SLO stats (testable offline with synthetic records). */
+    static Map<String, Object> windowStatsFrom(List<RunHistory.Record> rows, long sinceTs) {
+        long ok = 0, failed = 0;
+        long[] ms = new long[rows.size()];
+        long max = 0, total = 0;
+        int i = 0;
+        for (RunHistory.Record r : rows) {
+            if (r.ok()) ok++; else failed++;
+            ms[i++] = r.ms();
+            total += r.ms();
+            if (r.ms() > max) max = r.ms();
+        }
+        long n = ok + failed;
+        long[] sorted = ms.clone();
+        java.util.Arrays.sort(sorted);
+        double successRate = n == 0 ? 100.0 : Math.round(1000.0 * ok / n) / 10.0;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("sinceTs", Math.max(0, sinceTs));
+        out.put("runs", n);
+        out.put("ok", ok);
+        out.put("failed", failed);
+        out.put("success_rate", successRate);
+        out.put("avg_ms", n == 0 ? 0 : total / n);
+        out.put("max_ms", max);
+        out.put("p50_ms", Metrics.percentile(sorted, 0.50));
+        out.put("p95_ms", Metrics.percentile(sorted, 0.95));
+        return out;
+    }
+
     public List<RunHistory.Record> loadRecent(int n) {
         List<RunHistory.Record> out = new ArrayList<>();
         if (!db.available()) return out;

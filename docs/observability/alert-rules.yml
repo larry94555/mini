@@ -46,3 +46,21 @@ groups:
         annotations:
           summary: "High average run latency"
           description: "Average run latency has exceeded 60s for 10 minutes."
+
+      - alert: IminiLowSuccessRate
+        # SLO gauge (imini_run_success_rate, percent) below 95% -- complements the windowed ratio above
+        expr: imini_run_success_rate < 95
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Run success rate below SLO"
+          description: "imini_run_success_rate has been {{ $value }}% (< 95%) for 10 minutes."
+
+      - alert: IminiHighLatencyP95
+        # tail latency, not just the average
+        expr: imini_run_latency_p95_ms > 60000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "High p95 run latency"
+          description: "p95 run latency has been {{ $value }}ms (> 60s) for 10 minutes."

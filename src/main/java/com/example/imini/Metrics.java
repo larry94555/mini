@@ -166,6 +166,12 @@ public class Metrics {
     }
 
     /** A page of the FULL persisted run history (oldest-first from {@code sinceTs}), as plain maps. */
+    /** Durable SLO over a time window (from persisted run_history), or empty stats when no history store. */
+    public Map<String, Object> windowStats(long sinceTs) {
+        if (historyStore == null) return RunHistoryStore.windowStatsFrom(new java.util.ArrayList<>(), sinceTs);
+        return historyStore.windowStats(sinceTs);
+    }
+
     public java.util.List<Map<String, Object>> historyPage(long sinceTs, int limit) {
         java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
         if (historyStore == null) return out;

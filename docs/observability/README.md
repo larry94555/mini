@@ -100,3 +100,10 @@ Prometheus layer, and [`alertmanager.yml`](alertmanager.yml) shows how to route 
 route that notifies sooner, and an inhibit rule so a critical alert mutes matching warnings. Replace the
 webhook URLs with your real webhook/email/Slack integration, then run
 `alertmanager --config.file=alertmanager.yml` (validate with `amtool check-config alertmanager.yml`).
+
+## Durable SLO (survives restarts)
+
+The Prometheus gauges above (`imini_run_success_rate`, `imini_run_latency_p50_ms`/`p95_ms`) are computed over
+an in-memory window of recent runs and reset on restart. For a **durable** SLO over a real time window, query
+`GET /admin/slo?window=24h` (also `7d`, `30m`, `90s`, `all`) -- it is computed from the persisted run-history
+table, so it survives restarts and reflects the chosen window. Admin only.
