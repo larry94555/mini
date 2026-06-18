@@ -2675,3 +2675,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** both `ci.yml` and `smoke.yml` add `actions/cache@v4` on path `.maven`, keyed
   `${{ runner.os }}-mvnwrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}`, so the
   no-system-Maven path (notably the Windows job) reuses the cached distribution instead of re-downloading.
+
+---
+
+# Release workflow, Dependabot, and supply-chain scan
+
+## 300. Release on a version tag (CI)
+
+- **Observe:** `.github/workflows/release.yml` triggers on `v*` tags. It checks the tag matches the
+  `pom.xml` version (fails on mismatch), builds `target/imini.jar`, writes `imini.jar.sha256`, and publishes
+  a GitHub Release (auto-generated notes) with both files attached. `workflow_dispatch` builds without
+  publishing (dry run). To test: bump `pom.xml`, `git tag vX.Y.Z`, push the tag; confirm the Release.
+
+## 301. Dependabot update PRs (CI/config)
+
+- **Observe:** `.github/dependabot.yml` declares three ecosystems -- maven (`pom.xml`), github-actions (the
+  workflows), and docker (the Dockerfile base image) -- on a weekly schedule. Dependabot opens labelled
+  update PRs. After a Maven version bump, re-pin the wrapper checksum (`sh scripts/pin-maven-checksum.sh`).
+
+## 302. SBOM + vulnerability scan (CI)
+
+- **Observe:** `.github/workflows/supply-chain.yml` builds the jar then generates a CycloneDX SBOM
+  (`anchore/sbom-action`, uploaded as artifact `imini-sbom.cdx.json`) and runs a Trivy filesystem scan
+  (`HIGH,CRITICAL`) whose SARIF is uploaded to GitHub code scanning. The scan is report-only (`exit-code: 0`)
+  so findings surface in the Security tab without failing the build. Also runs weekly via cron.
+
+## 303. Supply-chain action pins resolve (regression)
+
+- **Symptom guarded against:** Supply-chain workflow failing with "Unable to resolve action
+  `aquasecurity/trivy-action@0.28.0`, unable to find version" -- a non-existent tag.
+- **Fix:** pin `aquasecurity/trivy-action@v0.36.0` (the project migrated all tags to a `v` prefix after a
+  supply-chain incident; bare `0.x` tags are not used for new releases).
+- **Observe:** the `scan` job in `supply-chain.yml` resolves the action and uploads SARIF. Dependabot
+  (github-actions ecosystem) will propose future bumps.

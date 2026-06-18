@@ -1,0 +1,62 @@
+name: Release
+
+# On a version tag (vX.Y.Z), build the runnable jar, checksum it, and publish a GitHub Release with
+# auto-generated notes. The container image is published separately by docker-publish.yml on the same tag.
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:   # manual dry run (builds + checksums; only publishes on a real tag)
+
+permissions:
+  contents: write      # create the GitHub Release
+
+jobs:
+  release:
+    name: Build + publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Cache wrapper Maven distribution
+        uses: actions/cache@v4
+        with:
+          path: .maven
+          key: ${{ runner.os }}-mvnwrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
+      - name: Make the Maven wrapper executable
+        run: chmod +x mvnw
+
+      - name: Verify tag matches pom version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          POM_VERSION="$(./mvnw -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "pom=$POM_VERSION tag=$TAG"
+          if [ "$POM_VERSION" != "$TAG" ]; then
+            echo "::error::tag v$TAG does not match pom version $POM_VERSION -- bump pom.xml or fix the tag"; exit 1
+          fi
+
+      - name: Build the runnable jar
+        run: ./mvnw -B -ntp -DskipTests package
+
+      - name: Checksum the jar
+        run: |
+          cd target
+          sha256sum imini.jar > imini.jar.sha256
+          cat imini.jar.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            target/imini.jar
+            target/imini.jar.sha256
