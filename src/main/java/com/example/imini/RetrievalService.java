@@ -432,7 +432,16 @@ public class RetrievalService {
     @SuppressWarnings("unchecked")
     // In-process cache of text -> embedding (keyed by model+sha) backed by the embed_cache table, so
     // identical facts aren't re-embedded on every ranking or after a restart.
-    private final java.util.concurrent.ConcurrentHashMap<String, float[]> embedMem = new java.util.concurrent.ConcurrentHashMap<>();
+    // In-process cache of text -> embedding (keyed by model+sha) backed by the embed_cache table, so
+    // identical facts aren't re-embedded on every ranking or after a restart. Bounded LRU so a long-running
+    // process can't grow it without limit; the DB table is the durable tier and is pruned to the same cap.
+    @Value("${retrieval.embed-cache-max:4096}") private int embedCacheMax;
+    private final java.util.Map<String, float[]> embedMem = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<String, float[]>(256, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, float[]> e) {
+                    return size() > Math.max(16, embedCacheMax);
+                }
+            });
 
     /** Embed a text, reusing a cached vector (memory, then DB) when the same text+model was embedded before. */
     float[] embedCached(String text) {
@@ -459,6 +468,9 @@ public class RetrievalService {
                                     + "ON CONFLICT(text_sha) DO UPDATE SET embedding=excluded.embedding, "
                                     + "model=excluded.model, updated_at=excluded.updated_at",
                             sha, embedModel, floatsToJson(v), System.currentTimeMillis());
+                    int cap = Math.max(16, embedCacheMax);
+                    db.update("DELETE FROM embed_cache WHERE text_sha NOT IN "
+                            + "(SELECT text_sha FROM embed_cache ORDER BY updated_at DESC, rowid DESC LIMIT ?)", cap);
                 } catch (Exception ignore) { /* cache write is best-effort */ }
             }
         }

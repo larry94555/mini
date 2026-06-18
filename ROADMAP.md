@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Memory consolidation pass: a real-SQLite integration test (`MemoryStorePersistenceTest`) covers the
+  durable-memory path end to end (note/pins/provenance, relevance seeding, analytics, hygiene prune); the
+  long-lingering redundant `ContextFoldConfigIT.java` is finally deleted; the embed cache is now a bounded
+  LRU (+`embed_cache` table pruned to `retrieval.embed-cache-max`); and the memory pipeline is summarized in
+  the UI and documented in `docs/MEMORY.md`.
 - Memory hygiene/decay + two-stage recall + embedding cache: durable facts unused (never injected/recalled)
   for `agent.memory-decay-days` are auto-pruned after a run (and via `POST /memory/hygiene`), pins never
   touched; promote-to-pin candidates are ordered by usage. `recall_memory` is now two-stage -- cheap-rank a

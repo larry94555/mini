@@ -295,6 +295,7 @@
         <button id="clearDurableMem" style="font-size:11px;float:right" title="Clear the durable memory note (admin)">clear</button>
         <button id="hygieneDurableMem" style="font-size:11px;float:right;margin-right:4px" title="Prune long-unused auto facts (admin)">hygiene</button>
         <div class="muted" style="font-size:11px;margin:2px 0">Facts carried across sessions and restarts; a new session is seeded with the most <i>relevant</i> facts (pins always included). Included in workspace Export/Import.</div>
+        <div class="muted" style="font-size:10.5px;margin:2px 0;opacity:.85">pipeline: <b>seed</b> (relevance-ranked) &rarr; <b>fold/compact</b> during a run &rarr; <b>consolidate</b> (quality guard) &rarr; <b>hygiene</b> (decay) &rarr; <b>recall_memory</b> tool &rarr; <b>analytics</b>. See <code>docs/MEMORY.md</code>.</div>
         <div id="durableMemMeta" class="muted" style="font-size:10.5px;margin:2px 0"></div>
         <textarea id="durableMemNote" placeholder="auto memory note (editable) — facts the agent learned" style="width:100%;height:70px;font-size:11px"></textarea>
         <div class="row" style="margin-top:3px"><button id="saveDurableMem" style="font-size:11px">Save note</button></div>

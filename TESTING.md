@@ -3023,3 +3023,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** with `retrieval.embeddings=true`, repeated seeding/recall over the same facts does not
   re-call the embed endpoint (cached in-process and in `embed_cache`, keyed by model + text hash); cache
   survives a restart.
+
+---
+
+# Memory integration test, cleanup, unified panel, bounded embed cache
+
+## 347. Durable-memory persistence (MemoryStorePersistenceTest)
+
+- **Run:** `./mvnw -Dtest=MemoryStorePersistenceTest test` (runs against a real temp SQLite DB in CI).
+- **Observe:** end to end over real SQLite -- set note + pin (provenance), relevance-ranked seeding (pin +
+  top auto fact, off-topic fact excluded), recall bumps recalled, analytics reflect injected/recalled, and
+  hygiene prunes the never-used aged fact while keeping used ones and never touching pins. If persistence
+  can't initialize (e.g. no sqlite driver), the test skips cleanly instead of failing.
+
+## 348. Lingering file removed
+
+- **Observe:** `src/test/java/com/example/imini/ContextFoldConfigIT.java` is deleted; `ContextFoldConfigTest.java`
+  remains and is the one Surefire runs. The tree no longer carries the redundant copy.
+
+## 349. Bounded embedding cache (manual / Run-harness)
+
+- **Observe:** the in-process embed cache is an LRU bounded at `max(16, retrieval.embed-cache-max)`; inserting
+  more than the cap evicts the oldest entries, and the `embed_cache` table is pruned to the same cap on write.
+
+## 350. Unified memory panel + docs (manual)
+
+- **Observe:** the *Project memory* card shows the full pipeline summary (seed -> fold/compact -> consolidate
+  -> hygiene -> recall -> analytics) and points to `docs/MEMORY.md`, which documents the subsystem, config
+  table, endpoints, and storage tables.
