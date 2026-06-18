@@ -133,39 +133,73 @@ This puts `llama-server` on your PATH. Done.
 
 ### Linux
 
-The recommended approach is to build llama.cpp from source using CMake, which produces a binary tuned for
-your CPU:
+The recommended approach is to build llama.cpp from source using CMake.
+
+**Step 3a — Install build dependencies (Debian/Ubuntu):**
 
 ```sh
-# Install build tools (Debian/Ubuntu)
-sudo apt update && sudo apt install -y git cmake build-essential
+sudo apt update && sudo apt install -y \
+  git cmake build-essential \
+  libcurl4-openssl-dev libssl-dev
+```
 
-# Clone the repository
+> `libcurl4-openssl-dev` and `libssl-dev` are required so that llama-server can download the AI model
+> from Hugging Face at runtime. Without them the build succeeds but llama-server prints
+> `HTTPS is not supported` and `failed to download model from Hugging Face`.
+
+**Fedora / RHEL:**
+```sh
+sudo dnf install -y git cmake gcc-c++ make libcurl-devel openssl-devel
+```
+
+**Step 3b — Clone and build:**
+
+```sh
+# Clone into your home directory (keeps it separate from any other project)
+cd ~
 git clone https://github.com/ggml-org/llama.cpp.git
 cd llama.cpp
 
-# Build
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -j$(nproc)
+# If you have built here before and get a CMakeCache conflict, wipe the old cache first:
+#   rm -rf build
 
-# Add the build output directory to your PATH so llama-server is callable from anywhere.
-# Add this line to your shell profile (~/.bashrc, ~/.zshrc, etc.), then reload it:
-#   export PATH="$HOME/llama.cpp/build/bin:$PATH"
-# To apply immediately in the current terminal:
+# Build with HTTPS/curl support enabled (-DLLAMA_CURL=ON is the key flag)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON
+cmake --build build --config Release -j$(nproc)
+```
+
+> **If cmake fails with "CMakeCache.txt … different directory":** a stale build cache from a previous
+> run in a different location is blocking the configure step. Delete it and re-run:
+> ```sh
+> rm -rf build
+> cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON
+> cmake --build build --config Release -j$(nproc)
+> ```
+
+**Step 3c — Add both PATH and LD_LIBRARY_PATH to your shell profile:**
+
+```sh
+# PATH          -> so the shell finds the llama-server executable
+# LD_LIBRARY_PATH -> so the dynamic loader finds llama.cpp's .so libraries at runtime.
+#                    Without this, llama-server exits immediately with:
+#                    "error while loading shared libraries: … cannot open shared object file"
 echo 'export PATH="$HOME/llama.cpp/build/bin:$PATH"' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH="$HOME/llama.cpp/build/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-**Fedora / RHEL build tools:**
+**Verify:**
 ```sh
-sudo dnf install -y git cmake gcc-c++ make
+llama-server --version
 ```
-
-Verify: `llama-server --version`
+If this prints a version number, all three things are wired up (executable found, libraries found, HTTPS
+supported). If you see `cannot open shared object file` the `LD_LIBRARY_PATH` line above was not applied
+— re-run the `echo` commands and open a fresh terminal.
 
 **Pre-built binary alternative:** If you prefer not to build, download a Linux release binary from
-https://github.com/ggml-org/llama.cpp/releases — look for a `linux-x64` asset. Extract it and put
-`llama-server` on your PATH or in the imini folder.
+https://github.com/ggml-org/llama.cpp/releases — look for a `linux-x64` asset. Extract it and copy the
+`llama-server` binary and all accompanying `.so` files to a directory on both your PATH and
+LD_LIBRARY_PATH, or just put them in the imini folder and set the vars to point there.
 
 ---
 
@@ -173,29 +207,74 @@ https://github.com/ggml-org/llama.cpp/releases — look for a `linux-x64` asset.
 
 WSL runs a full Linux environment, so you build llama.cpp the same way as on Linux. The `nix`
 package-manager approach that is sometimes suggested does not work reliably in WSL — building from source
-with CMake is the recommended method:
+with CMake is the recommended method.
+
+**Step 3a — Install build dependencies inside WSL:**
 
 ```sh
-# Install build tools inside WSL
-sudo apt update && sudo apt install -y git cmake build-essential
+sudo apt update && sudo apt install -y \
+  git cmake build-essential \
+  libcurl4-openssl-dev libssl-dev
+```
 
-# Clone llama.cpp
+> `libcurl4-openssl-dev` and `libssl-dev` are required so that llama-server can download the AI model
+> from Hugging Face at runtime. Without them the build succeeds but llama-server prints
+> `HTTPS is not supported` / `failed to download model from Hugging Face` in `llama-server.log`,
+> and `./ask.sh` returns with no answer because the server never actually started.
+
+**Step 3b — Clone and build:**
+
+```sh
+# Clone into your home directory inside WSL
+cd ~
 git clone https://github.com/ggml-org/llama.cpp.git
 cd llama.cpp
 
-# Build (this takes a few minutes)
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -j$(nproc)
+# If you have built here before and get a CMakeCache conflict, wipe the old cache first:
+#   rm -rf build
 
-# Add the build output directory to your PATH so llama-server is callable from anywhere.
-# Add this to your shell profile (~/.bashrc), then reload it:
-#   export PATH="$HOME/llama.cpp/build/bin:$PATH"
-# To apply immediately in the current terminal:
+# Build with HTTPS/curl support enabled (-DLLAMA_CURL=ON is the key flag)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON
+cmake --build build --config Release -j$(nproc)
+```
+
+> **If cmake fails with "CMakeCache.txt … different directory":** a stale build cache from a previous
+> run in a different location is blocking the configure step. Delete it and re-run:
+> ```sh
+> rm -rf build
+> cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON
+> cmake --build build --config Release -j$(nproc)
+> ```
+> Alternatively, if you are already inside the `llama.cpp` root and prefer to build in-source
+> (the `cmake .` form you may have found while troubleshooting), clear only the stale cache files
+> and use `.` as the source/build directory:
+> ```sh
+> rm -rf CMakeCache.txt CMakeFiles
+> cmake . -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON
+> cmake --build . --config Release -j$(nproc)
+> ```
+> Either form produces a working `llama-server`. The `-B build` form keeps build artefacts out of
+> the source tree; `cmake .` works equally well if that is what you are already set up for.
+
+**Step 3c — Add both PATH and LD_LIBRARY_PATH to your shell profile:**
+
+```sh
+# PATH            -> so the shell finds the llama-server executable
+# LD_LIBRARY_PATH -> so the dynamic loader finds llama.cpp's .so libraries at runtime.
+#                    Without this, llama-server exits immediately with:
+#                    "error while loading shared libraries: … cannot open shared object file"
 echo 'export PATH="$HOME/llama.cpp/build/bin:$PATH"' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH="$HOME/llama.cpp/build/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-Verify from the WSL terminal: `llama-server --version`
+**Verify:**
+```sh
+llama-server --version
+```
+If this prints a version number, all three things are wired up (executable found, libraries found, HTTPS
+supported). If you see `cannot open shared object file` the `LD_LIBRARY_PATH` line was not applied — re-run
+the `echo` commands and open a fresh terminal.
 
 > **Note:** Run imini entirely inside the WSL terminal. Once it is running you can open
 > `http://localhost:8080` in your Windows browser as normal.
@@ -317,6 +396,9 @@ See [`docs/observability/`](docs/observability/) to add Prometheus/Grafana dashb
 | WSL: can't reach app from Windows browser | Run `./run.sh` inside the WSL terminal; then open `http://localhost:8080` in your Windows browser. |
 | cmake not found (Linux/WSL build) | `sudo apt install cmake build-essential` (Debian/Ubuntu) or `sudo dnf install cmake gcc-c++` (Fedora). |
 | llama.cpp build errors | Make sure build tools are installed; try `cmake --build build --config Release -j1` (single thread) to see the error clearly. |
+| `HTTPS is not supported` / `failed to download model from Hugging Face` in `llama-server.log` | llama.cpp was built without SSL/curl support. Install the missing libraries and rebuild: `sudo apt install libcurl4-openssl-dev libssl-dev` (Debian/Ubuntu) or `sudo dnf install libcurl-devel openssl-devel` (Fedora), then `rm -rf build && cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON && cmake --build build --config Release -j$(nproc)`. This is the most common cause of `./ask.sh` returning with no answer after the server appears to start. |
+| `CMakeCache.txt … different directory` cmake error | A stale build cache from a previous run in a different location is blocking the configure step. Run `rm -rf build` inside the `llama.cpp` directory, then re-run the cmake commands. |
+| `error while loading shared libraries: … cannot open shared object file` (Linux/WSL) | `LD_LIBRARY_PATH` is not set. Run: `echo 'export LD_LIBRARY_PATH="$HOME/llama.cpp/build/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' >> ~/.bashrc && source ~/.bashrc`. Adding `build/bin` to PATH is not enough — PATH finds the executable, `LD_LIBRARY_PATH` finds the `.so` libraries it depends on. |
 | `ask.sh` returns immediately with no answer | The script now prints why. `Could not get a response ... (curl exit 7)` means nothing is listening at the URL — start the server with `./run.sh` and wait for `llama-server is ready.`. `empty response` means the model is still loading — check `llama-server.log` and retry. |
 | `ask.sh` fails but `run.sh` is running (WSL) | `localhost` may not resolve to the server inside WSL. Use the IPv4 address: `IMINI_URL=http://127.0.0.1:8080 ./ask.sh "..."`. |
 | `ask.sh: bad interpreter` / `\r: No such file` | The `.sh` file was checked out with Windows (CRLF) line endings. Re-clone with the repo's `.gitattributes` honored, or run `sed -i 's/\r$//' ask.sh scripts/common.sh run.sh`. |
