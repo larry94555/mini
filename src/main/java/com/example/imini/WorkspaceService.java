@@ -21,12 +21,15 @@ public class WorkspaceService {
     private final PluginService plugins;
     private final SettingsStore settings;
     private final SigningService signing;
+    private final MemoryStore memory;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public WorkspaceService(PluginService plugins, SettingsStore settings, SigningService signing) {
+    public WorkspaceService(PluginService plugins, SettingsStore settings, SigningService signing,
+                            MemoryStore memory) {
         this.plugins = plugins;
         this.settings = settings;
         this.signing = signing;
+        this.memory = memory;
     }
 
     /** Mint a fresh Ed25519 key pair (base64) for signing/verifying bundles. */
@@ -46,6 +49,12 @@ public class WorkspaceService {
         bundle.put("exportedAt", java.time.Instant.now().toString());
         bundle.put("pack", pack);
         bundle.put("settings", settings.all());
+        // durable memory rides along with the bundle (like settings; signature still covers the pack digest)
+        Map<String, Object> mem = new LinkedHashMap<>();
+        String note = memory.get(MemoryStore.DEFAULT_OWNER);
+        mem.put("note", note == null ? "" : note);
+        mem.put("pins", memory.pinsDetailed(MemoryStore.DEFAULT_OWNER));
+        bundle.put("memory", mem);
         String packSha = signPayload(mapper.writeValueAsString(pack));
         bundle.putAll(signing.signFields(packSha));       // adds signatureAlg/signature/packSha256[/keyId] when configured
         return mapper.writeValueAsString(bundle);
@@ -192,6 +201,28 @@ public class WorkspaceService {
             }
         }
         out.put("settingsApplied", applied);
+        // 3) restore durable memory (note + pins with provenance), if present
+        Object memObj = root.get("memory");
+        if (memObj instanceof Map<?, ?> memMap) {
+            Object note = memMap.get("note");
+            if (note != null && !String.valueOf(note).isBlank()) {
+                memory.setNote(MemoryStore.DEFAULT_OWNER, String.valueOf(note));
+            }
+            Object pins = memMap.get("pins");
+            if (pins instanceof List<?> pinList) {
+                List<Map<String, Object>> typed = new ArrayList<>();
+                for (Object o : pinList) if (o instanceof Map<?, ?> pm) {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("fact", pm.get("fact"));
+                    m.put("source", pm.get("source"));
+                    m.put("createdAt", pm.get("createdAt"));
+                    typed.add(m);
+                }
+                memory.importPins(MemoryStore.DEFAULT_OWNER, typed);
+                out.put("memoryPinsImported", typed.size());
+            }
+            out.put("memoryRestored", true);
+        }
         log.info("[workspace] imported bundle: settings applied=" + applied.size());
         return out;
     }
