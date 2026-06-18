@@ -45,7 +45,7 @@ public class LlamaClient {
     private int maxTokens;
     @Value("${agent.stream-max-chars:12000}")
     private int streamMaxChars;
-    @Value("${agent.stream-max-seconds:90}")
+    @Value("${agent.stream-max-seconds:600}")
     private int streamMaxSeconds;
     @Value("${agent.summary-model:}")
     private String summaryModel;

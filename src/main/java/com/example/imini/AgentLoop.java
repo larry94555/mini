@@ -46,9 +46,9 @@ public class AgentLoop {
     @Value("${agent.plan.max-replans:2}") private int planMaxReplans;
     @Value("${agent.plan.verify:true}") private boolean planVerify;
     @Value("${agent.plan.suggest-checks:true}") private boolean planSuggestChecks;
-    @Value("${agent.verify-edits:true}") private boolean verifyEdits;
-    @Value("${agent.coding-report:true}") private boolean codingReport;
-    @Value("${agent.coding-report.enforce:true}") private boolean codingReportEnforce;
+    @Value("${agent.verify-edits:false}") private boolean verifyEdits;
+    @Value("${agent.coding-report:false}") private boolean codingReport;
+    @Value("${agent.coding-report.enforce:false}") private boolean codingReportEnforce;
     @Value("${agent.plan.step-diff:true}") private boolean planStepDiff;
     @Value("${agent.plan.step-diff.snapshot:true}") private boolean planStepSnapshot;
 
