@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Memory hygiene/decay + two-stage recall + embedding cache: durable facts unused (never injected/recalled)
+  for `agent.memory-decay-days` are auto-pruned after a run (and via `POST /memory/hygiene`), pins never
+  touched; promote-to-pin candidates are ordered by usage. `recall_memory` is now two-stage -- cheap-rank a
+  shortlist, then optionally have the summary model pick/order the most relevant (`agent.memory-rerank`).
+  Embedding-mode ranking caches each fact's vector (in-process + `embed_cache` table) to avoid re-embedding.
 - Embedding-based memory ranking + recall_memory tool + memory analytics: durable-fact ranking now reuses a
   shared `RetrievalService.rankTexts` that scores by embedding cosine when `retrieval.embeddings=true` (else
   lexical, with fallback), used by both session seeding and a new `recall_memory` tool the agent can call

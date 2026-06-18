@@ -22,12 +22,17 @@ public class MemoryStore {
 
     private final Database db;
     private final RetrievalService retrieval;
+    private final LlamaClient llama;
     @Value("${agent.memory-inject-max:12}") private int injectMax; // max durable facts seeded per session
     @Value("${agent.memory-recall-k:6}") private int recallK;      // default facts returned by recall_memory
+    @Value("${agent.memory-recall-shortlist:12}") private int recallShortlist; // 1st-stage candidate count
+    @Value("${agent.memory-rerank:true}") private boolean rerank;  // 2nd-stage model rerank of recall
+    @Value("${agent.memory-decay-days:30}") private int decayDays; // age out unused facts older than this
 
-    public MemoryStore(Database db, RetrievalService retrieval) {
+    public MemoryStore(Database db, RetrievalService retrieval, LlamaClient llama) {
         this.db = db;
         this.retrieval = retrieval;
+        this.llama = llama;
     }
 
     /**
@@ -204,6 +209,7 @@ public class MemoryStore {
         for (String l : splitLines(get(owner))) {
             if (!pinSet.contains(l.toLowerCase(java.util.Locale.ROOT))) auto.add(l);
         }
+        touchFacts(owner, auto); // register every auto fact (first_seen) so hygiene can age unused ones
         // rank auto facts by the current retrieval mode (embeddings if enabled, else lexical)
         auto = new java.util.ArrayList<>(retrieval.rankTexts(query, auto));
         int room = Math.max(0, injectMax - pins.size());
@@ -226,13 +232,117 @@ public class MemoryStore {
             if (seen.add(l.toLowerCase(java.util.Locale.ROOT))) facts.add(l);
         }
         if (facts.isEmpty()) return "(no durable memory stored yet)";
-        java.util.List<String> ranked = retrieval.rankTexts(query, facts);
         int want = k > 0 ? k : recallK;
-        java.util.List<String> topList = new java.util.ArrayList<>(ranked.subList(0, Math.min(want, ranked.size())));
+
+        // stage 1: cheap rank to a shortlist
+        java.util.List<String> ranked = retrieval.rankTexts(query, facts);
+        java.util.List<String> shortlist =
+                new java.util.ArrayList<>(ranked.subList(0, Math.min(Math.max(want, recallShortlist), ranked.size())));
+
+        // stage 2 (optional): let the summary model pick/order the most relevant from the shortlist
+        java.util.List<String> topList = (rerank && shortlist.size() > want)
+                ? rerankRecall(query, shortlist, want)
+                : new java.util.ArrayList<>(shortlist.subList(0, Math.min(want, shortlist.size())));
+
         noteUse(owner, topList, "recalled");
         StringBuilder sb = new StringBuilder("Relevant durable memory:\n");
         for (String f : topList) sb.append("- ").append(f).append('\n');
         return sb.toString().strip();
+    }
+
+    /** Ask the summary model to choose the {@code k} most relevant candidates for the query; falls back to
+     *  the shortlist's own order if the model is unavailable or its answer can't be parsed. */
+    private java.util.List<String> rerankRecall(String query, java.util.List<String> candidates, int k) {
+        try {
+            StringBuilder numbered = new StringBuilder();
+            for (int i = 0; i < candidates.size(); i++) {
+                numbered.append(i + 1).append(". ").append(candidates.get(i)).append('\n');
+            }
+            java.util.List<Map<String, Object>> req = new java.util.ArrayList<>();
+            req.add(Map.of("role", "system", "content",
+                    "You select the most relevant memory facts for a query. Given a numbered list, reply with "
+                            + "ONLY the numbers of the up to " + k + " most relevant facts, most relevant first, "
+                            + "comma-separated (e.g. \"3,1,5\"). No other text."));
+            req.add(Map.of("role", "user", "content", "QUERY: " + query + "\n\nFACTS:\n" + numbered));
+            Map<String, Object> resp = llama.summaryChat(req);
+            Object c = resp == null ? null : resp.get("content");
+            java.util.List<String> picked = parseRerankSelection(c == null ? "" : String.valueOf(c), candidates, k);
+            return picked.isEmpty()
+                    ? new java.util.ArrayList<>(candidates.subList(0, Math.min(k, candidates.size())))
+                    : picked;
+        } catch (Exception e) {
+            log.warn("[memory] recall rerank failed (" + e.getMessage() + "); using shortlist order");
+            return new java.util.ArrayList<>(candidates.subList(0, Math.min(k, candidates.size())));
+        }
+    }
+
+    /** Parse a "3,1,5"-style selection into facts (1-based indices into candidates), capped at k, deduped. */
+    static java.util.List<String> parseRerankSelection(String modelOut, java.util.List<String> candidates, int k) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (modelOut == null) return out;
+        java.util.LinkedHashSet<Integer> idx = new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d+").matcher(modelOut);
+        while (m.find() && idx.size() < k) {
+            int i = Integer.parseInt(m.group());
+            if (i >= 1 && i <= candidates.size()) idx.add(i);
+        }
+        for (int i : idx) out.add(candidates.get(i - 1));
+        return out;
+    }
+
+    /**
+     * Hygiene pass: age out auto-note facts that have been observed for longer than {@code memory-decay-days}
+     * yet were never injected into a session or recalled by the tool. Pinned facts are never pruned. Returns
+     * a report {pruned:[...], kept:n, decayDays}.
+     */
+    public Map<String, Object> hygiene(String owner) {
+        Map<String, Object> report = new java.util.LinkedHashMap<>();
+        java.util.List<String> pruned = new java.util.ArrayList<>();
+        java.util.List<String> autoLines = splitLines(get(owner));
+        report.put("decayDays", decayDays);
+        if (!db.available() || autoLines.isEmpty()) {
+            report.put("pruned", pruned);
+            report.put("kept", autoLines.size());
+            return report;
+        }
+        long now = System.currentTimeMillis();
+        long decayMs = (long) decayDays * 24L * 60L * 60L * 1000L;
+        java.util.List<String> kept = new java.util.ArrayList<>();
+        for (String line : autoLines) {
+            long[] stat = statFor(owner, line); // [injected, recalled, firstSeen]
+            if (shouldDecay(stat[0], stat[1], stat[2], now, decayMs)) pruned.add(line);
+            else kept.add(line);
+        }
+        if (!pruned.isEmpty()) {
+            setNote(owner, String.join("\n", kept));
+            for (String p : pruned) {
+                try { db.update("DELETE FROM memory_stats WHERE scope=? AND fact=?", key(owner), p); }
+                catch (Exception ignore) { }
+            }
+            log.info("[memory] hygiene pruned " + pruned.size() + " unused fact(s) older than "
+                    + decayDays + "d");
+        }
+        report.put("pruned", pruned);
+        report.put("kept", kept.size());
+        return report;
+    }
+
+    private long[] statFor(String owner, String fact) {
+        try {
+            List<long[]> rows = db.query(
+                    "SELECT injected, recalled, COALESCE(first_seen,0) FROM memory_stats WHERE scope=? AND fact=?",
+                    rs -> new long[]{rs.getLong(1), rs.getLong(2), rs.getLong(3)}, key(owner), fact.strip());
+            return rows.isEmpty() ? new long[]{0, 0, 0} : rows.get(0);
+        } catch (Exception e) {
+            return new long[]{0, 0, 0};
+        }
+    }
+
+    /** Pure decay rule: never used (0 injected, 0 recalled) and observed longer ago than the decay window. */
+    static boolean shouldDecay(long injected, long recalled, long firstSeen, long now, long decayMs) {
+        if (injected > 0 || recalled > 0) return false; // it has earned its place
+        if (firstSeen <= 0) return false;               // never observed/aged yet -> keep
+        return (now - firstSeen) > decayMs;
     }
 
     /** A tool the agent can call mid-conversation to recall durable facts relevant to a query. */
@@ -264,13 +374,28 @@ public class MemoryStore {
             if (f == null || f.isBlank()) continue;
             try {
                 // col is an internal constant ("injected"/"recalled"), never user input
-                db.update("INSERT INTO memory_stats(scope, fact, injected, recalled, last_used) VALUES(?,?,?,?,?) "
+                db.update("INSERT INTO memory_stats(scope, fact, injected, recalled, last_used, first_seen) "
+                                + "VALUES(?,?,?,?,?,?) "
                                 + "ON CONFLICT(scope, fact) DO UPDATE SET " + col + "=" + col
                                 + "+1, last_used=excluded.last_used",
-                        key(owner), f.strip(), col.equals("injected") ? 1 : 0, col.equals("recalled") ? 1 : 0, now);
+                        key(owner), f.strip(), col.equals("injected") ? 1 : 0, col.equals("recalled") ? 1 : 0,
+                        now, now);
             } catch (Exception e) {
                 log.warn("[memory] stat failed: " + e.getMessage());
             }
+        }
+    }
+
+    /** Register facts as observed (first_seen) without bumping usage, so hygiene can age out unused ones. */
+    private void touchFacts(String owner, java.util.List<String> facts) {
+        if (!db.available() || facts == null || facts.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        for (String f : facts) {
+            if (f == null || f.isBlank()) continue;
+            try {
+                db.update("INSERT OR IGNORE INTO memory_stats(scope, fact, injected, recalled, last_used, "
+                                + "first_seen) VALUES(?,?,0,0,NULL,?)", key(owner), f.strip(), now);
+            } catch (Exception e) { /* best-effort */ }
         }
     }
 
