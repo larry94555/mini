@@ -11,7 +11,7 @@ RUN mvn -q -DskipTests package
 # with <finalName>imini</finalName> in pom.xml this is target/imini.jar
 
 # ---- run stage: small JRE image that just runs the jar ----
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=build /src/target/imini.jar /app/imini.jar
 # the agent's working directory + persistence live under these (mounted in compose)
