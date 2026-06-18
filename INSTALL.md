@@ -317,3 +317,6 @@ See [`docs/observability/`](docs/observability/) to add Prometheus/Grafana dashb
 | WSL: can't reach app from Windows browser | Run `./run.sh` inside the WSL terminal; then open `http://localhost:8080` in your Windows browser. |
 | cmake not found (Linux/WSL build) | `sudo apt install cmake build-essential` (Debian/Ubuntu) or `sudo dnf install cmake gcc-c++` (Fedora). |
 | llama.cpp build errors | Make sure build tools are installed; try `cmake --build build --config Release -j1` (single thread) to see the error clearly. |
+| `ask.sh` returns immediately with no answer | The script now prints why. `Could not get a response ... (curl exit 7)` means nothing is listening at the URL — start the server with `./run.sh` and wait for `llama-server is ready.`. `empty response` means the model is still loading — check `llama-server.log` and retry. |
+| `ask.sh` fails but `run.sh` is running (WSL) | `localhost` may not resolve to the server inside WSL. Use the IPv4 address: `IMINI_URL=http://127.0.0.1:8080 ./ask.sh "..."`. |
+| `ask.sh: bad interpreter` / `\r: No such file` | The `.sh` file was checked out with Windows (CRLF) line endings. Re-clone with the repo's `.gitattributes` honored, or run `sed -i 's/\r$//' ask.sh scripts/common.sh run.sh`. |

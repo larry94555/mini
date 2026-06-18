@@ -48,6 +48,14 @@ chmod +x *.sh scripts/*.sh
 ./ask.sh "Say hello in one sentence."
 ```
 
+> **WSL note:** if `./ask.sh` returns immediately with no answer, the script will now print why (it's usually that the server isn't reachable yet, or the model is still loading). If `run.sh` is running but `./ask.sh` still can't connect, `localhost` may not resolve to the server inside WSL — use the IPv4 address instead:
+>
+> ```sh
+> IMINI_URL=http://127.0.0.1:8080 ./ask.sh "Say hello in one sentence."
+> ```
+>
+> See *Troubleshooting* in [`INSTALL.md`](INSTALL.md) for more.
+
 ### Windows (native)
 
 Open a Command Prompt in the imini folder (open the folder in File Explorer → click the address bar →
