@@ -3171,3 +3171,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `docs/observability/alert-rules.yml` includes `IminiLowSuccessRate` (imini_run_success_rate <
   95) and `IminiHighLatencyP95` (imini_run_latency_p95_ms > 60s); `grafana-dashboard.json` includes
   success-rate and p95 stat panels and a latency panel plotting avg/p50/p95/max.
+
+---
+
+# Reliability, hardening, per-run trace
+
+## 368. Retry backoff + semantics (RetryTest)
+
+- **Run:** `./mvnw -Dtest=RetryTest test`.
+- **Observe:** `Retry.delayMs` is exponential (400/800/1600), adds jitter (50% -> 600), never drops below the
+  base exponential, and caps at 30s; `withBackoff` retries IOExceptions up to `attempts`, propagates non-IO
+  exceptions immediately (1 call), and throws the last IOException after exhausting attempts.
+
+## 369. Config validation (ConfigValidatorTest)
+
+- **Run:** `./mvnw -Dtest=ConfigValidatorTest test`.
+- **Observe:** `ConfigValidator.validate` returns no FATALs for a sane authed config; flags negative retries
+  and persistence-enabled-with-blank-path as FATAL; warns on auth-enabled-without-principals and on
+  auth-disabled. `countPrincipals` counts comma-separated entries.
+
+## 370. Secret redaction (RedactTest)
+
+- **Run:** `./mvnw -Dtest=RedactTest test`.
+- **Observe:** `Redact.mask` hides the middle (keeping 2+2 chars; short -> "****"); `Redact.scrub` removes
+  known secret substrings, replacing them with "****".
+
+## 371. Startup fail-fast (manual)
+
+- **Observe:** booting with `--llama.max-retries=-1` (or `--persistence.db-path=` with persistence on) fails
+  startup with an "invalid configuration" error; the log also prints `auth.enabled`, principal count, and a
+  masked signing-secret indicator.
+
+## 372. Per-run trace viewer (manual)
+
+- **Observe:** in the Admin overview, each recent run has a "trace — N events" disclosure; expanding it shows
+  the session/endpoint/latency/outcome header and the event timeline with colored type chips
+  (fold/compact/trim/tool/error).

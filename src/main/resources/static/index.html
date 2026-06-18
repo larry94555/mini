@@ -56,6 +56,14 @@
   .tracebar input { margin:0; }
   .hdot { display:inline-block; width:9px; height:9px; border-radius:50%; margin:0 2px; vertical-align:middle; background:var(--line); }
   .hdot.ok { background:#3fb950; } .hdot.degraded { background:#d29922; } .hdot.down { background:#f85149; }
+  .evtag { display:inline-block; font-size:9.5px; padding:0 5px; border-radius:999px; margin-right:5px; border:1px solid var(--line); color:var(--muted); }
+  .evtag.fold { color:#58a6ff; border-color:#58a6ff55; }
+  .evtag.compact { color:#bc8cff; border-color:#bc8cff55; }
+  .evtag.trim { color:#d29922; border-color:#d2992255; }
+  .evtag.tool { color:#3fb950; border-color:#3fb95055; }
+  .evtag.error { color:#f85149; border-color:#f8514955; }
+  .runrow { border-top:1px solid var(--border); padding:3px 0; }
+  .runmeta { font-size:10.5px; }
   .ctxbadge { font-size:10.5px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:0 6px; }
   #preflight .warn { color:var(--warn); } #preflight .bad { color:var(--bad); }
   .pinchip { display:inline-flex; gap:4px; align-items:center; font-size:10.5px; border:1px solid var(--line); border-radius:999px; padding:1px 7px; margin:2px 3px 2px 0; }
@@ -778,6 +786,16 @@ async function showKeys(){
 $("#wsKeys") && ($("#wsKeys").onclick = showKeys);
 function runsHtml(runs){
   if (!Array.isArray(runs) || !runs.length) return "(none)";
+  const evChip = (e) => {
+    const m = /^\s*\[([a-z_]+)\]/i.exec(String(e));
+    const type = m ? m[1].toLowerCase() : "";
+    const cls = ["fold","compact","trim","tool","error"].includes(type) ? type : "";
+    const label = m ? m[1] : "event";
+    const rest = m ? String(e).slice(m[0].length).trim() : String(e);
+    return '<div class="muted" style="font-size:10.5px;margin-left:14px">'
+      + '<span class="evtag ' + cls + '">' + escapeHtml(label) + '</span>'
+      + escapeHtml(rest) + '</div>';
+  };
   return runs.slice(0,10).map(r => {
     const t = r.ts ? new Date(r.ts).toLocaleTimeString() : "";
     const cx = [];
@@ -786,16 +804,18 @@ function runsHtml(runs){
     if (r.trims) cx.push(r.trims + ' trim' + (r.trims>1?'s':''));
     const ctx = cx.length ? ' <span class="ctxbadge" title="context management during this run">' + escapeHtml(cx.join(', ')) + '</span>' : '';
     const ev = Array.isArray(r.events) ? r.events : [];
-    const evHtml = ev.length
-      ? '<details style="margin:1px 0 1px 14px"><summary class="muted" style="cursor:pointer;font-size:10.5px">'
-        + ev.length + ' context event' + (ev.length>1?'s':'') + '</summary>'
-        + ev.map(e => '<div class="muted" style="font-size:10.5px">' + escapeHtml(String(e)) + '</div>').join('')
+    const trace = ev.length
+      ? '<details style="margin:1px 0 1px 0"><summary class="muted" style="cursor:pointer;font-size:10.5px">trace — '
+        + ev.length + ' event' + (ev.length>1?'s':'') + '</summary>'
+        + '<div class="runmeta muted" style="margin:2px 0 2px 14px">session ' + escapeHtml(String(r.session||"(none)"))
+        + ' · ' + escapeHtml(String(r.endpoint||"")) + ' · ' + (r.ms||0) + 'ms · ' + (r.ok?'ok':'failed') + '</div>'
+        + ev.map(evChip).join('')
         + '</details>'
       : '';
-    return '<div style="border-top:1px solid var(--border);padding:2px 0">'
+    return '<div class="runrow">'
       + escapeHtml(t) + ' · ' + escapeHtml(String(r.endpoint||"")) + ' [' + escapeHtml(String(r.mode||"")) + '] '
       + (r.ok ? 'ok' : '<span class="muted">failed</span>') + ' ' + (r.ms||0) + 'ms' + ctx + ' '
-      + '<span class="muted">' + escapeHtml(String(r.session||"")) + '</span>' + evHtml + '</div>';
+      + '<span class="muted">' + escapeHtml(String(r.session||"")) + '</span>' + trace + '</div>';
   }).join("");
 }
 async function refreshAdmin(){

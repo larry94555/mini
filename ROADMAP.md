@@ -340,6 +340,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Reliability + hardening + per-run trace: transient llama failures now retry with exponential backoff +
+  jitter (pure, tested `Retry.delayMs`). A startup `ConfigValidator` fails fast on contradictory config and
+  warns on risky settings; a `Redact` helper masks secrets in logs. The admin recent-runs view became a
+  per-run trace timeline with typed event chips.
 - Durable SLO + end-to-end correlation + observability alerts: `GET /admin/slo?window=24h|7d|30m|all`
   computes success rate + p50/p95 from the persisted run_history (survives restart), via a pure, tested
   `RunHistoryStore.windowStatsFrom`. MDC correlation now extends from the request filter into the agent loop
