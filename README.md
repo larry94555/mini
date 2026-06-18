@@ -162,6 +162,9 @@ No cloud API key is required.
 | `.github/workflows/release.yml` | On a `v*` tag: build the jar, checksum it, publish a GitHub Release |
 | `.github/workflows/supply-chain.yml` | SBOM (CycloneDX) + dependency vulnerability scan (Trivy -> Security tab) |
 | `.github/dependabot.yml` | Weekly dependency-update PRs (Maven, GitHub Actions, Docker) |
+| `.github/workflows/release-please.yml` | Conventional-Commit release PRs: bump `pom.xml` + `CHANGELOG.md`, tag |
+| `CHANGELOG.md` | Auto-generated changelog (release-please) |
+| `.trivyignore` | Documented CVE exceptions for the CRITICAL scan gate |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
 | `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
@@ -276,10 +279,31 @@ Actions used by the workflows, and the Dockerfile base image. (Renovate is an eq
 Dependabot is used here because it is built into GitHub.) When Dependabot bumps the pinned Maven version,
 re-pin the wrapper checksum with `sh scripts/pin-maven-checksum.sh`.
 
-**SBOM + vulnerability scan.** `supply-chain.yml` runs on pushes, PRs, and weekly: it generates a
-**CycloneDX SBOM** (uploaded as a build artifact) and runs a **Trivy** dependency scan whose results appear
-in the repository's **Security -> Code scanning** tab. The scan is report-only (it does not fail the build)
-so a newly disclosed CVE is surfaced without blocking unrelated work.
+**SBOM + vulnerability scan.** `supply-chain.yml` runs on pushes, PRs, and weekly. It generates a
+**CycloneDX SBOM** (uploaded as a build artifact) and runs **Trivy** twice: a report step that sends all
+HIGH/CRITICAL findings to the **Security -> Code scanning** tab (non-blocking), and a **gate step that fails
+the build on a fixable CRITICAL** (`ignore-unfixed: true`, so CVEs with no upstream fix don't block).
+Document intentional exceptions in `.trivyignore`.
+
+**Releases and changelog.** Commit with [Conventional Commits](https://www.conventionalcommits.org/)
+(`feat:`, `fix:`, `feat!:` for breaking). `release-please.yml` maintains a "release PR" that bumps the
+`pom.xml` version and updates `CHANGELOG.md`; merging it tags `vX.Y.Z`, which triggers `release.yml`
+(attaches the jar + `.sha256` to the release) and `docker-publish.yml` (publishes the image). You can still
+cut a release manually by bumping `pom.xml` and pushing a matching tag.
+
+## Large tool results: the bounded context fold
+
+When a single tool result (a huge file or web page) would blow the model's context window, imini condenses
+it before it enters the history. Moderately large results get a cheap head+tail trim. A result that
+*vastly* exceeds the window (over `agent.fold-threshold-chars`) is instead **folded**: it is chunked, each
+chunk is summarized by the cheap summary model, the summaries are concatenated, and the process recurses
+until the digest fits. Unlike truncation, the fold reads every region at least once (lossy by
+*compression*, not by *deletion*). It degrades gracefully to head+tail if the summary model is unavailable.
+
+Tune it in `application.properties` (defaults shown): `agent.fold-enabled=true`,
+`agent.fold-threshold-chars=24000`, `agent.fold-chunk-chars=8000`, `agent.fold-target-chars=4000`,
+`agent.fold-max-depth=2`. Set `agent.fold-enabled=false` for the prior head+tail-only behavior. Background:
+[`docs/RECURSIVE_LANGUAGE_MODELS.md`](docs/RECURSIVE_LANGUAGE_MODELS.md).
 
 ## Common helper scripts
 

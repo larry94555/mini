@@ -2708,3 +2708,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   supply-chain incident; bare `0.x` tags are not used for new releases).
 - **Observe:** the `scan` job in `supply-chain.yml` resolves the action and uploads SARIF. Dependabot
   (github-actions ecosystem) will propose future bumps.
+
+---
+
+# Context fold, Trivy CRITICAL gate, release-please
+
+## 304. Bounded context fold (deterministic, no server -- ContextFoldTest)
+
+- **Run:** `./mvnw -Dtest=ContextFoldTest test` (uses a fake summary model; no llama-server needed).
+- **Observe:** `chunkBy` splits/reassembles exactly; a small result is unchanged; with folding disabled an
+  oversized result gets a head+tail trim and the model is never called; with folding enabled an oversized
+  result is summarized chunk-by-chunk (one model call per chunk, output starts with `[folded summary`,
+  shrunk, no head+tail marker); and a summary-model failure degrades gracefully to head+tail.
+
+## 305. Trivy gate fails on fixable CRITICAL (CI)
+
+- **Observe:** `supply-chain.yml` runs Trivy twice -- a report step (HIGH,CRITICAL -> SARIF -> Security tab,
+  non-blocking) and a **gate step** (`severity: CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`) that
+  fails the build on a fixable CRITICAL. Document accepted exceptions in `.trivyignore`.
+
+## 306. release-please changelog/version automation (CI/config)
+
+- **Observe:** `release-please.yml` (with `release-please-config.json` + `.release-please-manifest.json`,
+  release-type `maven`) opens a release PR on pushes to main that bumps `pom.xml` and updates `CHANGELOG.md`
+  from Conventional Commits. Merging tags `vX.Y.Z`; `release.yml` then attaches `imini.jar` + `.sha256` to
+  the release (`gh release upload`), and `docker-publish.yml` publishes the image.

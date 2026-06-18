@@ -340,6 +340,13 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- RLM-style bounded context fold + Trivy CRITICAL gate + release-please/CHANGELOG: a single tool result that
+  vastly exceeds the window is now FOLDED (chunk -> summarize via the cheap model -> reduce -> recurse) by
+  `ContextManager.condenseToolResult` instead of dropping its middle, reading every region once (lossy by
+  compression, with graceful head+tail fallback; `agent.fold-*` settings). The supply-chain scan now FAILS
+  on a fixable CRITICAL (`ignore-unfixed`, `.trivyignore` exceptions) while still reporting HIGH/CRITICAL to
+  the Security tab. `release-please.yml` maintains a Conventional-Commit release PR that bumps `pom.xml` +
+  `CHANGELOG.md` and tags; `release.yml` attaches the jar/checksum to that release.
 - Release workflow + Dependabot + SBOM/supply-chain scan: a `v*` tag now builds the jar, checksums it, and
   publishes a GitHub Release (`release.yml`, with a tag-vs-pom version guard); `.github/dependabot.yml`
   opens weekly update PRs for Maven, GitHub Actions, and Docker; and `supply-chain.yml` generates a
