@@ -65,6 +65,12 @@ public class LlamaClient {
     private int maxRetries;
     @Value("${llama.retry-backoff-ms:400}")
     private long retryBackoffMs;
+    @Value("${llama.circuit-breaker-threshold:5}")
+    private int cbThreshold;
+    @Value("${llama.circuit-breaker-cooldown-ms:30000}")
+    private long cbCooldownMs;
+    // Initialised in @PostConstruct (after @Value injection); lateinit pattern.
+    private volatile CircuitBreaker breaker;
 
     private final TokenBudgetService budget;
     private final Metrics metrics;   // optional; null in unit tests
@@ -80,6 +86,17 @@ public class LlamaClient {
     /** Backward-compatible convenience constructor (no metrics); used by tests and older callers. */
     public LlamaClient(TokenBudgetService budget) {
         this(budget, null);
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void initBreaker() {
+        breaker = new CircuitBreaker("llama", cbThreshold, cbCooldownMs);
+        log.info("[llama] circuit breaker: threshold=" + cbThreshold + " cooldown=" + cbCooldownMs + "ms");
+    }
+
+    /** Current circuit-breaker state (for /healthz and metrics). */
+    public CircuitBreaker.State breakerState() {
+        return breaker != null ? breaker.state() : CircuitBreaker.State.CLOSED;
     }
 
     private String base() { return "http://" + clientHost + ":" + port; }
@@ -206,13 +223,23 @@ public class LlamaClient {
                                        List<Map<String, Object>> messages,
                                        List<Map<String, Object>> tools) throws Exception {
         HttpRequest req = buildRequest(url, model, messages, tools, false);
-        HttpResponse<String> resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
-            HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (r.statusCode() / 100 == 5) {                 // transient server error -> retry
-                throw new java.io.IOException("llama-server " + r.statusCode() + ": " + r.body());
-            }
-            return r;
-        });
+        if (breaker != null && !breaker.allowCall()) {
+            throw new CircuitBreaker.OpenException("[circuit:llama] open — llama-server unavailable");
+        }
+        HttpResponse<String> resp;
+        try {
+            resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
+                HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (r.statusCode() / 100 == 5) {                 // transient server error -> retry
+                    throw new java.io.IOException("llama-server " + r.statusCode() + ": " + r.body());
+                }
+                return r;
+            });
+            if (breaker != null) breaker.recordSuccess();
+        } catch (java.io.IOException e) {
+            if (breaker != null) breaker.recordFailure();
+            throw e;
+        }
         if (resp.statusCode() / 100 != 2) {                  // 4xx -> caller error, not retried
             throw new RuntimeException("llama-server error " + resp.statusCode() + ": " + resp.body());
         }
@@ -369,11 +396,19 @@ public class LlamaClient {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
-                HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
-                if (r.statusCode() / 100 == 5) throw new java.io.IOException("tokenize " + r.statusCode());
-                return r;
-            });
+            if (breaker != null && !breaker.allowCall()) return -1; // open: skip silently
+            HttpResponse<String> resp;
+            try {
+                resp = Retry.withBackoff(maxRetries + 1, retryBackoffMs, () -> {
+                    HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+                    if (r.statusCode() / 100 == 5) throw new java.io.IOException("tokenize " + r.statusCode());
+                    return r;
+                });
+                if (breaker != null) breaker.recordSuccess();
+            } catch (java.io.IOException e) {
+                if (breaker != null) breaker.recordFailure();
+                return -1;
+            }
             if (resp.statusCode() / 100 != 2) return -1;
             Map<String, Object> json = mapper.readValue(resp.body(), Map.class);
             Object tokens = json.get("tokens");

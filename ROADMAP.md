@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Circuit breaker + sandbox hardening + graceful shutdown: a three-state circuit breaker (CLOSED/OPEN/
+  HALF_OPEN) wraps all llama-server calls so sustained outages fail fast after the threshold; the
+  run_command sandbox now uses the workspace root as working directory and caps output at
+  sandbox.max-output-bytes; RunService drains in-flight runs on SIGTERM before shutting down. ConfigValidator
+  test CI failure fixed (parameter order).
 - Reliability + hardening + per-run trace: transient llama failures now retry with exponential backoff +
   jitter (pure, tested `Retry.delayMs`). A startup `ConfigValidator` fails fast on contradictory config and
   warns on risky settings; a `Redact` helper masks secrets in logs. The admin recent-runs view became a

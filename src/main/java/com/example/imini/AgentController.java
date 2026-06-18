@@ -359,7 +359,8 @@ public class AgentController {
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("status", readinessStatus(dbOk, llamaOk));
         out.put("db", Map.of("available", dbOk, "persistent", dbOk));
-        out.put("llama", Map.of("reachable", llamaOk, "contextTokens", ctx));
+        out.put("llama", Map.of("reachable", llamaOk, "contextTokens", ctx,
+                "circuitBreaker", llama.breakerState().name().toLowerCase()));
         out.put("uptimeMs", snap.getOrDefault("uptime_ms", 0L));
         out.put("context", snap.getOrDefault("context", Map.of())); // folds/compactions/trims
         String durable = memory.get(MemoryStore.DEFAULT_OWNER);
