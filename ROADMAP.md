@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Maven wrapper + cross-platform CI smoke test: added a lightweight `./mvnw` / `mvnw.cmd` (with
+  `.mvn/wrapper/maven-wrapper.properties`) so the project builds with no system Maven (prefers a system
+  `mvn`, else downloads a pinned Apache Maven into `.maven/`); `run.sh`/`run.bat` and `ci.yml` now use it.
+  A new `smoke.yml` workflow builds and boots imini headless on Linux + macOS and probes `/health`, and
+  shell-lints the POSIX scripts. (The previously-dangling `scripts/*.ps1` helpers are now committed.)
 - Cross-platform run scripts (macOS/Linux/WSL) + OS-aware model binary: added POSIX `.sh` equivalents of
   every `.bat` (thin `curl` wrappers sharing `scripts/common.sh`, plus `run.sh`/`eval.sh`), and made
   `llama.binary` default per-OS (`llama-server` off Windows) so the managed-server path works everywhere

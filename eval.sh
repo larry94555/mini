@@ -22,11 +22,18 @@ while [ "$i" -lt "$count" ]; do
   total=$((total + 1))
   answer="$(api_post /ask "{\"question\":\"$(json_escape "$question")\"}")"
   ok=1
-  ec_count="$(jq -r ".[$i].expect_contains | length" "$CASES")"
+  ec_count="$(jq -r ".[$i].expect_contains // [] | length" "$CASES")"
   j=0
   while [ "$j" -lt "$ec_count" ]; do
     needle="$(jq -r ".[$i].expect_contains[$j]" "$CASES")"
     case "$answer" in *"$needle"*) : ;; *) ok=0 ;; esac
+    j=$((j + 1))
+  done
+  nc_count="$(jq -r ".[$i].expect_not_contains // [] | length" "$CASES")"
+  j=0
+  while [ "$j" -lt "$nc_count" ]; do
+    needle="$(jq -r ".[$i].expect_not_contains[$j]" "$CASES")"
+    case "$answer" in *"$needle"*) ok=0 ;; *) : ;; esac
     j=$((j + 1))
   done
   if [ "$ok" -eq 1 ]; then passed=$((passed + 1)); echo "PASS  $name"; else echo "FAIL  $name"; fi

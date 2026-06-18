@@ -41,6 +41,8 @@ echo.
 
 echo [3/4] Locating Maven ^(the build tool^)...
 set "MVN_CMD="
+if exist "%~dp0mvnw.cmd" set "MVN_CMD=%~dp0mvnw.cmd"
+if defined MVN_CMD goto :have_maven
 where mvn >nul 2>nul
 if not errorlevel 1 set "MVN_CMD=mvn"
 if defined MVN_CMD goto :have_maven

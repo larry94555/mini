@@ -149,14 +149,18 @@ of the `.bat` files.
 
 Verify: `java -version` should print 17 or higher.
 
-## Step 2 — Install Maven
+## Step 2 — Maven (optional — the wrapper handles it)
+
+The repo ships a Maven wrapper (`./mvnw`, `mvnw.cmd`), and `run.sh`/`run.bat` use it automatically, so you
+do **not** need to install Maven: if none is on your PATH, the wrapper downloads a pinned Apache Maven into
+`.maven/` once. Installing Maven yourself is still fine (the wrapper prefers a system `mvn`):
 
 - **macOS:** `brew install maven`
 - **Debian/Ubuntu/WSL:** `sudo apt install maven`
 - **Fedora:** `sudo dnf install maven`
 - **Any (SDKMAN!):** `sdk install maven`
 
-Verify: `mvn -version`.
+Verify (either): `./mvnw -version` or `mvn -version`.
 
 ## Step 3 — Install llama-server
 

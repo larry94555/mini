@@ -2590,3 +2590,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `chmod +x *.sh scripts/*.sh`, then `./run.sh`; in another terminal `./ask.sh "Say hi"`.
 - **Observe:** the app builds and serves at http://localhost:8080 exactly as on Windows; the `.sh`
   wrappers return the same responses as their `.bat` counterparts. `IMINI_URL=...` retargets them.
+
+---
+
+# Maven wrapper + cross-platform CI smoke test
+
+## 290. Maven wrapper delegates and parses config (deterministic, no model)
+
+- **Run:** `./mvnw -version` (and, with a `mvn` on PATH, confirm it is used).
+- **Observe:** `mvnw` reads `distributionVersion`/`distributionUrl` from
+  `.mvn/wrapper/maven-wrapper.properties`, prefers a system `mvn` when present (forwarding all args), and
+  otherwise downloads the pinned Apache Maven into `.maven/` once. `mvnw.cmd` does the same on Windows
+  (reusing `scripts/get-maven.ps1` for the download). `sh -n mvnw` parses cleanly.
+
+## 291. Cross-platform smoke workflow (CI)
+
+- **Observe:** `.github/workflows/smoke.yml` runs on `ubuntu-latest` and `macos-latest`: it shell-lints the
+  POSIX scripts (`sh -n`), runs `./mvnw -version`, builds with `./mvnw -DskipTests package`, then boots the
+  jar with `--llama.manage-server=false` and polls `/health` until it returns ok — proving the app builds
+  and starts on Linux and macOS, not just Windows.
+
+## 292. eval.sh parity with run-evals.ps1 (manual)
+
+- **Observe:** `eval.sh` now honors both `expect_contains` and `expect_not_contains` (matching the
+  PowerShell runner), tolerating cases that omit either field. Requires `jq`.

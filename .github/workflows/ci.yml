@@ -19,7 +19,7 @@ jobs:
           java-version: "21"
           cache: maven
       - name: Run the test suite
-        run: mvn -B -ntp test
+        run: ./mvnw -B -ntp test
 
   docker-build:
     name: Docker image builds
