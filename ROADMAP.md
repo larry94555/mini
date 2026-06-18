@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Durable SLO + end-to-end correlation + observability alerts: `GET /admin/slo?window=24h|7d|30m|all`
+  computes success rate + p50/p95 from the persisted run_history (survives restart), via a pure, tested
+  `RunHistoryStore.windowStatsFrom`. MDC correlation now extends from the request filter into the agent loop
+  (`runId`/`session`) and scheduled tasks (`runKind`/`taskId`/`session`). The shipped `docs/observability/`
+  alert rules + Grafana dashboard gained success-rate and p95 panels/alerts using the SLO gauges.
 - Full-history NDJSON + JSON-log correlation + SLO panel: `GET /admin/runs/history.ndjson?since=&limit=`
   streams the entire persisted run_history (paginated), beyond the in-memory tail. The `json` Spring profile
   now also stamps MDC correlation fields (`reqId`/`path`/`user`) onto structured logs. `Metrics` computes

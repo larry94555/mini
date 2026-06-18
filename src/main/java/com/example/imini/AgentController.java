@@ -490,6 +490,48 @@ public class AgentController {
     }
 
     /**
+     * Parse a window spec into milliseconds: a number with a unit suffix s/m/h/d (e.g. "90s", "30m", "24h",
+     * "7d"), a bare number of milliseconds, or "all"/"" -> -1 (meaning "since the beginning"). Unknown specs
+     * fall back to 24h. Pure + static for testing.
+     */
+    static long parseWindowMs(String window) {
+        if (window == null) return 86_400_000L;
+        String w = window.trim().toLowerCase();
+        if (w.isEmpty() || w.equals("all")) return -1L;
+        try {
+            char unit = w.charAt(w.length() - 1);
+            if (Character.isDigit(unit)) return Long.parseLong(w); // bare milliseconds
+            long n = Long.parseLong(w.substring(0, w.length() - 1));
+            return switch (unit) {
+                case 's' -> n * 1_000L;
+                case 'm' -> n * 60_000L;
+                case 'h' -> n * 3_600_000L;
+                case 'd' -> n * 86_400_000L;
+                default -> 86_400_000L;
+            };
+        } catch (Exception e) {
+            return 86_400_000L;
+        }
+    }
+
+    /**
+     * Durable SLO over a time window, computed from the persisted run_history (survives restart). Unlike the
+     * in-memory percentiles in /metrics (a moving window over recent runs), this covers a real time window.
+     * {@code window}: e.g. "24h" (default), "7d", "30m", "90s", or "all". Admin only.
+     */
+    @GetMapping("/admin/slo")
+    public Map<String, Object> adminSlo(@RequestParam(name = "window", defaultValue = "24h") String window) {
+        requireAdmin();
+        long windowMs = parseWindowMs(window);
+        long since = windowMs < 0 ? 0 : Math.max(0, System.currentTimeMillis() - windowMs);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("window", window);
+        out.put("windowMs", windowMs);
+        out.putAll(metrics.windowStats(since));
+        return out;
+    }
+
+    /**
      * The FULL persisted run history as newline-delimited JSON, paginated: up to {@code limit} runs
      * (oldest-first) with {@code ts >= since}. Page forward by passing the last line's {@code ts} as the
      * next {@code since}. Reaches the entire run_history table, not just the in-memory tail. Admin only.

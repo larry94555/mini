@@ -194,22 +194,29 @@ public class AgentLoop {
     }
 
     public String run(String sessionId, String userQuestion, Mode mode, RunSink sink) throws Exception {
-        if (sink != null) sink.log("[mode] running in " + mode.name().toLowerCase());
-        if (slash.isHelp(userQuestion)) return slash.help();
-        if (project.isMemoryCommand(userQuestion)) return project.report();
-        if (init.isInitCommand(userQuestion)) return init.runInit();
-        if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
-        if (LoopCommand.isLoop(userQuestion)) return runLoop(sessionId, userQuestion, mode, sink);
-        String agentReply = maybeAgentCommand(userQuestion, sink);
-        if (agentReply != null) return agentReply;
-        String forked = maybeForkedSkill(userQuestion, sessionId, sink);
-        if (forked != null) return forked;
-        String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
-        if (shouldAutoPlan(systemPromptFor(question, sessionId), question, sink)) {
-            return runPlan(sessionId, question, mode, sink);
+        org.slf4j.MDC.put("runId", Long.toHexString(System.nanoTime()));
+        org.slf4j.MDC.put("session", sessionId == null ? "" : sessionId);
+        try {
+            if (sink != null) sink.log("[mode] running in " + mode.name().toLowerCase());
+            if (slash.isHelp(userQuestion)) return slash.help();
+            if (project.isMemoryCommand(userQuestion)) return project.report();
+            if (init.isInitCommand(userQuestion)) return init.runInit();
+            if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
+            if (LoopCommand.isLoop(userQuestion)) return runLoop(sessionId, userQuestion, mode, sink);
+            String agentReply = maybeAgentCommand(userQuestion, sink);
+            if (agentReply != null) return agentReply;
+            String forked = maybeForkedSkill(userQuestion, sessionId, sink);
+            if (forked != null) return forked;
+            String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
+            if (shouldAutoPlan(systemPromptFor(question, sessionId), question, sink)) {
+                return runPlan(sessionId, question, mode, sink);
+            }
+            recorder.beginEdits(sessionId);
+            return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
+        } finally {
+            org.slf4j.MDC.remove("runId");
+            org.slf4j.MDC.remove("session");
         }
-        recorder.beginEdits(sessionId);
-        return withEditTrust(sessionId, engine.run(systemPromptFor(question, sessionId), question, registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
@@ -263,6 +270,8 @@ public class AgentLoop {
      * check is screened by the same Sandbox as run_command.
      */
     public String runLoop(String sessionId, String message, Mode mode, RunSink sink) throws Exception {
+        if (org.slf4j.MDC.get("runId") == null) org.slf4j.MDC.put("runId", Long.toHexString(System.nanoTime()));
+        if (org.slf4j.MDC.get("session") == null) org.slf4j.MDC.put("session", sessionId == null ? "" : sessionId);
         LoopCommand.Spec spec = LoopCommand.parse(message, loopMaxAttempts, loopHardMax);
         if (spec.goal().isBlank()) {
             return "Usage: /loop [check=<command>] [attempts=N] <goal>. "
@@ -309,6 +318,8 @@ public class AgentLoop {
     }
 
     public String runPlan(String sessionId, String goal, Mode mode, RunSink sink) throws Exception {
+        if (org.slf4j.MDC.get("runId") == null) org.slf4j.MDC.put("runId", Long.toHexString(System.nanoTime()));
+        if (org.slf4j.MDC.get("session") == null) org.slf4j.MDC.put("session", sessionId == null ? "" : sessionId);
         if (slash.isHelp(goal)) return slash.help();
         final String g = slash.expand(goal);
         recorder.beginRun(sessionId); // fresh transcript for this plan

@@ -3136,3 +3136,38 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** start with `--spring.profiles.active=json`; logs become one JSON object per line and each
   request carries MDC `reqId`, `path`, and (when authed) `user`. Default profile keeps the plain console.
+
+---
+
+# Durable SLO + end-to-end correlation + observability alerts
+
+## 363. Window parser (WindowParseTest)
+
+- **Run:** `./mvnw -Dtest=WindowParseTest test`.
+- **Observe:** `AgentController.parseWindowMs` maps `90s/30m/24h/7d` to ms, bare numbers to ms, `all`/`""` to
+  -1 (since beginning), and unknown/null to 24h.
+
+## 364. Durable SLO aggregation (WindowStatsTest)
+
+- **Run:** `./mvnw -Dtest=WindowStatsTest test`.
+- **Observe:** `RunHistoryStore.windowStatsFrom` over 10 synthetic records (2 failures, latencies 100..1000)
+  yields runs=10, ok=8, failed=2, success_rate=80.0, p50=500, p95=1000, avg=550, max=1000; empty -> 100% and
+  zeros.
+
+## 365. /admin/slo endpoint (manual)
+
+- **Observe:** `GET /admin/slo?window=24h` returns `{window, windowMs, runs, ok, failed, success_rate,
+  avg_ms, max_ms, p50_ms, p95_ms}` from the persisted run_history; `window=all` covers everything. Admin only.
+  Unlike `/metrics` (in-memory moving window), these numbers survive a restart.
+
+## 366. Run-loop + scheduled-task correlation (manual)
+
+- **Observe:** with `--spring.profiles.active=json`, request-driven runs carry `reqId`/`path`/`user`
+  (AuthFilter) plus `runId`/`session` (AgentLoop); scheduled runs carry `runKind=scheduled`/`taskId`/`session`
+  (ScheduledTasks) plus `runId`/`session`. A single run's fold/compact/tool log lines share the same `runId`.
+
+## 367. Observability alerts + dashboard (manual)
+
+- **Observe:** `docs/observability/alert-rules.yml` includes `IminiLowSuccessRate` (imini_run_success_rate <
+  95) and `IminiHighLatencyP95` (imini_run_latency_p95_ms > 60s); `grafana-dashboard.json` includes
+  success-rate and p95 stat panels and a latency panel plotting avg/p50/p95/max.
