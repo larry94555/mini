@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Persistence coverage + readiness probe: a real-SQLite `PersistenceRoundTripTest` round-trips sessions
+  (history/ownership/sharing), run history (context counts + event timeline), and plans; a
+  `WorkspaceBundleRoundTripTest` round-trips a signed bundle (settings + durable memory) through real HMAC
+  signing/verification. New `GET /healthz` readiness probe (db + llama reachability + context/memory
+  snapshot) and `/admin/overview` now surfaces context totals + durable-memory state with the run timeline.
 - Memory consolidation pass: a real-SQLite integration test (`MemoryStorePersistenceTest`) covers the
   durable-memory path end to end (note/pins/provenance, relevance seeding, analytics, hygiene prune); the
   long-lingering redundant `ContextFoldConfigIT.java` is finally deleted; the embed cache is now a bounded
