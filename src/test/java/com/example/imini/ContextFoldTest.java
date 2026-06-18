@@ -42,7 +42,7 @@ class ContextFoldTest {
     }
 
     private static ContextManager manager(FakeLlama llama, boolean foldEnabled) throws Exception {
-        ContextManager cm = new ContextManager(llama);
+        ContextManager cm = new ContextManager(llama, null);
         set(cm, "maxToolChars", 100);
         set(cm, "foldEnabled", foldEnabled);
         set(cm, "foldThresholdChars", 200);

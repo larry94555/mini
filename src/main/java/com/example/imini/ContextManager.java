@@ -29,6 +29,7 @@ public class ContextManager {
     static final String MEMORY_TAG = "[MEMORY]";
 
     private final LlamaClient llama;
+    private final Metrics metrics;   // optional; null in unit tests
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Value("${agent.compact-token-threshold:6000}")
@@ -54,8 +55,9 @@ public class ContextManager {
     @Value("${agent.fold-max-depth:2}")
     private int foldMaxDepth;         // recursion cap so the reduce always terminates
 
-    public ContextManager(LlamaClient llama) {
+    public ContextManager(LlamaClient llama, Metrics metrics) {
         this.llama = llama;
+        this.metrics = metrics;
     }
 
     /**
@@ -72,8 +74,16 @@ public class ContextManager {
         if (result == null || result.length() <= maxToolChars) return result;
         if (foldEnabled && result.length() > foldThresholdChars) {
             try {
-                return foldOversized(result, 0);
+                String folded = foldOversized(result, 0);
+                if (metrics != null) {
+                    metrics.inc("context_fold");
+                    metrics.addModelOutput(0); // fold uses the summary model; runs counted there
+                }
+                log.info("\n[fold] condensed a " + result.length() + "-char input to "
+                        + folded.length() + " chars");
+                return folded;
             } catch (Exception e) {
+                if (metrics != null) metrics.inc("context_fold_fallback");
                 log.warn("[fold] failed (" + e.getMessage() + "); falling back to head+tail trim");
             }
         }

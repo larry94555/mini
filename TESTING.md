@@ -2733,3 +2733,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   release-type `maven`) opens a release PR on pushes to main that bumps `pom.xml` and updates `CHANGELOG.md`
   from Conventional Commits. Merging tags `vX.Y.Z`; `release.yml` then attaches `imini.jar` + `.sha256` to
   the release (`gh release upload`), and `docker-publish.yml` publishes the image.
+
+---
+
+# Fold observability, @file folding, Trivy severity policy
+
+## 307. Shipped fold defaults fold a huge input (ContextFoldConfigIT)
+
+- **Run:** `./mvnw -Dtest=ContextFoldConfigIT test` (deterministic fake model; no llama-server).
+- **Observe:** reading the real `agent.fold-*` defaults from `application.properties`, a ~100KB single input
+  is folded (output starts `[folded summary`, far smaller than the input, every ~8KB chunk summarized).
+
+## 308. Oversized @file references are folded, not skipped (ContextRefFoldTest)
+
+- **Observe:** `ContextRefService.largeFileAction` returns INLINE below `max-file-kb`, FOLD between
+  `max-file-kb` and `max-fold-file-kb` (when folding is enabled), and SKIP above `max-fold-file-kb` or when
+  folding is disabled. In `expand()`, a FOLD file is read and condensed via `ContextManager` and attached
+  as "(file, folded from N bytes -> M)".
+
+## 309. Fold observability (manual)
+
+- **Observe:** when a fold occurs, the `context_fold` counter increments (and `context_fold_fallback` on
+  graceful fallback). Check `GET /metrics` (`counters.context_fold`) or `GET /metrics/prom`
+  (`imini_counter{counter="context_fold"}`); the bundled Grafana dashboard can graph it.
+
+## 310. Trivy severity policy (CI)
+
+- **Observe:** `supply-chain.yml` reports HIGH/CRITICAL to the Security tab on every run; the CRITICAL gate
+  (`exit-code 1`, `ignore-unfixed`) runs on PRs/pushes (`if: github.event_name != 'schedule'`) but not on
+  the weekly cron. Policy: `docs/SECURITY.md`; exceptions: `.trivyignore`.
+
+## 311. Live-server fold (manual integration)
+
+- **Run:** start imini with a real llama-server, then `./ask.sh "Read @<a-huge-file> and summarize"` (file
+  larger than `context.refs.max-file-kb`).
+- **Observe:** the trace shows the file attached as folded; the answer reflects content from across the
+  whole file (not just the head); `context_fold` increments. CI cannot host a model, so this is manual.

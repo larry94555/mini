@@ -65,9 +65,12 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-      # 2) Gate: FAIL the build on a fixable CRITICAL. ignore-unfixed avoids blocking on CVEs with no
-      #    upstream fix yet; document intentional exceptions in .trivyignore.
-      - name: Trivy gate (fail on fixable CRITICAL)
+      # 2) Gate: on PRs/pushes, FAIL on a fixable CRITICAL (ignore-unfixed avoids blocking on CVEs with no
+      #    upstream fix; exceptions go in .trivyignore). The weekly scheduled run does NOT gate -- it only
+      #    reports (step 1 above), so newly disclosed HIGH/CRITICAL CVEs surface without breaking main.
+      #    Policy: docs/SECURITY.md.
+      - name: Trivy gate (fail on fixable CRITICAL -- PRs/pushes only)
+        if: github.event_name != 'schedule'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
