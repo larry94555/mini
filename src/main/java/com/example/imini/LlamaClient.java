@@ -71,9 +71,15 @@ public class LlamaClient {
     private volatile int serverCtxCache = 0; // 0 = unknown / not yet fetched
     private volatile int serverVisionCache = 0; // 0 unknown, 1 yes, -1 no
 
+    @org.springframework.beans.factory.annotation.Autowired
     public LlamaClient(TokenBudgetService budget, Metrics metrics) {
         this.budget = budget;
         this.metrics = metrics;
+    }
+
+    /** Backward-compatible convenience constructor (no metrics); used by tests and older callers. */
+    public LlamaClient(TokenBudgetService budget) {
+        this(budget, null);
     }
 
     private String base() { return "http://" + clientHost + ":" + port; }
