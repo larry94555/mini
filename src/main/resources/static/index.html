@@ -293,6 +293,7 @@
         <b style="font-size:12px">Durable memory</b>
         <a class="linklike" id="refreshDurableMemLink" style="font-size:11px" title="Reload durable memory">refresh</a>
         <button id="clearDurableMem" style="font-size:11px;float:right" title="Clear the durable memory note (admin)">clear</button>
+        <button id="hygieneDurableMem" style="font-size:11px;float:right;margin-right:4px" title="Prune long-unused auto facts (admin)">hygiene</button>
         <div class="muted" style="font-size:11px;margin:2px 0">Facts carried across sessions and restarts; a new session is seeded with the most <i>relevant</i> facts (pins always included). Included in workspace Export/Import.</div>
         <div id="durableMemMeta" class="muted" style="font-size:10.5px;margin:2px 0"></div>
         <textarea id="durableMemNote" placeholder="auto memory note (editable) — facts the agent learned" style="width:100%;height:70px;font-size:11px"></textarea>
@@ -1408,17 +1409,24 @@ function renderPins(pins){
     refreshDurableMemory();
   });
 }
-function renderPinCandidates(note, pinned){
+function renderPinCandidates(note, pinned, stats){
   const wrap = document.getElementById("pinSuggestWrap");
   const el = document.getElementById("pinCandidates");
   if (!wrap || !el) return;
   const pinnedSet = new Set((pinned||"").split("\n").map(x=>x.trim().toLowerCase()).filter(Boolean));
-  const cands = (note||"").split("\n").map(x=>x.trim()).filter(Boolean)
+  const use = {}; (stats||[]).forEach(f => { use[String(f.fact||"").toLowerCase()] = (f.injected||0)+(f.recalled||0); });
+  let cands = (note||"").split("\n").map(x=>x.trim()).filter(Boolean)
     .filter(l => !pinnedSet.has(l.toLowerCase()));
+  // hottest (most injected/recalled) first -- best pin candidates
+  cands.sort((a,b) => (use[b.toLowerCase()]||0) - (use[a.toLowerCase()]||0));
   if (!cands.length){ wrap.style.display = "none"; el.innerHTML = ""; return; }
   wrap.style.display = "";
-  el.innerHTML = cands.map(l => '<span class="candchip">' + escapeHtml(l)
-    + ' <a title="pin this fact" data-cand="' + escapeHtml(l) + '">+pin</a></span>').join("");
+  el.innerHTML = cands.map(l => {
+    const u = use[l.toLowerCase()]||0;
+    const badge = u>0 ? ' <span class="muted" title="times used">\u00d7'+u+'</span>' : '';
+    return '<span class="candchip">' + escapeHtml(l) + badge
+      + ' <a title="pin this fact" data-cand="' + escapeHtml(l) + '">+pin</a></span>';
+  }).join("");
   el.querySelectorAll("a[data-cand]").forEach(a => a.onclick = async () => {
     await post("/memory/durable/pin", {text: a.getAttribute("data-cand"), source: "auto note"});
     refreshDurableMemory();
@@ -1436,7 +1444,9 @@ async function refreshDurableMemory(){
     meta.textContent = (j.present ? ("updated " + when) : "(no durable memory yet \u2014 fills in after a session compacts; pin facts to keep them)") + ws;
     if (document.activeElement !== ta) ta.value = j.note || "";
     renderPins(j.pins);
-    renderPinCandidates(j.note, j.pinned);
+    let stats = [];
+    try { const an = await getJson("/memory/analytics"); stats = (an && an.facts) || []; } catch(e){}
+    renderPinCandidates(j.note, j.pinned, stats);
     refreshMemoryAnalytics();
   } catch(e){ meta.textContent = "(unavailable)"; }
 }
@@ -1464,6 +1474,13 @@ async function refreshDurableMemory(){
   if (cl) cl.onclick = async () => {
     const r = await post("/memory/durable/clear", {});
     if (r && r.ok === false){ appendLog("[memory] clear failed (admin only?)"); }
+    refreshDurableMemory();
+  };
+  const hy = document.getElementById("hygieneDurableMem");
+  if (hy) hy.onclick = async () => {
+    const r = await post("/memory/hygiene", {});
+    if (r && Array.isArray(r.pruned)) appendLog("[memory] hygiene pruned " + r.pruned.length + " unused fact(s)");
+    else appendLog("[memory] hygiene failed (admin only?)");
     refreshDurableMemory();
   };
 }

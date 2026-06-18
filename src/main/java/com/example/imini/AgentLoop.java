@@ -247,6 +247,7 @@ public class AgentLoop {
         // write the session's current memory note back to durable storage so it carries to future sessions
         String durableNote = ContextManager.extractMemoryNote(result.messages());
         memory.save(sessions.owner(sessionId), context.consolidateMemoryIfNeeded(durableNote));
+        memory.hygiene(sessions.owner(sessionId)); // conservative: prune only long-unused auto facts
         return withEditTrust(sessionId, result.answer(), mode, sink);
     }
 

@@ -335,12 +335,12 @@ public class RetrievalService {
         String q = query == null ? "" : query;
         List<String> in = new ArrayList<>(texts);
         if (useEmbeddings) {
-            float[] qv = embed(q);
+            float[] qv = embedCached(q);
             if (qv.length > 0) {
                 java.util.IdentityHashMap<String, Double> score = new java.util.IdentityHashMap<>();
                 boolean ok = true;
                 for (String t : in) {
-                    float[] tv = embed(t);
+                    float[] tv = embedCached(t);
                     if (tv.length == 0) { ok = false; break; }
                     score.put(t, cosine(qv, tv));
                 }
@@ -430,6 +430,53 @@ public class RetrievalService {
     // --- embeddings (optional) ----------------------------------------------
 
     @SuppressWarnings("unchecked")
+    // In-process cache of text -> embedding (keyed by model+sha) backed by the embed_cache table, so
+    // identical facts aren't re-embedded on every ranking or after a restart.
+    private final java.util.concurrent.ConcurrentHashMap<String, float[]> embedMem = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Embed a text, reusing a cached vector (memory, then DB) when the same text+model was embedded before. */
+    float[] embedCached(String text) {
+        if (text == null || text.isBlank()) return new float[0];
+        String sha = sha256(embedModel + "\u0000" + text);
+        float[] mem = embedMem.get(sha);
+        if (mem != null) return mem;
+        if (db.available()) {
+            try {
+                List<String> rows = db.query("SELECT embedding FROM embed_cache WHERE text_sha=? AND model=?",
+                        rs -> rs.getString(1), sha, embedModel);
+                if (!rows.isEmpty()) {
+                    float[] v = jsonToFloats(rows.get(0));
+                    if (v != null && v.length > 0) { embedMem.put(sha, v); return v; }
+                }
+            } catch (Exception ignore) { /* fall through to compute */ }
+        }
+        float[] v = embed(text);
+        if (v.length > 0) {
+            embedMem.put(sha, v);
+            if (db.available()) {
+                try {
+                    db.update("INSERT INTO embed_cache(text_sha, model, embedding, updated_at) VALUES(?,?,?,?) "
+                                    + "ON CONFLICT(text_sha) DO UPDATE SET embedding=excluded.embedding, "
+                                    + "model=excluded.model, updated_at=excluded.updated_at",
+                            sha, embedModel, floatsToJson(v), System.currentTimeMillis());
+                } catch (Exception ignore) { /* cache write is best-effort */ }
+            }
+        }
+        return v;
+    }
+
+    private static String sha256(String s) {
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : h) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(s.hashCode());
+        }
+    }
+
     private float[] embed(String text) {
         try {
             String base = (embedBaseUrl == null || embedBaseUrl.isBlank())

@@ -2988,3 +2988,38 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** in the *Project memory* card, expand *Memory analytics* to see each fact's injected/recalled
   counts (most-used first). `GET /memory/analytics` returns `facts:[{fact,injected,recalled,lastUsed}]`.
   Counts accrue as sessions seed facts and the tool recalls them; zero-count facts are prune candidates.
+
+---
+
+# Memory hygiene/decay, two-stage recall, embedding cache
+
+## 342. Decay rule (MemoryHygieneTest)
+
+- **Run:** `./mvnw -Dtest=MemoryHygieneTest test`.
+- **Observe:** `MemoryStore.shouldDecay` prunes only facts that were never injected or recalled AND were
+  first observed longer ago than the decay window; ever-used or not-yet-aged facts (and facts with no
+  first_seen) are kept.
+
+## 343. Recall rerank parsing (MemoryRerankParseTest)
+
+- **Run:** `./mvnw -Dtest=MemoryRerankParseTest test`.
+- **Observe:** `MemoryStore.parseRerankSelection` turns a model's "3,1,5" answer into facts in that order,
+  ignores out-of-range/duplicate indices, caps at k, and returns empty for blank/garbage/null.
+
+## 344. Automatic + manual hygiene (manual)
+
+- **Observe:** auto facts that never get injected/recalled are pruned after a run once older than
+  `agent.memory-decay-days` (lower it to test quickly); the *hygiene* button / `POST /memory/hygiene` returns
+  `{pruned:[...], kept, decayDays}`. Pinned facts are never pruned.
+
+## 345. Two-stage recall (manual)
+
+- **Observe:** with `agent.memory-rerank=true`, `recall_memory` shortlists `agent.memory-recall-shortlist`
+  candidates by the cheap ranker, then the summary model selects the top facts; set `agent.memory-rerank=false`
+  to use the shortlist order directly. Model failure falls back to the shortlist.
+
+## 346. Embedding cache (manual)
+
+- **Observe:** with `retrieval.embeddings=true`, repeated seeding/recall over the same facts does not
+  re-call the embed endpoint (cached in-process and in `embed_cache`, keyed by model + text hash); cache
+  survives a restart.

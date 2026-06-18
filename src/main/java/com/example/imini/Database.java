@@ -87,7 +87,12 @@ public class Database {
             // durable-memory analytics: how often each fact is injected into a session / recalled by tool
             "CREATE TABLE memory_stats (scope TEXT NOT NULL, fact TEXT NOT NULL, injected INTEGER NOT NULL "
                     + "DEFAULT 0, recalled INTEGER NOT NULL DEFAULT 0, last_used INTEGER, "
-                    + "PRIMARY KEY(scope, fact))");
+                    + "PRIMARY KEY(scope, fact))",
+            // hygiene: when a fact was first observed, to age out long-unused facts
+            "ALTER TABLE memory_stats ADD COLUMN first_seen INTEGER",
+            // embedding cache: avoid re-embedding identical texts (keyed by model + sha256 of text)
+            "CREATE TABLE embed_cache (text_sha TEXT PRIMARY KEY, model TEXT NOT NULL, "
+                    + "embedding TEXT NOT NULL, updated_at INTEGER NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

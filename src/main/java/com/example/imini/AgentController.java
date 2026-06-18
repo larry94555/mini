@@ -906,6 +906,15 @@ public class AgentController {
         return out;
     }
 
+    /** Run a durable-memory hygiene pass: prune long-unused auto facts (admin). Returns what was pruned. */
+    @PostMapping("/memory/hygiene")
+    public Map<String, Object> memoryHygiene() {
+        requireAdmin();
+        Map<String, Object> report = memory.hygiene(currentUser());
+        audit.record(currentUser(), "memory", "hygiene", "pruned=" + ((List<?>) report.getOrDefault("pruned", List.of())).size());
+        return report;
+    }
+
     /** Clear the current user's durable memory note (admin). Pinned facts are preserved. */
     @PostMapping("/memory/durable/clear")
     public Map<String, Object> clearDurableMemory() {
