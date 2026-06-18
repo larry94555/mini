@@ -73,6 +73,7 @@ public class AgentController {
     private final BuiltinTools builtins;
     private final MemoryStore memory;
     private final ContextManager context;
+    private final Database db;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -83,7 +84,8 @@ public class AgentController {
                            PreviewStore previews, BuiltinTools builtins,
                            TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
                            PluginService plugins, SessionSettings sessionSettings,
-                           WorkspaceService workspace, MemoryStore memory, ContextManager context) {
+                           WorkspaceService workspace, MemoryStore memory, ContextManager context,
+                           Database db) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -111,6 +113,7 @@ public class AgentController {
         this.builtins = builtins;
         this.memory = memory;
         this.context = context;
+        this.db = db;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -332,6 +335,40 @@ public class AgentController {
         return Map.of("status", "ok");
     }
 
+    /** Roll a readiness snapshot's component states into an overall status. */
+    static String readinessStatus(boolean dbOk, boolean llamaOk) {
+        if (dbOk && llamaOk) return "ok";
+        if (!dbOk && !llamaOk) return "down";
+        return "degraded";
+    }
+
+    /**
+     * Readiness probe for deployment/monitoring: database availability, llama-server reachability (and its
+     * context window), persistence mode, uptime, and a compact observability snapshot (context-management
+     * counts + durable-memory presence). Open (no auth) like {@code /health}; returns 200 with a status of
+     * "ok", "degraded" (one dependency down), or "down".
+     */
+    @GetMapping("/healthz")
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> healthz() {
+        boolean dbOk = db.available();
+        int ctx = llama.serverContext();         // 0 when the llama-server is unreachable
+        boolean llamaOk = ctx > 0;
+
+        Map<String, Object> snap = metrics.snapshot();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("status", readinessStatus(dbOk, llamaOk));
+        out.put("db", Map.of("available", dbOk, "persistent", dbOk));
+        out.put("llama", Map.of("reachable", llamaOk, "contextTokens", ctx));
+        out.put("uptimeMs", snap.getOrDefault("uptime_ms", 0L));
+        out.put("context", snap.getOrDefault("context", Map.of())); // folds/compactions/trims
+        String durable = memory.get(MemoryStore.DEFAULT_OWNER);
+        out.put("memory", Map.of(
+                "workspace", MemoryStore.workspaceId(),
+                "durablePresent", durable != null && !durable.isBlank()));
+        return out;
+    }
+
     @GetMapping("/me")
     public Map<String, String> me() {
         Principal p = RequestContext.current();
@@ -402,6 +439,13 @@ public class AgentController {
                 "tokenBudget", tokenBudget.budget()));
 
         out.put("recentRuns", metrics.recentRuns(10));
+        // unified observability: context-management activity + durable-memory state alongside the runs
+        out.put("context", snap.getOrDefault("context", Map.of())); // folds/compactions/trims totals
+        String durableNote = memory.get(MemoryStore.DEFAULT_OWNER);
+        out.put("memory", Map.of(
+                "workspace", MemoryStore.workspaceId(),
+                "durablePresent", durableNote != null && !durableNote.isBlank(),
+                "trackedFacts", memory.analytics(currentUser()).size()));
         out.put("recentAudit", audit.recent("", "", "", 0, Math.max(1, Math.min(50, auditLimit))));
         return out;
     }

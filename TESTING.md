@@ -3051,3 +3051,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the *Project memory* card shows the full pipeline summary (seed -> fold/compact -> consolidate
   -> hygiene -> recall -> analytics) and points to `docs/MEMORY.md`, which documents the subsystem, config
   table, endpoints, and storage tables.
+
+---
+
+# Persistence coverage, bundle round-trip, readiness probe
+
+## 351. Core-store persistence (PersistenceRoundTripTest)
+
+- **Run:** `./mvnw -Dtest=PersistenceRoundTripTest test` (real temp SQLite in CI; self-skips otherwise).
+- **Observe:** sessions round-trip history + ownership (`claim`/`owner`) + sharing (`share`/`readers`); run
+  history persists and reloads with context counts (folds/compactions/trims) and the event timeline; plans
+  save/load goal + items.
+
+## 352. Signed workspace bundle round-trip (WorkspaceBundleRoundTripTest)
+
+- **Run:** `./mvnw -Dtest=WorkspaceBundleRoundTripTest test`.
+- **Observe:** with an HMAC signing secret, `exportJson` produces a signed bundle carrying settings + durable
+  memory; `importBundle` reports `signature=verified` and restores the note, pins, and settings. Plugin
+  export is pointed at an empty temp workspace so the test is hermetic.
+
+## 353. Readiness status roll-up (ReadinessStatusTest)
+
+- **Run:** `./mvnw -Dtest=ReadinessStatusTest test`.
+- **Observe:** `AgentController.readinessStatus` returns `ok` (both up), `degraded` (one down), `down` (both).
+
+## 354. /healthz probe + unified overview (manual)
+
+- **Observe:** `GET /healthz` returns `{status, db, llama:{reachable,contextTokens}, uptimeMs, context, memory}`
+  with no auth; status is `degraded` when the llama-server is unreachable. `GET /admin/overview` now includes
+  a `context` summary and a `memory` block (workspace, durablePresent, trackedFacts) next to `recentRuns`.
