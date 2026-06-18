@@ -19,6 +19,9 @@ short version once those are in place:
 
    ```
    run.bat
+
+
+> On macOS, Linux, or WSL, use the `.sh` scripts instead of `.bat` (e.g. `./run.sh`, `./ask.sh "..."`); run `chmod +x *.sh scripts/*.sh` once first. See [`INSTALL.md`](INSTALL.md) for per-OS setup.
    ```
 
    The first start is slow (it downloads libraries and a ~2 GB model). You're ready when you see

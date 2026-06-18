@@ -38,7 +38,7 @@ public class LlamaServerManager {
 
 
     @Value("${llama.manage-server:true}") private boolean manageServer;
-    @Value("${llama.binary:llama-server.exe}") private String binary;
+    @Value("${llama.binary:}") private String binary;   // blank = OS default: llama-server.exe on Windows, llama-server elsewhere
     @Value("${llama.profile:small}") private String profile;
     @Value("${llama.hf-model:}") private String hfModel;
     @Value("${llama.model-path:}") private String modelPath;
@@ -81,13 +81,20 @@ public class LlamaServerManager {
         }
     }
 
+    /** The llama-server executable: the configured value, else the OS default name. */
+    private String resolveBinary() {
+        if (binary != null && !binary.isBlank()) return binary.trim();
+        boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+        return windows ? "llama-server.exe" : "llama-server";
+    }
+
     private List<String> buildCommand() {
         int ctx = ctxSize > 0 ? ctxSize : profileCtx(profile);
         int ngl = gpuLayers >= 0 ? gpuLayers : 0;                       // default CPU-only
         int t = threads > 0 ? threads : Runtime.getRuntime().availableProcessors();
 
         List<String> cmd = new ArrayList<>();
-        cmd.add(binary);
+        cmd.add(resolveBinary());
         if (!modelPath.isBlank()) {
             cmd.add("-m");
             cmd.add(modelPath);                                         // local GGUF

@@ -340,6 +340,10 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Cross-platform run scripts (macOS/Linux/WSL) + OS-aware model binary: added POSIX `.sh` equivalents of
+  every `.bat` (thin `curl` wrappers sharing `scripts/common.sh`, plus `run.sh`/`eval.sh`), and made
+  `llama.binary` default per-OS (`llama-server` off Windows) so the managed-server path works everywhere
+  with no config. Docs gained a macOS/Linux/WSL run section and per-OS install steps. No app logic changed.
 - Key-management UI + multi-arch images + signed-index registry browser: a read-only `GET /workspace/keys`
   endpoint plus a Plugins-card **keys** panel show the verifier keyring (ids, expiry, revoked/expired/signer
   flags); the publish workflow now builds a linux/amd64 + linux/arm64 manifest; and the Browse-registry view

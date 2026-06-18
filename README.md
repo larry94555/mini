@@ -185,19 +185,49 @@ The local `llama-server` normally runs on:
 http://localhost:8081
 ```
 
+## Run on macOS, Linux, or WSL
+
+The app is plain Java, so the same code runs anywhere with a JDK 17+. Use the POSIX shell scripts (the
+`.sh` equivalents of the `.bat` files). First time only, make them executable:
+
+```sh
+chmod +x *.sh scripts/*.sh
+```
+
+Then start it and try a few commands:
+
+```sh
+./run.sh
+./ask.sh "Say hello in one sentence."
+./chat.sh work1 "Remember that the codename is Bluefin."
+./stream.sh work1 "Use repo_tree to inspect the project, then summarize what kind of app this is."
+```
+
+These run identically on macOS, Linux, WSL, and Git Bash on Windows. The scripts talk to
+`http://localhost:8080` by default; point them at another host/port with the `IMINI_URL` environment
+variable, e.g. `IMINI_URL=http://localhost:9000 ./runs.sh`. On macOS/Linux/WSL the model server binary is
+`llama-server` (no `.exe`); imini detects this automatically, so no configuration change is needed.
+
 ## Common helper scripts
 
-| Script | Purpose |
-|---|---|
-| `run.bat` | Start the app and local model server |
-| `ask.bat "question"` | One-shot prompt |
-| `chat.bat SESSION "message"` | Multi-turn session prompt |
-| `stream.bat SESSION "message"` | Streaming session prompt |
-| `plan.bat "request"` | Plan mode: record proposed mutations without running them |
-| `rewind.bat` | Rewind the last checkpointed edit |
-| `interrupt.bat SESSION` | Stop a running session |
-| `steer.bat SESSION "guidance"` | Inject guidance into a running session |
-| `runs.bat` | Show active and queued runs |
+Every script ships in two forms: `*.bat` for native Windows, and `*.sh` for macOS/Linux/WSL (and Git Bash).
+They are thin `curl` wrappers around the HTTP endpoints below, so they behave identically.
+
+| Windows | macOS / Linux / WSL | Purpose |
+|---|---|---|
+| `run.bat` | `./run.sh` | Start the app and local model server |
+| `ask.bat "question"` | `./ask.sh "question"` | One-shot prompt |
+| `chat.bat SESSION "message"` | `./chat.sh SESSION "message"` | Multi-turn session prompt |
+| `stream.bat SESSION "message"` | `./stream.sh SESSION "message"` | Streaming session prompt |
+| `plan.bat "request"` | `./plan.sh "request"` | Plan mode: record proposed mutations without running them |
+| `rewind.bat` | `./rewind.sh` | Rewind the last checkpointed edit |
+| `interrupt.bat SESSION` | `./interrupt.sh SESSION` | Stop a running session |
+| `steer.bat SESSION "guidance"` | `./steer.sh SESSION "guidance"` | Inject guidance into a running session |
+| `runs.bat` | `./runs.sh` | Show active and queued runs |
+| `eval.bat` | `./eval.sh` | Run the behavioral eval suite (`evals/cases.json`; `.sh` needs `jq`) |
+
+Set `IMINI_URL` to target a non-default address (the `.sh` scripts read it; default
+`http://localhost:8080`).
 
 ## HTTP endpoints
 
