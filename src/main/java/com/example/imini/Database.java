@@ -83,7 +83,11 @@ public class Database {
             "ALTER TABLE run_history ADD COLUMN events TEXT",
             // durable-memory pins with provenance (scope = owner@workspace)
             "CREATE TABLE memory_pins (scope TEXT NOT NULL, fact TEXT NOT NULL, source TEXT, "
-                    + "created_at INTEGER NOT NULL, PRIMARY KEY(scope, fact))");
+                    + "created_at INTEGER NOT NULL, PRIMARY KEY(scope, fact))",
+            // durable-memory analytics: how often each fact is injected into a session / recalled by tool
+            "CREATE TABLE memory_stats (scope TEXT NOT NULL, fact TEXT NOT NULL, injected INTEGER NOT NULL "
+                    + "DEFAULT 0, recalled INTEGER NOT NULL DEFAULT 0, last_used INTEGER, "
+                    + "PRIMARY KEY(scope, fact))");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

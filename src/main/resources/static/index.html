@@ -304,6 +304,10 @@
         <div style="margin-top:6px"><b style="font-size:11px">Pinned facts</b> <span class="muted" style="font-size:10.5px">(always kept; seed every session)</span></div>
         <div id="durablePins" style="margin:2px 0"></div>
         <div class="row"><input id="pinInput" placeholder="pin a fact (e.g. prefers metric units)" style="flex:1;font-size:11px"/><button id="addPin" style="font-size:11px">Pin</button></div>
+        <details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:11px">Memory analytics <a class="linklike" id="refreshMemStats" title="reload">refresh</a></summary>
+          <div class="muted" style="font-size:10.5px;margin:2px 0">How often each durable fact is seeded into sessions (injected) or pulled by the <code>recall_memory</code> tool. Low/zero counts are prune candidates.</div>
+          <div id="memStats" style="font-size:10.5px">(loading...)</div>
+        </details>
       </div>
     </div>
     <div class="card">
@@ -1433,6 +1437,7 @@ async function refreshDurableMemory(){
     if (document.activeElement !== ta) ta.value = j.note || "";
     renderPins(j.pins);
     renderPinCandidates(j.note, j.pinned);
+    refreshMemoryAnalytics();
   } catch(e){ meta.textContent = "(unavailable)"; }
 }
 {
@@ -1496,6 +1501,24 @@ async function runPreflight(){
     }
   });
 }
+
+// ---- durable memory analytics ----
+async function refreshMemoryAnalytics(){
+  const el = document.getElementById("memStats"); if (!el) return;
+  try {
+    const j = await getJson("/memory/analytics");
+    const facts = (j && j.facts) || [];
+    if (!facts.length){ el.textContent = "(no usage recorded yet)"; return; }
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse">'
+      + '<tr class="muted"><th style="text-align:left">fact</th><th>inj</th><th>rec</th></tr>'
+      + facts.slice(0,30).map(f =>
+          '<tr><td style="padding:1px 4px 1px 0">' + escapeHtml(String(f.fact||""))
+          + '</td><td style="text-align:center">' + (f.injected||0)
+          + '</td><td style="text-align:center">' + (f.recalled||0) + '</td></tr>').join("")
+      + '</table>';
+  } catch(e){ el.textContent = "(unavailable)"; }
+}
+{ const r = document.getElementById("refreshMemStats"); if (r) r.onclick = (e)=>{ e.preventDefault(); refreshMemoryAnalytics(); }; }
 </script>
 </body>
 </html>

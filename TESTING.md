@@ -2959,3 +2959,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   another instance restores the note and pins (merged; existing pins kept). The bundle signature still covers
   the plugin-pack digest -- memory rides alongside settings, so a tampered memory section is not rejected by
   signature (documented). Import reports `memoryRestored` / `memoryPinsImported`.
+
+---
+
+# Embedding-based ranking, recall_memory tool, memory analytics
+
+## 338. Shared ranker (RankTextsTest)
+
+- **Run:** `./mvnw -Dtest=RankTextsTest test`.
+- **Observe:** `RetrievalService.rankTexts` (embeddings off) ranks a query-relevant fact first, is empty/null
+  safe, and preserves order for a blank query. This ranker backs both seeding and recall_memory.
+
+## 339. Embedding-based ranking (manual)
+
+- **Observe:** start a second llama-server with `--embeddings` and set `retrieval.embeddings=true` (+
+  `retrieval.embed-base-url`). Durable-memory injection and recall_memory then rank by cosine similarity, so
+  semantically related facts (e.g. "Postgres setup" for a "database connection" query) surface even without
+  shared words. If the embed endpoint is down, ranking falls back to lexical.
+
+## 340. recall_memory tool (manual)
+
+- **Observe:** with durable facts stored, ask the agent something whose answer is a learned fact not in the
+  current conversation; it can call `recall_memory(query[, k])` and gets the top facts (default
+  `agent.memory-recall-k`). The tool is registered alongside `search_memory`.
+
+## 341. Memory analytics (manual)
+
+- **Observe:** in the *Project memory* card, expand *Memory analytics* to see each fact's injected/recalled
+  counts (most-used first). `GET /memory/analytics` returns `facts:[{fact,injected,recalled,lastUsed}]`.
+  Counts accrue as sessions seed facts and the tool recalls them; zero-count facts are prune candidates.

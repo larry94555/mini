@@ -897,6 +897,15 @@ public class AgentController {
         return durableMemory();
     }
 
+    /** Per-fact durable-memory usage analytics: how often each fact is injected into a session / recalled. */
+    @GetMapping("/memory/analytics")
+    public Map<String, Object> memoryAnalytics() {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("facts", memory.analytics(currentUser()));
+        out.put("workspace", MemoryStore.workspaceId());
+        return out;
+    }
+
     /** Clear the current user's durable memory note (admin). Pinned facts are preserved. */
     @PostMapping("/memory/durable/clear")
     public Map<String, Object> clearDurableMemory() {

@@ -324,6 +324,40 @@ public class RetrievalService {
         return sb.toString().strip();
     }
 
+    /**
+     * Rank arbitrary texts by relevance to a query using the CURRENT retrieval mode: cosine over embeddings
+     * when {@code retrieval.embeddings=true}, otherwise lexical term overlap. Returns the texts most-relevant
+     * first (stable for ties). Reused by durable-memory injection and the recall_memory tool; falls back to
+     * lexical if the embedding endpoint is unavailable for any text.
+     */
+    public synchronized List<String> rankTexts(String query, List<String> texts) {
+        if (texts == null || texts.isEmpty()) return List.of();
+        String q = query == null ? "" : query;
+        List<String> in = new ArrayList<>(texts);
+        if (useEmbeddings) {
+            float[] qv = embed(q);
+            if (qv.length > 0) {
+                java.util.IdentityHashMap<String, Double> score = new java.util.IdentityHashMap<>();
+                boolean ok = true;
+                for (String t : in) {
+                    float[] tv = embed(t);
+                    if (tv.length == 0) { ok = false; break; }
+                    score.put(t, cosine(qv, tv));
+                }
+                if (ok) {
+                    in.sort((a, b) -> Double.compare(score.get(b), score.get(a)));
+                    return in;
+                }
+            }
+            // any embedding failure -> fall through to lexical
+        }
+        List<String> qt = tokenize(q);
+        if (!qt.isEmpty()) {
+            in.sort((a, b) -> Double.compare(lexicalScore(qt, b), lexicalScore(qt, a)));
+        }
+        return in;
+    }
+
     /** Pure lexical score: distinct query terms found in the text, weighted by occurrence. */
     public static double lexicalScore(List<String> queryTokens, String text) {
         if (text == null || text.isBlank()) return 0;

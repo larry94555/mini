@@ -21,7 +21,7 @@ public class ToolRegistry {
 
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
                         McpManager mcp, RetrievalService retrieval, SkillService skills,
-                        AgentRegistry agents) {
+                        AgentRegistry agents, MemoryStore memory) {
         this.subAgent = subAgent;
         this.agents = agents;
         for (Tool t : builtins.all()) register(t);
@@ -30,6 +30,7 @@ public class ToolRegistry {
         register(delegateAgentTool());
         register(retrieval.searchTool());          // search_memory (RAG over the workspace)
         register(retrieval.indexTool());            // index_workspace
+        register(memory.recallTool());              // recall_memory (durable cross-session facts)
         register(skills.loadSkillTool());          // load_skill (progressive disclosure)
         register(skills.saveSkillTool());          // save_skill (capture knowledge)
         register(skills.refreshSkillsTool());      // refresh_skills (pull remote repos)

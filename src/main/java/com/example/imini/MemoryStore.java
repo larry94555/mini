@@ -21,10 +21,13 @@ public class MemoryStore {
     private static volatile String WS_ID; // cached workspace id (hash of the working directory)
 
     private final Database db;
+    private final RetrievalService retrieval;
     @Value("${agent.memory-inject-max:12}") private int injectMax; // max durable facts seeded per session
+    @Value("${agent.memory-recall-k:6}") private int recallK;      // default facts returned by recall_memory
 
-    public MemoryStore(Database db) {
+    public MemoryStore(Database db, RetrievalService retrieval) {
         this.db = db;
+        this.retrieval = retrieval;
     }
 
     /**
@@ -201,15 +204,94 @@ public class MemoryStore {
         for (String l : splitLines(get(owner))) {
             if (!pinSet.contains(l.toLowerCase(java.util.Locale.ROOT))) auto.add(l);
         }
-        java.util.List<String> qt = RetrievalService.tokenize(query == null ? "" : query);
-        if (!qt.isEmpty()) {
-            auto.sort((a, b) -> Double.compare(
-                    RetrievalService.lexicalScore(qt, b), RetrievalService.lexicalScore(qt, a)));
-        }
+        // rank auto facts by the current retrieval mode (embeddings if enabled, else lexical)
+        auto = new java.util.ArrayList<>(retrieval.rankTexts(query, auto));
         int room = Math.max(0, injectMax - pins.size());
+        java.util.List<String> top = auto.subList(0, Math.min(room, auto.size()));
         java.util.List<String> combined = new java.util.ArrayList<>(pins);
-        combined.addAll(auto.subList(0, Math.min(room, auto.size())));
+        combined.addAll(top);
+        noteUse(owner, combined, "injected"); // analytics: which facts were seeded into this session
         return dedupeLines(String.join("\n", combined));
+    }
+
+    /**
+     * Recall durable facts relevant to a query, on demand (the recall_memory tool): pins + auto notes,
+     * ranked by the current retrieval mode, top-k returned as a readable list. Records recall analytics.
+     */
+    public String recall(String owner, String query, int k) {
+        java.util.List<String> facts = new java.util.ArrayList<>(splitLines(pinned(owner)));
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String f : facts) seen.add(f.toLowerCase(java.util.Locale.ROOT));
+        for (String l : splitLines(get(owner))) {
+            if (seen.add(l.toLowerCase(java.util.Locale.ROOT))) facts.add(l);
+        }
+        if (facts.isEmpty()) return "(no durable memory stored yet)";
+        java.util.List<String> ranked = retrieval.rankTexts(query, facts);
+        int want = k > 0 ? k : recallK;
+        java.util.List<String> topList = new java.util.ArrayList<>(ranked.subList(0, Math.min(want, ranked.size())));
+        noteUse(owner, topList, "recalled");
+        StringBuilder sb = new StringBuilder("Relevant durable memory:\n");
+        for (String f : topList) sb.append("- ").append(f).append('\n');
+        return sb.toString().strip();
+    }
+
+    /** A tool the agent can call mid-conversation to recall durable facts relevant to a query. */
+    public Tool recallTool() {
+        Map<String, Object> props = new java.util.LinkedHashMap<>();
+        props.put("query", Map.of("type", "string", "description",
+                "What to recall from durable cross-session memory (a topic, preference, or past decision)."));
+        props.put("k", Map.of("type", "integer", "description", "How many facts to return (optional)."));
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", props);
+        schema.put("required", List.of("query"));
+        return new Tool("recall_memory",
+                "Recall durable facts learned across earlier sessions (pinned facts and consolidated notes) "
+                        + "that are relevant to a query. Use when you need a previously-learned preference, "
+                        + "decision, fact, or convention that may not be in the current conversation.",
+                schema, false, args -> {
+            Object q = args.get("query");
+            int k = args.get("k") instanceof Number n ? n.intValue() : recallK;
+            return recall(DEFAULT_OWNER, q == null ? "" : String.valueOf(q), k);
+        });
+    }
+
+    /** Increment an analytics counter ({@code injected} or {@code recalled}) for each fact. */
+    private void noteUse(String owner, java.util.List<String> facts, String col) {
+        if (!db.available() || facts == null || facts.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        for (String f : facts) {
+            if (f == null || f.isBlank()) continue;
+            try {
+                // col is an internal constant ("injected"/"recalled"), never user input
+                db.update("INSERT INTO memory_stats(scope, fact, injected, recalled, last_used) VALUES(?,?,?,?,?) "
+                                + "ON CONFLICT(scope, fact) DO UPDATE SET " + col + "=" + col
+                                + "+1, last_used=excluded.last_used",
+                        key(owner), f.strip(), col.equals("injected") ? 1 : 0, col.equals("recalled") ? 1 : 0, now);
+            } catch (Exception e) {
+                log.warn("[memory] stat failed: " + e.getMessage());
+            }
+        }
+    }
+
+    /** Per-fact usage analytics: {@code [{fact, injected, recalled, lastUsed}]}, most-used first. */
+    public java.util.List<Map<String, Object>> analytics(String owner) {
+        java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+        if (!db.available()) return out;
+        try {
+            return db.query("SELECT fact, injected, recalled, last_used FROM memory_stats WHERE scope=? "
+                            + "ORDER BY (injected + recalled) DESC, last_used DESC",
+                    rs -> {
+                        Map<String, Object> m = new java.util.LinkedHashMap<>();
+                        m.put("fact", rs.getString(1));
+                        m.put("injected", rs.getInt(2));
+                        m.put("recalled", rs.getInt(3));
+                        m.put("lastUsed", rs.getLong(4));
+                        return m;
+                    }, key(owner));
+        } catch (Exception e) {
+            return out;
+        }
     }
 
     private static java.util.List<String> splitLines(String text) {

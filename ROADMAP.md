@@ -340,6 +340,11 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Embedding-based memory ranking + recall_memory tool + memory analytics: durable-fact ranking now reuses a
+  shared `RetrievalService.rankTexts` that scores by embedding cosine when `retrieval.embeddings=true` (else
+  lexical, with fallback), used by both session seeding and a new `recall_memory` tool the agent can call
+  mid-conversation. A `memory_stats` table records per-fact injected/recalled counts, surfaced in the
+  Project memory card and at `/memory/analytics` to find prune candidates.
 - Relevance-ranked memory injection + provenance + bundle export/import: a new session is seeded with the
   most relevant durable facts (pins always; top auto facts by `RetrievalService` lexical score to the first
   message, capped at `agent.memory-inject-max`) instead of the whole note. Pins moved to a `memory_pins`
