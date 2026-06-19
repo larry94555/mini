@@ -17,7 +17,14 @@ public final class AuditDashboard {
 
     private AuditDashboard() {}
 
+    /** Backward-compatible entry point: no time range, single page. */
     public static String render(List<AuditLog.Entry> entries, String user, String action, String target, int limit) {
+        int total = entries == null ? 0 : entries.size();
+        return render(entries, user, action, target, "", "", 0, limit, total);
+    }
+
+    public static String render(List<AuditLog.Entry> entries, String user, String action, String target,
+                                String since, String until, int offset, int limit, int total) {
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
         sb.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
@@ -28,6 +35,9 @@ public final class AuditDashboard {
         sb.append("label{display:flex;flex-direction:column;font-size:.8rem;color:#555;gap:.2rem;}");
         sb.append("input{font:inherit;padding:.3rem .4rem;border:1px solid #ccc;border-radius:4px;}");
         sb.append("button{font:inherit;padding:.35rem .8rem;border:1px solid #3b7;background:#3b7;color:#fff;border-radius:4px;cursor:pointer;}");
+        sb.append(".pager{display:flex;gap:.5rem;align-items:center;margin:.5rem 0;}");
+        sb.append(".pager a{padding:.3rem .7rem;border:1px solid #ccc;border-radius:4px;text-decoration:none;color:#1a1a1a;}");
+        sb.append(".pager a.disabled{color:#bbb;border-color:#eee;pointer-events:none;}");
         sb.append("table{border-collapse:collapse;width:100%;margin:.5rem 0;}");
         sb.append("th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #ddd;vertical-align:top;}");
         sb.append("th{background:#f5f5f5;} td.time{white-space:nowrap;font-variant-numeric:tabular-nums;color:#555;}");
@@ -41,13 +51,30 @@ public final class AuditDashboard {
         sb.append("<label>user<input name=\"user\" value=\"").append(esc(user)).append("\"></label>");
         sb.append("<label>action<input name=\"action\" value=\"").append(esc(action)).append("\"></label>");
         sb.append("<label>target<input name=\"target\" value=\"").append(esc(target)).append("\"></label>");
-        sb.append("<label>limit<input name=\"limit\" type=\"number\" min=\"1\" value=\"").append(limit).append("\"></label>");
+        sb.append("<label>since<input name=\"since\" placeholder=\"ISO or epoch ms\" value=\"").append(esc(since)).append("\"></label>");
+        sb.append("<label>until<input name=\"until\" placeholder=\"ISO or epoch ms\" value=\"").append(esc(until)).append("\"></label>");
+        sb.append("<label>page size<input name=\"limit\" type=\"number\" min=\"1\" value=\"").append(limit).append("\"></label>");
         sb.append("<button type=\"submit\">Filter</button>");
         sb.append("</form>");
 
         int shown = (entries == null) ? 0 : entries.size();
-        sb.append("<p class=\"muted\">Showing ").append(shown).append(" most recent matching ")
-          .append(shown == 1 ? "entry" : "entries").append(". Newest first.</p>");
+        int from = total == 0 ? 0 : offset + 1;
+        int to = offset + shown;
+        sb.append("<p class=\"muted\">Showing ").append(from).append("\u2013").append(to)
+          .append(" of ").append(total).append(" matching ")
+          .append(total == 1 ? "entry" : "entries").append(". Newest first.</p>");
+
+        // pager (prev/next preserve the active filters)
+        int prevOffset = Math.max(0, offset - Math.max(1, limit));
+        int nextOffset = offset + Math.max(1, limit);
+        boolean hasPrev = offset > 0;
+        boolean hasNext = to < total;
+        sb.append("<div class=\"pager\">");
+        sb.append("<a class=\"").append(hasPrev ? "" : "disabled").append("\" href=\"")
+          .append(link(user, action, target, since, until, prevOffset, limit)).append("\">\u2190 Prev</a>");
+        sb.append("<a class=\"").append(hasNext ? "" : "disabled").append("\" href=\"")
+          .append(link(user, action, target, since, until, nextOffset, limit)).append("\">Next \u2192</a>");
+        sb.append("</div>");
 
         sb.append("<table><thead><tr><th>time</th><th>user</th><th>action</th><th>target</th><th>outcome</th></tr></thead><tbody>");
         if (entries != null) {
@@ -71,6 +98,24 @@ public final class AuditDashboard {
         sb.append("<p class=\"muted\">Raw JSON at <code>/audit</code>; CSV/JSON export at <code>/audit/export</code>.</p>");
         sb.append("</body></html>");
         return sb.toString();
+    }
+
+    /** Build a viewer URL preserving filters, with the given offset/limit. Query values are URL-encoded. */
+    static String link(String user, String action, String target, String since, String until,
+                       int offset, int limit) {
+        StringBuilder sb = new StringBuilder("/admin/audit.html?");
+        sb.append("user=").append(enc(user));
+        sb.append("&action=").append(enc(action));
+        sb.append("&target=").append(enc(target));
+        sb.append("&since=").append(enc(since));
+        sb.append("&until=").append(enc(until));
+        sb.append("&offset=").append(Math.max(0, offset));
+        sb.append("&limit=").append(limit);
+        return sb.toString();
+    }
+
+    private static String enc(String s) {
+        return s == null ? "" : java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /** Minimal HTML escaping for text nodes and quoted attribute values. */

@@ -3521,3 +3521,45 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** set `redaction.patterns=EMP-\d{6}=>EMP-****`. A log line or trace attribute containing
   `EMP-123456` is masked to `EMP-****` in both the console and `json` profiles, alongside the built-in
   bearer/key/email masking.
+
+---
+
+# Persisted tool rate limits, alert sink, audit viewer time-range & pagination
+
+## 419. Tool rate-limit persistence config & fallback (ToolRateLimiterTest)
+
+- **Run:** `./mvnw -Dtest=ToolRateLimiterTest test`.
+- **Observe:** with no database (or `tool-rate-limit.persistent=false`), the limiter uses in-memory state and
+  still throttles correctly. Construction takes a `Database`; `describe()` reports `persistent` true/false.
+
+## 420. Tool rate-limit survives restart (manual)
+
+- **Observe:** with persistence on, `tool-rate-limit.enabled=true`, `tool-rate-limit.limits=web_fetch=2/600`,
+  exhaust the limit, restart the process, and confirm the tool is still throttled (the window row persists in
+  the `rate_limits` table under a `tool:` key). With `tool-rate-limit.persistent=false`, the limit resets.
+
+## 421. Alert sink forwarding logic (AlertSinkTest)
+
+- **Run:** `./mvnw -Dtest=AlertSinkTest test`.
+- **Observe:** `parseActions` reads the configured action set; `shouldForward` is true only when enabled and
+  the action is in the set; `toJson` emits the entry fields with proper JSON escaping.
+
+## 422. Alert sink end-to-end (manual)
+
+- **Observe:** set `alerts.enabled=true` and `alerts.webhook-url=http://localhost:9000/hook` (point at a local
+  listener). Trigger a `capability_denied` (a scoped-out tool call); confirm a `WARN [alert] ...` log line and
+  a JSON POST to the webhook. With no webhook URL, only the log line appears. A failing webhook never breaks
+  the run.
+
+## 423. Audit viewer pagination & time range (AuditPageRangeTest, AuditDashboardPagingTest)
+
+- **Run:** `./mvnw -Dtest=AuditPageRangeTest,AuditDashboardPagingTest test`.
+- **Observe:** `AuditLog.filterRangePaged` slices by `[since, until]` then `offset`/`limit`; the dashboard
+  shows "Showing X–Y of Z" with Prev/Next links that preserve filters and URL-encode values, and renders the
+  since/until inputs.
+
+## 424. Audit viewer time-range parsing (manual / parseInstant)
+
+- **Observe:** `GET /admin/audit.html?action=capability_denied&since=2023-01-01&limit=50&offset=50` returns the
+  second page of denials since that date. `since`/`until` accept ISO-8601 instants, `YYYY-MM-DD` dates, or
+  epoch millis; blank/invalid is treated as unbounded.

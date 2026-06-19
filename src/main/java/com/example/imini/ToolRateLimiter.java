@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -21,22 +22,35 @@ import java.util.concurrent.ConcurrentHashMap;
  * with no entry is unlimited. Limits are keyed by {@code tenant + ":" + tool}, so one noisy tenant can't
  * exhaust another's budget. Off by default, so existing behaviour is unchanged.
  *
- * <p>State is in-memory (per process); unlike the HTTP limiter there is no SQLite persistence, so limits
- * reset on restart. That is an acceptable trade-off for a throttle whose windows are seconds-to-minutes.
+ * <p><b>Persistence.</b> When SQLite persistence is available and {@code tool-rate-limit.persistent=true}
+ * (the default), window state is stored in the shared {@code rate_limits} table under {@code tool:}-prefixed
+ * keys — so limits survive a restart and are shared across instances pointing at the same database, exactly
+ * like the HTTP limiter. With persistence off (or no database) it falls back to in-memory state that resets
+ * on restart.
  */
 @Component
 public class ToolRateLimiter {
 
     private static final Logger log = LoggerFactory.getLogger(ToolRateLimiter.class);
 
+    /** Key namespace inside the shared rate_limits table, to avoid clashing with HTTP limiter keys. */
+    static final String KEY_PREFIX = "tool:";
+
     @Value("${tool-rate-limit.enabled:false}") private boolean enabled;
     @Value("${tool-rate-limit.limits:}") private String limitsCfg;
+    @Value("${tool-rate-limit.persistent:true}") private boolean persistent;
+
+    private final Database db;
 
     /** tool -> [limit, windowMs]. Immutable after init. */
     private Map<String, long[]> limits = Map.of();
 
-    /** "tenant:tool" -> sliding-window state [windowStart, current, prev]. */
+    /** "tenant:tool" -> sliding-window state [windowStart, current, prev]. In-memory fallback. */
     private final Map<String, long[]> state = new ConcurrentHashMap<>();
+
+    public ToolRateLimiter(Database db) {
+        this.db = db;
+    }
 
     public boolean enabled() { return enabled; }
 
@@ -44,8 +58,13 @@ public class ToolRateLimiter {
     public void init() {
         this.limits = parseLimits(limitsCfg);
         if (enabled && !limits.isEmpty()) {
-            log.info("[tool-rate-limit] enabled for " + limits.size() + " tool(s): " + limits.keySet());
+            log.info("[tool-rate-limit] enabled for " + limits.size() + " tool(s): " + limits.keySet()
+                    + (persistentActive() ? " (persistent)" : " (in-memory)"));
         }
+    }
+
+    private boolean persistentActive() {
+        return persistent && db != null && db.available();
     }
 
     /**
@@ -88,20 +107,45 @@ public class ToolRateLimiter {
         if (cfg == null) return true; // no limit configured for this tool
         long limit = cfg[0], windowMs = cfg[1];
         String key = (tenant == null ? "anonymous" : tenant) + ":" + tool;
+        return persistentActive() ? allowPersistent(key, limit, windowMs, nowMs)
+                                  : allowInMemory(key, limit, windowMs, nowMs);
+    }
+
+    private boolean allowInMemory(String key, long limit, long windowMs, long nowMs) {
         long[] s = state.computeIfAbsent(key, k -> new long[]{nowMs, 0, 0});
         long[] r = RateLimiter.slidingStep(s[0], s[1], s[2], nowMs, windowMs);
-        // r = [windowStart, newCurrent, prev, weighted]; weighted is scaled estimate of the trailing rate.
-        if (r[3] > limit) {
-            return false; // would exceed the limit; do NOT commit the increment
-        }
+        if (r[3] > limit) return false; // would exceed; do NOT commit
         s[0] = r[0]; s[1] = r[1]; s[2] = r[2];
         return true;
+    }
+
+    private boolean allowPersistent(String key, long limit, long windowMs, long nowMs) {
+        String rlKey = KEY_PREFIX + key;
+        long windowStart = nowMs, current = 0, prev = 0;
+        try {
+            List<long[]> rows = db.query(
+                    "SELECT window_start, count, prev_count FROM rate_limits WHERE rl_key=?",
+                    rs -> new long[]{rs.getLong(1), rs.getLong(2), rs.getLong(3)}, rlKey);
+            if (!rows.isEmpty()) { windowStart = rows.get(0)[0]; current = rows.get(0)[1]; prev = rows.get(0)[2]; }
+            long[] r = RateLimiter.slidingStep(windowStart, current, prev, nowMs, windowMs);
+            if (r[3] > limit) return false; // over the limit; don't persist the increment
+            db.update("INSERT INTO rate_limits(rl_key, window_start, count, prev_count) VALUES(?,?,?,?) "
+                            + "ON CONFLICT(rl_key) DO UPDATE SET window_start=excluded.window_start, "
+                            + "count=excluded.count, prev_count=excluded.prev_count",
+                    rlKey, r[0], r[1], r[2]);
+            return true;
+        } catch (Exception ex) {
+            // On any DB error, fail open (allow) rather than break the run; fall back to in-memory.
+            log.warn("[tool-rate-limit] persistence error for " + rlKey + ", falling back: " + ex.getMessage());
+            return allowInMemory(key, limit, windowMs, nowMs);
+        }
     }
 
     /** Describe the configured limits for the admin endpoint. */
     public Map<String, Object> describe() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("enabled", enabled);
+        m.put("persistent", persistentActive());
         Map<String, String> ls = new LinkedHashMap<>();
         for (Map.Entry<String, long[]> e : limits.entrySet()) {
             ls.put(e.getKey(), e.getValue()[0] + "/" + (e.getValue()[1] / 1000) + "s");

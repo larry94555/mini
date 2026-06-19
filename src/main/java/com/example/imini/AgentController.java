@@ -685,17 +685,44 @@ public class AgentController {
             @RequestParam(name = "user", defaultValue = "") String user,
             @RequestParam(name = "action", defaultValue = "") String action,
             @RequestParam(name = "target", defaultValue = "") String target,
+            @RequestParam(name = "since", defaultValue = "") String since,
+            @RequestParam(name = "until", defaultValue = "") String until,
+            @RequestParam(name = "offset", defaultValue = "0") int offset,
             @RequestParam(name = "limit", defaultValue = "200") int limit) {
         requireAdmin();
         int capped = Math.max(1, Math.min(limit, 1000));
-        List<AuditLog.Entry> rows = audit.recent(
-                user.isBlank() ? null : user,
-                action.isBlank() ? null : action,
-                target.isBlank() ? null : target,
-                0, capped);
+        int off = Math.max(0, offset);
+        long sinceMs = parseInstant(since);
+        long untilMs = parseInstant(until);
+        String u = user.isBlank() ? null : user;
+        String a = action.isBlank() ? null : action;
+        String t = target.isBlank() ? null : target;
+        List<AuditLog.Entry> rows = audit.pageRange(u, a, t, sinceMs, untilMs, off, capped);
+        int total = audit.countRange(u, a, t, sinceMs, untilMs);
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(AuditDashboard.render(rows, user, action, target, capped));
+                .body(AuditDashboard.render(rows, user, action, target, since, until, off, capped, total));
+    }
+
+    /** Parse an ISO-8601 instant or epoch-millis string to epoch ms; 0 (unbounded) if blank/invalid. */
+    static long parseInstant(String s) {
+        if (s == null || s.isBlank()) return 0L;
+        String v = s.trim();
+        try {
+            return Long.parseLong(v); // epoch millis
+        } catch (NumberFormatException ignore) {
+            // fall through to ISO parsing
+        }
+        try {
+            return java.time.Instant.parse(v).toEpochMilli();
+        } catch (Exception ignore) {
+            try {
+                // date-only (treat as start of that UTC day)
+                return java.time.LocalDate.parse(v).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();
+            } catch (Exception ignore2) {
+                return 0L;
+            }
+        }
     }
 
     /**
