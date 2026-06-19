@@ -3449,3 +3449,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Run:** `./mvnw -Dtest=UsageDashboardTest test`.
 - **Observe:** `UsageDashboard.render` produces a self-contained HTML page with per-tenant rows, HTML-escapes
   tenant names, and shows disabled/empty states. Live: `GET /admin/usage` renders the same from real data.
+
+---
+
+# JSON-profile redaction, audited denials/alerts, sub-agent/MCP capability scoping
+
+## 409. JSON log redaction (RedactingJsonEncoderTest)
+
+- **Run:** `./mvnw -Dtest=RedactingJsonEncoderTest test`.
+- **Observe:** `RedactingJsonEncoder.toJson` emits a one-line JSON object with ts/level/logger/thread/message,
+  scrubs secrets/PII from the message, JSON-escapes values, and emits MDC keys sorted. Live: run with
+  `--spring.profiles.active=json` and confirm a log line containing `api_key=secret` is masked.
+
+## 410. Capability prefix / MCP-server scoping (CapabilityPrefixTest)
+
+- **Run:** `./mvnw -Dtest=CapabilityPrefixTest test`.
+- **Observe:** a scope token ending in `*` matches by prefix — `github_*` permits `github_search` and
+  `github_create_issue` but not `gitlab_search`; bare `*` and a null scope still allow everything.
+
+## 411. Sub-agent inherits caller's scope (manual)
+
+- **Observe:** with `capabilities.enabled=true` and a scope that excludes `web_fetch`/`web_search`, ask the
+  agent to `delegate_research`. The sub-agent's web tools are denied (the caller's role is propagated into
+  the sub-agent), rather than running unrestricted. Admin/unscoped callers are unaffected.
+
+## 412. Capability denial audited (manual)
+
+- **Observe:** when a scoped-out tool is attempted, `GET /audit` shows a `capability_denied` entry naming the
+  tool and the caller's role. The run itself sees `DENIED: tool '...' is outside this caller's capability scope.`
+
+## 413. Spend alert audited (manual)
+
+- **Observe:** with a small `cost.alert-token-threshold`, crossing it logs `[cost] ALERT ...` once and writes
+  a `spend_alert` entry to `GET /audit` (durable across restarts), in addition to appearing in `/admin/cost`.

@@ -24,9 +24,9 @@
         </encoder>
     </appender>
 
-    <!-- structured JSON console (timestamp, level, logger, thread, message, ...) -->
+    <!-- structured JSON console; our encoder masks secrets/PII in the message (RedactingJsonEncoder) -->
     <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+        <encoder class="com.example.imini.RedactingJsonEncoder"/>
     </appender>
 
     <springProfile name="json">
