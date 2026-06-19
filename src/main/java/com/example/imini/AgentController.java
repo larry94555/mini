@@ -561,6 +561,35 @@ public class AgentController {
         return out;
     }
 
+    /** Bulk-acknowledge all failed dead-letters matching the filters. Admin only. */
+    @PostMapping("/admin/alerts/ack-all")
+    public Map<String, Object> adminAlertsAckAll(
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "status", defaultValue = "") String status,
+            @RequestParam(name = "q", defaultValue = "") String q) {
+        requireAdmin();
+        int n = alertSink.ackMatching(action.isBlank() ? null : action,
+                status.isBlank() ? null : status, q.isBlank() ? null : q);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("acked", n);
+        return out;
+    }
+
+    /** Bulk-replay all failed dead-letters matching the filters. Admin only. */
+    @PostMapping("/admin/alerts/replay-all")
+    public Map<String, Object> adminAlertsReplayAll(
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "status", defaultValue = "") String status,
+            @RequestParam(name = "q", defaultValue = "") String q) {
+        requireAdmin();
+        int n = alertSink.replayMatching(action.isBlank() ? null : action,
+                status.isBlank() ? null : status, q.isBlank() ? null : q);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("replayed", n);
+        out.put("stats", alertSink.stats());
+        return out;
+    }
+
     /**
      * Re-attempt delivery of dead-lettered alerts. With {@code ?id=...} replays a single one; otherwise all.
      * Returns the number re-enqueued. Admin only.

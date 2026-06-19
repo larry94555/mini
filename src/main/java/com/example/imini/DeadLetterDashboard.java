@@ -34,6 +34,8 @@ public final class DeadLetterDashboard {
         sb.append("th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #ddd;vertical-align:top;}");
         sb.append("th{background:#f5f5f5;} td.time{white-space:nowrap;font-variant-numeric:tabular-nums;color:#555;}");
         sb.append("tr.acked{opacity:.55;} td.err{color:#a00;} form.act{display:inline;margin:0;}");
+        sb.append(".bulk{margin:.5rem 0;display:flex;gap:.5rem;}");
+        sb.append(".badge{display:inline-block;font-size:.7rem;background:#3b7;color:#fff;border-radius:3px;padding:0 .35rem;vertical-align:middle;}");
         sb.append("code{background:#f3f3f3;padding:0 .2rem;border-radius:3px;word-break:break-all;}");
         sb.append("td.payload{max-width:32rem;}");
         sb.append("</style></head><body>");
@@ -54,18 +56,31 @@ public final class DeadLetterDashboard {
           .append(" of ").append(total).append(" matching dead-letter").append(total == 1 ? "" : "s")
           .append(". Newest first.</p>");
 
+        // bulk actions over the current filter
+        String fa = esc(action), fs = esc(status), fq = esc(q);
+        String filterQs = "action=" + enc(action) + "&status=" + enc(status) + "&q=" + enc(q);
+        sb.append("<div class=\"bulk\">");
+        sb.append("<button type=\"button\" onclick=\"if(confirm('Replay ALL ").append(total)
+          .append(" matching?'))act('post','/admin/alerts/replay-all?").append(filterQs).append("')\">Replay all matching</button> ");
+        sb.append("<button type=\"button\" class=\"ghost\" onclick=\"if(confirm('Ack ALL matching?'))act('post','/admin/alerts/ack-all?")
+          .append(filterQs).append("')\">Ack all matching</button>");
+        sb.append("</div>");
+
         sb.append("<table><thead><tr>");
-        sb.append("<th>age</th><th>action</th><th>status</th><th>attempts</th>");
+        sb.append("<th>age</th><th>action</th><th>status</th><th>tier</th><th>attempts</th>");
         sb.append("<th>last error</th><th>payload</th><th>actions</th>");
         sb.append("</tr></thead><tbody>");
         if (rows != null) {
             long now = System.currentTimeMillis();
             for (AlertSink.DeadLetter d : rows) {
-                boolean acked = "acked".equalsIgnoreCase(d.status());
+                boolean acked = d.ackedAt() > 0;
                 sb.append("<tr class=\"").append(acked ? "acked" : "").append("\">");
                 sb.append("<td class=\"time\">").append(esc(humanAge(now - d.ts()))).append("</td>");
                 sb.append("<td>").append(esc(d.action() == null ? "" : d.action())).append("</td>");
-                sb.append("<td>").append(esc(d.status() == null ? "" : d.status())).append("</td>");
+                sb.append("<td>").append(esc(d.status() == null ? "" : d.status()));
+                if (acked) sb.append(" <span class=\"badge\">acked</span>");
+                sb.append("</td>");
+                sb.append("<td>").append(tierCell(d)).append("</td>");
                 sb.append("<td>").append(d.attempts()).append("</td>");
                 sb.append("<td class=\"err\">").append(esc(snippet(d.lastError(), 80))).append("</td>");
                 sb.append("<td class=\"payload\"><code>").append(esc(snippet(d.payload(), 200))).append("</code></td>");
@@ -74,7 +89,7 @@ public final class DeadLetterDashboard {
                 if (!id.isEmpty()) {
                     String jid = esc(id);
                     sb.append("<button type=\"button\" onclick=\"act('post','/admin/alerts/replay?id=").append(jid).append("')\">Replay</button> ");
-                    sb.append("<button type=\"button\" class=\"ghost\" onclick=\"act('post','/admin/alerts/ack?id=").append(jid).append("')\">Ack</button> ");
+                    if (!acked) sb.append("<button type=\"button\" class=\"ghost\" onclick=\"act('post','/admin/alerts/ack?id=").append(jid).append("')\">Ack</button> ");
                     sb.append("<button type=\"button\" class=\"danger\" onclick=\"if(confirm('Delete this dead-letter?'))act('delete','/admin/alerts/failed?id=").append(jid).append("')\">Delete</button>");
                 }
                 sb.append("</td></tr>");
@@ -113,6 +128,12 @@ public final class DeadLetterDashboard {
             "<script>function act(m,u){fetch(u,{method:m.toUpperCase()})"
             + ".then(function(r){if(!r.ok)alert('Request failed: '+r.status);location.reload();})"
             + ".catch(function(e){alert('Request error: '+e);});}</script>";
+
+    /** Pure: the escalation-tier cell — shows the tier reached, or "—" when not yet escalated. */
+    static String tierCell(AlertSink.DeadLetter d) {
+        int t = d.escalationTier();
+        return t <= 0 ? "\u2014" : ("T" + t);
+    }
 
     /** Pure: a coarse human-readable age from a millisecond duration. */
     static String humanAge(long ms) {
