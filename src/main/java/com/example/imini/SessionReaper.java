@@ -50,10 +50,12 @@ public class SessionReaper {
         log.info("[sessions] reaper enabled: ttl=" + ttlHours + "h, every " + interval + "min");
     }
 
-    /** One pruning pass; safe to call manually. */
+    /** One pruning pass plus an orphan sweep; safe to call manually. Returns sessions pruned. */
     public int reap() {
         try {
-            return sessions.pruneExpired(ttlMs(), System.currentTimeMillis());
+            int pruned = sessions.pruneExpired(ttlMs(), System.currentTimeMillis());
+            sessions.sweepOrphans(); // clean up any rows orphaned by older builds or partial deletes
+            return pruned;
         } catch (Exception e) {
             log.warn("[sessions] reap failed: " + e.getMessage());
             return 0;

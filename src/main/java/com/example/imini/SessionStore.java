@@ -214,9 +214,11 @@ public class SessionStore {
     }
 
     /**
-     * Delete sessions idle longer than {@code ttlMs}, plus their owner/share/title rows. Returns the number
-     * of sessions pruned. ttlMs <= 0 disables pruning (returns 0). Pinned/owned state travels with the
-     * session id, so removing the session row and its satellites fully retires it.
+     * Delete sessions idle longer than {@code ttlMs}, plus ALL of their dependent rows (owners, shares,
+     * titles, checkpoints, plans, plan steps, plan history, per-session skill state and settings, and any
+     * scheduled tasks bound to the session). Returns the number of sessions pruned. ttlMs <= 0 disables
+     * pruning (returns 0). This is the cascade that keeps the satellite tables from accumulating orphans
+     * once a session itself is gone.
      */
     public synchronized int pruneExpired(long ttlMs, long nowMs) {
         if (ttlMs <= 0) return 0;
@@ -226,19 +228,46 @@ public class SessionStore {
             List<String> expired = db.query(
                     "SELECT session_id FROM sessions WHERE updated_at < ?", rs -> rs.getString(1), cutoff);
             for (String id : expired) {
-                db.update("DELETE FROM sessions WHERE session_id=?", id);
-                db.update("DELETE FROM session_owners WHERE session_id=?", id);
-                db.update("DELETE FROM session_shares WHERE session_id=?", id);
-                db.update("DELETE FROM session_titles WHERE session_id=?", id);
-                cache.remove(id);
-                owners.remove(id);
-                titles.remove(id);
-                shares.remove(id);
+                deleteSessionCascade(id);
                 pruned++;
             }
         }
-        if (pruned > 0) log.info("[sessions] pruned " + pruned + " session(s) idle > " + ttlMs + "ms");
+        if (pruned > 0) log.info("[sessions] pruned " + pruned + " session(s) idle > " + ttlMs + "ms (cascade)");
         return pruned;
+    }
+
+    /** All tables keyed by session_id, deleted together when a session is retired. */
+    private static final List<String> SESSION_CHILD_TABLES = List.of(
+            "session_owners", "session_shares", "session_titles", "checkpoints",
+            "plans", "plan_steps", "plan_history", "session_skill_state",
+            "session_settings", "scheduled_tasks");
+
+    /** Delete a single session and every dependent row across all child tables (DB + in-memory caches). */
+    private void deleteSessionCascade(String id) {
+        db.update("DELETE FROM sessions WHERE session_id=?", id);
+        for (String table : SESSION_CHILD_TABLES) {
+            db.update("DELETE FROM " + table + " WHERE session_id=?", id);
+        }
+        cache.remove(id);
+        owners.remove(id);
+        titles.remove(id);
+        shares.remove(id);
+    }
+
+    /**
+     * Sweep orphaned child rows whose parent session no longer exists (e.g. left behind by older builds
+     * that pruned only the four core tables). Returns the total number of rows deleted across all child
+     * tables. Safe to run periodically; a no-op once the data is clean.
+     */
+    public synchronized int sweepOrphans() {
+        if (!db.available()) return 0;
+        int removed = 0;
+        for (String table : SESSION_CHILD_TABLES) {
+            removed += db.update(
+                    "DELETE FROM " + table + " WHERE session_id NOT IN (SELECT session_id FROM sessions)");
+        }
+        if (removed > 0) log.info("[sessions] orphan sweep removed " + removed + " row(s) across child tables");
+        return removed;
     }
 
     /** Age/size distribution of stored sessions for the /sessions/summary endpoint. */

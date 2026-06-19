@@ -41,6 +41,7 @@ public class AuthFilter implements Filter {
     @Value("${auth.open-paths:/health}") private String openPathsCfg;
     @Value("${auth.rate-limit-per-minute:0}") private int rateLimitPerMinute;
     @Value("${auth.rate-limit-persistent:true}") private boolean rateLimitPersistent;
+    @Value("${auth.rate-limit-algorithm:fixed}") private String rateLimitAlgorithm;
     @Value("${auth.principals:}") private String principalsCfg;
     @Value("${auth.admin-paths:/metrics,/audit}") private String adminPathsCfg;
 
@@ -69,12 +70,17 @@ public class AuthFilter implements Filter {
         adminPaths = Rbac.parseAdminPaths(adminPathsCfg);
         openPaths = new LinkedHashSet<>();
         for (String p : openPathsCfg.split(",")) if (!p.isBlank()) openPaths.add(p.trim());
-        limiter = new RateLimiter(rateLimitPerMinute, 60_000L, rateLimitPersistent ? db : null);
+        RateLimiter.Algorithm algo = "sliding".equalsIgnoreCase(rateLimitAlgorithm)
+                ? RateLimiter.Algorithm.SLIDING : RateLimiter.Algorithm.FIXED;
+        limiter = new RateLimiter(rateLimitPerMinute, 60_000L, rateLimitPersistent ? db : null, algo);
         long admins = keyToPrincipal.values().stream().filter(Principal::isAdmin).count();
         log.info("[auth] enabled=" + enabled + "; principals=" + keyToPrincipal.size()
                 + " (admins=" + admins + "); admin-paths=" + adminPaths
-                + "; rate-limit/min=" + rateLimitPerMinute + "; open=" + openPaths);
+                + "; rate-limit/min=" + rateLimitPerMinute + " (" + algo.name().toLowerCase() + "); open=" + openPaths);
     }
+
+    /** The active rate limiter (for the scheduled pruner). May be null before init(). */
+    public RateLimiter limiter() { return limiter; }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
