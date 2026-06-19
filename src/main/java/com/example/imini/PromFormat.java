@@ -105,6 +105,17 @@ public final class PromFormat {
                     line(sb, PREFIX + "alerts_escalated_tier", "tier=\"" + esc(e.getKey()) + "\"", e.getValue());
                 }
             }
+            if (alerts.get("ack_sla_by_tier") instanceof Map<?, ?> sla) {
+                Map<String, Map<String, Long>> m = (Map<String, Map<String, Long>>) sla;
+                help(sb, "alerts_ack_latency_avg_ms", "Mean ack latency by escalation tier (ms)", "gauge");
+                for (Map.Entry<String, Map<String, Long>> e : sortedRoutes(m)) {
+                    line(sb, PREFIX + "alerts_ack_latency_avg_ms", "tier=\"" + esc(e.getKey()) + "\"", e.getValue().get("avg_ms"));
+                }
+                help(sb, "alerts_ack_latency_max_ms", "Max ack latency by escalation tier (ms)", "gauge");
+                for (Map.Entry<String, Map<String, Long>> e : sortedRoutes(m)) {
+                    line(sb, PREFIX + "alerts_ack_latency_max_ms", "tier=\"" + esc(e.getKey()) + "\"", e.getValue().get("max_ms"));
+                }
+            }
         }
         return sb.toString();
     }

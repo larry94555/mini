@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -82,6 +83,7 @@ public class AgentController {
     private final CapabilityService capabilities;
     private final ToolRateLimiter toolRateLimiter;
     private final AlertSink alertSink;
+    private final CsrfGuard csrf;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -95,7 +97,7 @@ public class AgentController {
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
                            Database db, SessionReaper reaper,
                            Tracer tracer, CostService cost, EvalHarness eval, CapabilityService capabilities,
-                           ToolRateLimiter toolRateLimiter, AlertSink alertSink) {
+                           ToolRateLimiter toolRateLimiter, AlertSink alertSink, CsrfGuard csrf) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -131,6 +133,7 @@ public class AgentController {
         this.capabilities = capabilities;
         this.toolRateLimiter = toolRateLimiter;
         this.alertSink = alertSink;
+        this.csrf = csrf;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -537,13 +540,42 @@ public class AgentController {
         int total = alertSink.deadLetterCount(a, st, query);
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(DeadLetterDashboard.render(rows, action, status, q, off, capped, total));
+                .body(DeadLetterDashboard.render(rows, action, status, q, off, capped, total,
+                        csrf.token(), alertSink.dedupSummary(20)));
+    }
+
+    /** Top currently-throttled dedup keys (most suppressed first). Admin only. */
+    @GetMapping("/admin/alerts/digests")
+    public Map<String, Object> adminAlertsDigests(
+            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("digests", alertSink.dedupSummary(limit));
+        return out;
+    }
+
+    /** A short-lived per-process CSRF token for the viewer's state-changing actions. Admin only. */
+    @GetMapping("/admin/alerts/csrf")
+    public Map<String, Object> adminAlertsCsrf() {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("csrf", csrf.token());
+        out.put("enabled", csrf.enabled());
+        return out;
+    }
+
+    /** Resolve the presented CSRF token: header wins, query param is the fallback. */
+    private String csrfToken(String header, String param) {
+        return (header != null && !header.isBlank()) ? header : param;
     }
 
     /** Acknowledge a dead-letter so it no longer escalates. Admin only. */
     @PostMapping("/admin/alerts/ack")
-    public Map<String, Object> adminAlertsAck(@RequestParam(name = "id") String id) {
+    public Map<String, Object> adminAlertsAck(@RequestParam(name = "id") String id,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
         int n = alertSink.ack(id);
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("acked", n);
@@ -552,8 +584,11 @@ public class AgentController {
 
     /** Force an escalation sweep of un-acked dead-letters past the threshold. Admin only. */
     @PostMapping("/admin/alerts/escalate")
-    public Map<String, Object> adminAlertsEscalate() {
+    public Map<String, Object> adminAlertsEscalate(
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
         int n = alertSink.escalateStale(System.currentTimeMillis());
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("escalated", n);
@@ -566,8 +601,11 @@ public class AgentController {
     public Map<String, Object> adminAlertsAckAll(
             @RequestParam(name = "action", defaultValue = "") String action,
             @RequestParam(name = "status", defaultValue = "") String status,
-            @RequestParam(name = "q", defaultValue = "") String q) {
+            @RequestParam(name = "q", defaultValue = "") String q,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
         int n = alertSink.ackMatching(action.isBlank() ? null : action,
                 status.isBlank() ? null : status, q.isBlank() ? null : q);
         Map<String, Object> out = new java.util.LinkedHashMap<>();
@@ -580,8 +618,11 @@ public class AgentController {
     public Map<String, Object> adminAlertsReplayAll(
             @RequestParam(name = "action", defaultValue = "") String action,
             @RequestParam(name = "status", defaultValue = "") String status,
-            @RequestParam(name = "q", defaultValue = "") String q) {
+            @RequestParam(name = "q", defaultValue = "") String q,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
         int n = alertSink.replayMatching(action.isBlank() ? null : action,
                 status.isBlank() ? null : status, q.isBlank() ? null : q);
         Map<String, Object> out = new java.util.LinkedHashMap<>();
@@ -595,8 +636,11 @@ public class AgentController {
      * Returns the number re-enqueued. Admin only.
      */
     @PostMapping("/admin/alerts/replay")
-    public Map<String, Object> adminAlertsReplay(@RequestParam(name = "id", required = false) String id) {
+    public Map<String, Object> adminAlertsReplay(@RequestParam(name = "id", required = false) String id,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
         int n = alertSink.replay(id);
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("replayed", n);
@@ -612,16 +656,22 @@ public class AgentController {
     @PostMapping("/admin/alerts/test")
     public Map<String, Object> adminAlertsTest(
             @RequestParam(name = "send", defaultValue = "false") boolean send,
-            @RequestBody(required = false) String templateOverride) {
+            @RequestBody(required = false) String templateOverride,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        if (send) csrf.require(csrfToken(csrfHeader, csrfParam)); // only the side-effecting path needs the token
         String tmpl = (templateOverride != null && !templateOverride.isBlank()) ? templateOverride : null;
         return alertSink.preview(tmpl, send);
     }
 
     /** Purge dead-lettered alerts: all, or one with {@code ?id=...}. Admin only. */
     @DeleteMapping("/admin/alerts/failed")
-    public Map<String, Object> adminAlertsPurge(@RequestParam(name = "id", required = false) String id) {
+    public Map<String, Object> adminAlertsPurge(@RequestParam(name = "id", required = false) String id,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
         int n = alertSink.purgeAll(id);
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("purged", n);

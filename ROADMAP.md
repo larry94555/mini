@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- CSRF guard for the viewer + dedup-digest summary panel + escalation-tier ack-SLA timing: the dead-letter viewer's state-changing actions now require a per-process CSRF token (alerts.admin-csrf; embedded in the page, sent as X-CSRF-Token, fetchable at GET /admin/alerts/csrf); the most-throttled dedup keys are exposed at GET /admin/alerts/digests and a "Top suppressed keys" viewer panel; and the time from escalation to ack is aggregated per tier (ack_sla_by_tier) and exported as imini_alerts_ack_latency_avg_ms/_max_ms{tier}.
+
 - Escalation tier/ack visibility, per-tier metrics, and bulk dead-letter actions: each dead-letter now surfaces escalation_tier/escalated_at/acked_at in the JSON and the HTML viewer (a tier column + acked badge); escalations are counted per ladder tier and exported as imini_alerts_escalated_tier{tier}; and POST /admin/alerts/ack-all and /admin/alerts/replay-all bulk-act on every failed dead-letter matching the current action/status/q filter (with one-click buttons in the viewer) so a backlog can be cleared after an outage.
 
 - Multi-tier escalation ladder + atomic claiming, an HTML dead-letter viewer, and dedup digests: alerts.escalate-tiers walks an un-acked dead-letter up an ordered delay|url ladder (atomic escalation_tier claim so concurrent reapers page each tier exactly once; legacy single-tier keys still work); GET /admin/alerts.html is a filterable, paginated dead-letter viewer with inline ack/replay/delete; and the reaper emits one dedup digest per key (alerts.dedup-digest, imini_alerts_digested) when a dedup window elapses with suppressions, so suppressed storms stay visible without flooding.

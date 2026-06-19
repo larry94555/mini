@@ -403,6 +403,51 @@ public class AlertSink {
     /** True when dedup digests should be emitted (dedup window set and digests enabled). */
     boolean digestEnabled() { return dedupWindowSeconds > 0 && dedupDigest; }
 
+    /** A current dedup-window summary row: the key (action|target), its parts, and how many it has suppressed. */
+    public record DedupSummary(String key, String action, String target, long suppressed, long windowStart) {}
+
+    /**
+     * The most-suppressing active dedup windows (descending by suppressed count), for an at-a-glance view of
+     * which alerts are being throttled. Reads the shared {@code alert_dedup} table when durable, else the
+     * in-memory map. Only windows that have actually suppressed something are returned.
+     */
+    public List<DedupSummary> dedupSummary(int limit) {
+        int lim = limit <= 0 ? 20 : Math.min(limit, 200);
+        List<DedupSummary> out = new ArrayList<>();
+        if (dedupPersistent()) {
+            try {
+                return db.query("SELECT dk_key, window_start, suppressed FROM alert_dedup "
+                                + "WHERE suppressed > 0 ORDER BY suppressed DESC LIMIT ?",
+                        rs -> {
+                            String key = rs.getString(1);
+                            long ws = rs.getLong(2);
+                            long sup = rs.getLong(3);
+                            int bar = key == null ? -1 : key.indexOf('|');
+                            String action = bar >= 0 ? key.substring(0, bar) : key;
+                            String target = bar >= 0 ? key.substring(bar + 1) : "";
+                            return new DedupSummary(key, action, target, sup, ws);
+                        }, lim);
+            } catch (Exception ex) {
+                log.warn("[alerts] dedup summary query failed: " + ex.getMessage());
+                return List.of();
+            }
+        }
+        synchronized (dedupLock) {
+            for (var e : dedupState.entrySet()) {
+                long sup = e.getValue()[1];
+                if (sup <= 0) continue;
+                String key = e.getKey();
+                int bar = key.indexOf('|');
+                String action = bar >= 0 ? key.substring(0, bar) : key;
+                String target = bar >= 0 ? key.substring(bar + 1) : "";
+                out.add(new DedupSummary(key, action, target, sup, e.getValue()[0]));
+            }
+        }
+        out.sort((x, y) -> Long.compare(y.suppressed(), x.suppressed()));
+        return out.size() > lim ? out.subList(0, lim) : out;
+    }
+
+
     /** Pure: a small JSON digest payload summarizing how many alerts a dedup key suppressed. */
     static String digestPayload(String key, long count, long windowSeconds) {
         String action = key, target = "";
@@ -580,6 +625,7 @@ public class AlertSink {
         m.put("escalated", escalated.get());
         m.put("digested", digested.get());
         m.put("by_tier", byTierSnapshot());
+        m.put("ack_sla_by_tier", ackSlaByTier());
         m.put("in_flight", (long) inFlight.get());
         m.put("dead_letter_persistent", dlPersistent());
         m.put("routes", routes.keySet());
@@ -594,6 +640,53 @@ public class AlertSink {
         Map<String, Long> out = new LinkedHashMap<>();
         new java.util.TreeMap<>(byTier).forEach((tier, c) -> out.put(Integer.toString(tier), c.get()));
         return out;
+    }
+
+    /**
+     * Pure: aggregate (tier, ackLatencyMs) samples into {tier -> {count, avg_ms, max_ms}}. The latency is the
+     * time from a row being escalated to a tier until it was acknowledged. Samples with tier &lt;= 0 or
+     * negative latency are ignored. Result keys are tier numbers as strings, ordered ascending.
+     */
+    static Map<String, Map<String, Long>> aggregateSla(List<long[]> samples) {
+        java.util.TreeMap<Integer, long[]> acc = new java.util.TreeMap<>(); // tier -> [count, sum, max]
+        if (samples != null) {
+            for (long[] s : samples) {
+                if (s == null || s.length < 2) continue;
+                int tier = (int) s[0];
+                long lat = s[1];
+                if (tier <= 0 || lat < 0) continue;
+                long[] a = acc.computeIfAbsent(tier, k -> new long[3]);
+                a[0]++; a[1] += lat; a[2] = Math.max(a[2], lat);
+            }
+        }
+        Map<String, Map<String, Long>> out = new LinkedHashMap<>();
+        acc.forEach((tier, a) -> {
+            Map<String, Long> m = new LinkedHashMap<>();
+            m.put("count", a[0]);
+            m.put("avg_ms", a[0] == 0 ? 0 : a[1] / a[0]);
+            m.put("max_ms", a[2]);
+            out.put(Integer.toString(tier), m);
+        });
+        return out;
+    }
+
+    /**
+     * Per-tier ack-SLA latency ({tier -> {count, avg_ms, max_ms}}) measuring how long an escalated dead-letter
+     * took to be acknowledged (time from {@code escalated_at} to {@code acked_at}). Computed on demand from the
+     * table; stateless (no new columns). Empty when not durable.
+     */
+    public Map<String, Map<String, Long>> ackSlaByTier() {
+        if (!dlPersistent()) return Map.of();
+        List<long[]> samples;
+        try {
+            samples = db.query("SELECT escalation_tier, acked_at - escalated_at FROM alerts_dead_letter "
+                            + "WHERE acked_at IS NOT NULL AND escalated_at IS NOT NULL AND escalation_tier > 0",
+                    rs -> new long[]{rs.getInt(1), rs.getLong(2)});
+        } catch (Exception ex) {
+            log.warn("[alerts] ack-SLA query failed: " + ex.getMessage());
+            return Map.of();
+        }
+        return aggregateSla(samples);
     }
 
     private Map<String, Map<String, Long>> byRouteSnapshot() {
