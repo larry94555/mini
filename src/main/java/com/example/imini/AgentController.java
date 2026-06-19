@@ -75,6 +75,9 @@ public class AgentController {
     private final ContextManager context;
     private final Database db;
     private final SessionReaper reaper;
+    private final Tracer tracer;
+    private final CostService cost;
+    private final EvalHarness eval;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -86,7 +89,8 @@ public class AgentController {
                            TokenBudgetService tokenBudget, LlamaClient llama, ScheduledTasks schedule,
                            PluginService plugins, SessionSettings sessionSettings,
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
-                           Database db, SessionReaper reaper) {
+                           Database db, SessionReaper reaper,
+                           Tracer tracer, CostService cost, EvalHarness eval) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -116,6 +120,9 @@ public class AgentController {
         this.context = context;
         this.db = db;
         this.reaper = reaper;
+        this.tracer = tracer;
+        this.cost = cost;
+        this.eval = eval;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -129,23 +136,40 @@ public class AgentController {
         final String q = body.getOrDefault("question", "");
         final String image = body.get("image");          // optional base64 or data: URL
         final String imageType = body.get("imageType");  // optional media type, e.g. image/png
-        sessions.claim(sessionId, currentUser());
-        audit.record(currentUser(), planAction("ask", plan, resume), "session:" + sessionId, "started");
+        final String tenant = currentUser();
+        // Per-tenant quota: deny before doing any work if the tenant is over its monthly token budget.
+        if (!cost.allow(tenant)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                    "monthly token quota exceeded for " + tenant);
+        }
+        sessions.claim(sessionId, tenant);
+        audit.record(tenant, planAction("ask", plan, resume), "session:" + sessionId, "started");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
+        Tracer.Span span = tracer.start("ask").attr("session", sessionId).attr("tenant", tenant)
+                .attr("mode", mode.name().toLowerCase());
         try {
+            int inTokens = llama.countTokens(q);
             String answer = runService.runBounded(() ->
                     (image != null && !image.isBlank()) ? loop.run(sessionId, q, image, imageType, mode, new ConsoleSink())
                          : (plan && resume) ? loop.resumePlan(sessionId, mode, new ConsoleSink())
                          : plan ? loop.runPlan(sessionId, q, mode, new ConsoleSink())
                          : loop.run(sessionId, q, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
+            int outTokens = answer == null ? 0 : Math.max(0, answer.length() / 4); // ~4 chars/token
+            long micro = cost.record(tenant, "/ask", sessionId, Math.max(0, inTokens), outTokens);
+            span.attr("input_tokens", Math.max(0, inTokens)).attr("output_tokens", outTokens)
+                .attr("micro_usd", micro).attr("latency_ms", ms);
             metrics.recordRun("/ask", sessionId, mode.name().toLowerCase(), ms, true);
             metrics.logRun("/ask", sessionId, null, ms, true);
             return Map.of("answer", answer);
         } catch (Exception e) {
+            span.error(e.getMessage());
             metrics.recordRun("/ask", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
             throw e;
+        } finally {
+            span.end();
         }
     }
 
@@ -549,6 +573,37 @@ public class AgentController {
         out.put("windowMs", windowMs);
         out.putAll(metrics.windowStats(since));
         return out;
+    }
+
+    /**
+     * Recent distributed-trace spans (OpenTelemetry data model), newest first. Each span has a W3C
+     * trace_id/span_id/parent_id, name, timing, and attributes. Tracing is off unless tracing.enabled=true.
+     * Admin only.
+     */
+    @GetMapping("/admin/traces")
+    public Map<String, Object> adminTraces(@RequestParam(name = "limit", defaultValue = "50") int limit) {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("enabled", tracer.enabled());
+        out.put("spans", tracer.recent(Math.max(1, Math.min(500, limit))));
+        return out;
+    }
+
+    /** Per-tenant token usage and cost for the current month (cost_ledger). Admin only. */
+    @GetMapping("/admin/cost")
+    public Map<String, Object> adminCost() {
+        requireAdmin();
+        return cost.summary();
+    }
+
+    /**
+     * Run the agent-evaluation suite against the live model and return the pass-rate plus per-case detail.
+     * Self-skips (returns {skipped:true}) when the model is unreachable or eval is disabled. Admin only.
+     */
+    @PostMapping("/admin/eval")
+    public Map<String, Object> adminEval() {
+        requireAdmin();
+        return eval.runSuite(EvalHarness.defaultCases());
     }
 
     /**

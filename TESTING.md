@@ -3313,3 +3313,47 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** with `auth.rate-limit-per-minute` > 0 the run.sh log shows `[ratelimit] reaper enabled`. The
   reaper calls `RateLimiter.pruneStale` every `auth.rate-limit-reap-interval-minutes` (default 10), logging
   `[ratelimit] pruned N stale window(s)` when keys go quiet. Set the interval to 0 to disable.
+
+---
+
+# Eval harness, distributed tracing, per-tenant cost/quotas
+
+## 389. Cost math (CostServiceTest)
+
+- **Run:** `./mvnw -Dtest=CostServiceTest test`.
+- **Observe:** `microUsd` converts tokens at per-million prices to integer micro-USD (1M tokens @ $3/M =
+  3,000,000 micro-USD), rounds correctly, and is 0 for a free local model.
+
+## 390. Month boundary (CostServiceTest)
+
+- **Observe:** `startOfMonthMs` returns the 1st of the month at 00:00 UTC; two instants in the same month
+  share it; the next month is later. (Drives the "tokens this month" quota window.)
+
+## 391. Tracer span ids + JSON (TracerTest)
+
+- **Run:** `./mvnw -Dtest=TracerTest test`.
+- **Observe:** trace ids are 32 hex chars, span ids 16 (W3C); the attribute JSON encoder escapes quotes and
+  control characters.
+
+## 392. Span nesting + ring (manual / live)
+
+- **Observe:** with `tracing.enabled=true`, run `/ask`, then `GET /admin/traces`. The run produces nested
+  spans sharing one `traceId`; each has a `traceparent` of the form `00-<32hex>-<16hex>-01`. Disabling
+  tracing yields zero spans (no-op, zero overhead).
+
+## 393. Eval scoring (EvalHarnessTest)
+
+- **Run:** `./mvnw -Dtest=EvalHarnessTest test`.
+- **Observe:** `scoreContains` is case-insensitive; `scoreRegex` matches anywhere (DOTALL, CI) and returns
+  false on an invalid pattern; `scoreEqualsNormalized` collapses whitespace/case; `aggregate` computes the
+  pass-rate.
+
+## 394. Eval suite run (manual / live)
+
+- **Observe:** `POST /admin/eval` against a running model returns `{total, passed, passRate, cases:[...]}`.
+  With the model down it returns `{skipped:true, reason:"model unreachable"}` — safe to call offline.
+
+## 395. Per-tenant quota enforcement (manual)
+
+- **Observe:** set `cost.monthly-token-quota` to a small number; once a tenant's monthly tokens exceed it,
+  `/ask` returns HTTP 429. `GET /admin/cost` shows per-tenant token totals and micro-USD for the month.
