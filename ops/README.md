@@ -39,7 +39,7 @@ Included alerts (tune thresholds to your traffic):
   healthy again).
 - **Escalation & noise** — `IminiAlertSlaBreaches` (an alert went un-acked past its tier SLA and was
   re-escalated), `IminiAlertEscalating` (alerts climbing the ladder), `IminiAlertAckLatencyHigh` (acks taking
-  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood). See the runbook below.
+  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook). See the runbook below.
 - **SLO** — `IminiRunSuccessRateLow`, `IminiRunLatencyP95High`.
 
 ## Grafana dashboard — `grafana/imini-dashboard.json`
@@ -62,10 +62,15 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertSlaBreaches` | An alert blew its tier ack-SLA and was re-escalated | Ack or resolve immediately; review the tier's SLA on `GET /admin/alerts/config` if it's too tight |
 | `IminiAlertAckLatencyHigh` | Acks are slow (>30m max) | Review per-tier ack latency on the overview page; adjust on-call rotation or tier URLs |
 | `IminiAlertSuppressionStorm` | Dedup is collapsing a flood of duplicates | Inspect the top suppressed keys at `GET /admin/alerts/digests`; fix the upstream cause |
+| `IminiAlertDeliveryLatencyHigh` | The webhook receiver is slow (p95 >2s) | Probe it with `POST /admin/alerts/selftest?send=true`; check the receiver before it starts failing |
 
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a
-mistyped tier or route that silently parsed to nothing is easy to spot.
+mistyped tier or route that silently parsed to nothing is easy to spot. The config endpoint also returns a
+`warnings` array of detected misconfigurations (also logged at startup). To verify the pipeline end-to-end
+without waiting for a real incident, `POST /admin/alerts/selftest` reports how a synthetic alert resolves
+(routing/dedup/URL); add `?send=true` for a live probe POST that reports the receiver's HTTP status and
+round-trip latency.
 
 > These files are plain text you are meant to edit — thresholds, scrape interval, and panel layout are
 > starting points, not prescriptions.

@@ -3890,3 +3890,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `ops/grafana/imini-dashboard.json` is valid JSON with panels for escalations & SLA breaches,
   per-tier escalations, per-tier ack latency, and suppression/digests (ids 13-16). Import via Grafana →
   Dashboards → Import. The runbook in `ops/README.md` maps each alert to a first response.
+
+---
+
+# Startup config validation, synthetic self-test, delivery-latency histograms
+
+## 466. Config-validation warnings (AlertValidationSelftestLatencyTest)
+
+- **Run:** `./mvnw -Dtest=AlertValidationSelftestLatencyTest test`.
+- **Observe:** `AlertSink.validateConfig` flags contradictory/ineffective settings — ladder/webhook set while
+  disabled, enabled with no sink, `escalate-tiers` that parsed to 0, `dedup-shared`/`dead-letter-persistent`
+  with no DB, `dedup-digest` with no dedup window — and returns empty for a coherent config. The same warnings
+  are logged at startup and returned in `GET /admin/alerts/config` under `warnings`.
+
+## 467. Delivery-latency histogram (AlertValidationSelftestLatencyTest)
+
+- **Run:** same class.
+- **Observe:** `bucketIndex` maps a latency to the right bucket (boundaries inclusive; overflow → +Inf);
+  `stats().delivery_latency` exposes non-cumulative buckets + sum + count; `PromFormat` renders cumulative
+  `imini_alerts_delivery_latency_ms_bucket{le=...}` plus `_sum`/`_count`. Webhook POSTs (incl. failures) are
+  timed in `attempt`.
+
+## 468. Synthetic self-test (AlertValidationSelftestLatencyTest + manual)
+
+- **Observe (unit):** `selfTest(action,false)` reports `forwarded_action`/`resolved_url`/`routed`/
+  `template_used`/`dedup_enabled`/`would_deliver` and no probe; `selfTest(action,true)` while disabled reports
+  `probe.attempted=false`.
+- **Observe (manual, needs a receiver):** `POST /admin/alerts/selftest?send=true` (CSRF-guarded) does one
+  synchronous probe POST and returns `{ok,status,latency_ms}` (or `error`).
+
+## 469. ops delivery-latency panel + rule (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertDeliveryLatencyHigh` (p95 > 2s) and
+  `ops/grafana/imini-dashboard.json` has a "Webhook delivery latency (p50/p95)" panel. Validate with
+  `promtool check rules` and a Grafana import.
