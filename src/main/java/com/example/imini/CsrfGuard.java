@@ -61,6 +61,16 @@ public class CsrfGuard {
 
     public boolean enabled() { return enabled; }
 
+    /** Non-secret CSRF settings for operator introspection: enabled, secret mode, and token TTL. */
+    public java.util.Map<String, Object> configSnapshot() {
+        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("enabled", enabled);
+        m.put("secret_mode", (configuredSecret != null && !configuredSecret.isBlank())
+                ? "shared-secret" : "per-process");
+        m.put("ttl_seconds", Math.max(1, ttlSeconds));
+        return m;
+    }
+
     /** Mint a fresh token valid for the configured TTL from now. */
     public String token() { return mint(System.currentTimeMillis(), secret(), Math.max(1, ttlSeconds)); }
 

@@ -556,11 +556,31 @@ public class AgentController {
 
     /** A single operator overview of the alerting pipeline (counters, routes, tiers, top suppressed). Admin. */
     @GetMapping(value = "/admin/alerts/overview.html", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> adminAlertsOverview() {
+    public ResponseEntity<String> adminAlertsOverview(
+            @RequestParam(name = "refresh", defaultValue = "10") int refresh) {
         requireAdmin();
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(AlertsOverview.render(alertSink.stats(), alertSink.dedupSummary(10)));
+                .body(AlertsOverview.render(alertSink.stats(), alertSink.dedupSummary(10), Math.max(0, refresh)));
+    }
+
+    /** JSON backing the overview page's live auto-refresh. Admin only. */
+    @GetMapping("/admin/alerts/overview.json")
+    public Map<String, Object> adminAlertsOverviewJson() {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("stats", alertSink.stats());
+        out.put("digests", alertSink.dedupSummary(10));
+        return out;
+    }
+
+    /** The effective, resolved alerting configuration (webhooks masked, no secrets). Admin only. */
+    @GetMapping("/admin/alerts/config")
+    public Map<String, Object> adminAlertsConfig() {
+        requireAdmin();
+        Map<String, Object> out = alertSink.configSnapshot();
+        out.put("csrf", csrf.configSnapshot());
+        return out;
     }
 
     /** A short-lived per-process CSRF token for the viewer's state-changing actions. Admin only. */

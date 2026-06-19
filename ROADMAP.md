@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- ops runbook + dashboards/rules, an effective-config introspection endpoint, and a live auto-refreshing overview: the ops/ bundle gained Grafana panels and Prometheus rules for the newer signals (escalations, SLA breaches, per-tier ack latency, suppression storms) plus a response runbook; GET /admin/alerts/config returns the resolved alerting config (parsed tiers/SLAs, routes, dedup/retention, CSRF mode) with webhook URLs masked; and the overview page now polls GET /admin/alerts/overview.json to live-update its cards and tables (?refresh=<seconds>).
+
 - SLA-breach re-escalation + alerting-overview dashboard + signed/rotating CSRF tokens: escalation tiers take an optional ack-SLA deadline (delay|url|template|sla) and a dead-letter that misses it is re-escalated (or re-paged at the top tier), counted as imini_alerts_sla_breaches; GET /admin/alerts/overview.html is a one-screen operator view (counters, per-route, per-tier + ack-SLA, top suppressed); and CSRF tokens are now HMAC-signed with a TTL (alerts.csrf-secret/alerts.csrf-ttl-seconds) so they validate statelessly and across instances when the secret is shared.
 
 - CSRF guard for the viewer + dedup-digest summary panel + escalation-tier ack-SLA timing: the dead-letter viewer's state-changing actions now require a per-process CSRF token (alerts.admin-csrf; embedded in the page, sent as X-CSRF-Token, fetchable at GET /admin/alerts/csrf); the most-throttled dedup keys are exposed at GET /admin/alerts/digests and a "Top suppressed keys" viewer panel; and the time from escalation to ack is aggregated per tier (ack_sla_by_tier) and exported as imini_alerts_ack_latency_avg_ms/_max_ms{tier}.

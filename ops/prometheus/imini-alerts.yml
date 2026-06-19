@@ -60,6 +60,42 @@ groups:
           summary: "imini dead-letter backlog is non-empty"
           description: "Dead-lettered alerts have been waiting >30m. Inspect GET /admin/alerts/failed and replay."
 
+      - alert: IminiAlertSlaBreaches
+        expr: increase(imini_alerts_sla_breaches[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini escalation ack-SLA breached"
+          description: "A dead-letter went un-acked past its tier SLA and was re-escalated. Ack it via POST /admin/alerts/ack?id=... or see /admin/alerts.html."
+
+      - alert: IminiAlertEscalating
+        expr: increase(imini_alerts_escalated[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini alerts are escalating"
+          description: "Un-acked dead-letters are being paged up the escalation ladder. Review /admin/alerts/overview.html."
+
+      - alert: IminiAlertAckLatencyHigh
+        expr: max(imini_alerts_ack_latency_max_ms) > 1800000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini escalation ack latency is high"
+          description: "Escalated alerts are taking >30m to acknowledge. Check on-call responsiveness per tier on the overview page."
+
+      - alert: IminiAlertSuppressionStorm
+        expr: increase(imini_alerts_suppressed[15m]) > 100
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini dedup is suppressing a storm of alerts"
+          description: "A high volume of duplicate alerts is being collapsed. See the top suppressed keys at GET /admin/alerts/digests."
+
   - name: imini-slo
     rules:
       - alert: IminiRunSuccessRateLow

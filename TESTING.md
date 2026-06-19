@@ -3858,3 +3858,35 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   garbage, and null tokens are rejected; a token minted with a shared secret verifies on another instance
   using the same secret (multi-instance). The enabled guard requires a valid token (`require` throws 403
   otherwise).
+
+---
+
+# ops runbook/dashboards/rules, config introspection, live overview auto-refresh
+
+## 462. Config introspection + URL masking (AlertConfigOverviewTest)
+
+- **Run:** `./mvnw -Dtest=AlertConfigOverviewTest test`.
+- **Observe:** `AlertSink.maskUrl` keeps `scheme://host` and redacts the secret-bearing path; `configSnapshot`
+  exposes resolved keys (actions, parsed routes, resolved escalation tiers with SLAs, effective persistence)
+  with no raw webhook secrets; `CsrfGuard.configSnapshot` reports enabled/secret-mode/ttl without the secret.
+- **Live:** `GET /admin/alerts/config` (admin) returns the merged config.
+
+## 463. Overview live auto-refresh (AlertConfigOverviewTest)
+
+- **Run:** same class.
+- **Observe:** the 2-arg render is a static snapshot (no polling script); the 3-arg render with
+  `autoRefreshSeconds>0` embeds the auto-refresh note, the polling script against `/admin/alerts/overview.json`,
+  stable card ids (`c_<key>`), and table-body ids so JS can live-update. Live: `GET
+  /admin/alerts/overview.html?refresh=5`.
+
+## 464. ops Prometheus rules valid (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` parses and now includes `IminiAlertSlaBreaches`,
+  `IminiAlertEscalating`, `IminiAlertAckLatencyHigh`, and `IminiAlertSuppressionStorm` in the
+  `imini-alerting-pipeline` group. Validate with `promtool check rules ops/prometheus/imini-alerts.yml`.
+
+## 465. ops Grafana dashboard valid (manual)
+
+- **Observe:** `ops/grafana/imini-dashboard.json` is valid JSON with panels for escalations & SLA breaches,
+  per-tier escalations, per-tier ack latency, and suppression/digests (ids 13-16). Import via Grafana →
+  Dashboards → Import. The runbook in `ops/README.md` maps each alert to a first response.
