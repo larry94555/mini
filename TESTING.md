@@ -3632,3 +3632,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `ops/prometheus/imini-alerts.yml` loads cleanly via Prometheus `rule_files`, and
   `ops/grafana/imini-dashboard.json` imports into Grafana (pick the Prometheus datasource). Panels and rules
   reference the live `imini_*` series (security-event rates, `imini_alerts_*`, SLOs). See `ops/README.md`.
+
+---
+
+# Crash-safe replay + retry history, template validation/preview, per-action routing
+
+## 434. Per-action routing parse (AlertRoutingTemplateTest)
+
+- **Run:** `./mvnw -Dtest=AlertRoutingTemplateTest test`.
+- **Observe:** `AlertSink.parseRoutes` reads `action|url|template` entries separated by `;;` (template
+  optional), skips malformed entries, and `urlFor`/`templateFor` prefer a route over the defaults.
+
+## 435. Template validation & dry-run preview (AlertRoutingTemplateTest)
+
+- **Run:** same class.
+- **Observe:** `validateTemplate` flags unknown `{placeholders}` and unbalanced braces/quotes but not valid
+  templates; `preview` renders against a sample event, returns issues, and never sends when alerting is
+  disabled.
+- **Live:** `POST /admin/alerts/test` (admin) with a template body returns the rendered payload + issues;
+  `?send=true` enqueues one real sample delivery.
+
+## 436. Crash-safe replay + retry history (manual, needs DB)
+
+- **Observe:** with SQLite + an unreachable webhook, produce a dead-letter. `POST /admin/alerts/replay` marks
+  the row `replaying` (visible at `GET /admin/alerts/failed`) and re-enqueues it; with the webhook still down
+  the row returns to `failed` with `attempts` increased and `last_error` updated — not duplicated. Kill the
+  app while `replaying`; on restart the row is reset to `failed` (still present). Point the webhook at a real
+  receiver and replay — the row is deleted on the confirmed 2xx and `sent`/`replayed` increment.
+
+## 437. Per-action routing end-to-end (manual)
+
+- **Observe:** set `alerts.routes=spend_alert|http://127.0.0.1:9/none;;capability_denied|<real-receiver>`.
+  A `capability_denied` is delivered to the real receiver; a `spend_alert` dead-letters (its route is
+  unreachable). Unrouted actions use `alerts.webhook-url`.

@@ -30,26 +30,38 @@ import java.util.concurrent.atomic.AtomicLong;
  * can page an operator instead of only being browsable at {@code /admin/audit.html}.
  *
  * <p>It registers as an {@link AuditLog} listener at startup. For each recorded entry whose action is in the
- * configured set it (a) logs a {@code WARN} line — always available as a channel — and (b) if
- * {@code alerts.webhook-url} is set, enqueues a webhook POST.
+ * configured set it (a) logs a {@code WARN} line and (b) if a webhook is resolved for that action, enqueues a
+ * POST.
  *
- * <h2>Delivery buffer with retry &amp; dead-letter</h2>
- * Webhook delivery is buffered and resilient: each alert is dispatched on a background scheduler; a failed
- * POST (network error or non-2xx) is retried up to {@code alerts.max-retries} times with exponential backoff
- * ({@code alerts.retry-backoff-ms} base). An alert that exhausts its retries is moved to a bounded in-memory
- * dead-letter ring (inspectable at {@code GET /admin/alerts/failed}) rather than silently lost. If more than
- * {@code alerts.queue-capacity} deliveries are in flight, the newest is dropped (and counted) to bound memory.
- * Delivery never blocks or breaks the audit write or the run. Counters are exposed via {@link #stats()} and
- * scraped through the Prometheus endpoint.
+ * <h2>Delivery buffer, retry &amp; durable dead-letter</h2>
+ * Delivery is dispatched on a background scheduler; a failed POST is retried up to {@code alerts.max-retries}
+ * times with exponential backoff. An alert that exhausts its retries is dead-lettered — durably in the
+ * {@code alerts_dead_letter} SQLite table (or a bounded in-memory ring when no database). Dead-letters are
+ * inspectable at {@code GET /admin/alerts/failed} and replayable via {@code POST /admin/alerts/replay}.
  *
- * <p>Configure with {@code alerts.enabled=true}, {@code alerts.actions} (comma-separated audit actions;
- * defaults to the three security actions), optionally {@code alerts.webhook-url}, and the buffer knobs above.
- * Off by default.
+ * <h3>Replay safety</h3>
+ * Replay does not delete-then-resend. It marks a row {@code replaying} (keeping it), and only deletes it on a
+ * confirmed 2xx; if the replay exhausts its retries the row is restored to {@code failed} with its attempt
+ * count and last error updated (retry history). Rows stuck in {@code replaying} after a crash are reset to
+ * {@code failed} at startup, so an alert is never lost mid-replay.
+ *
+ * <h2>Per-action routing</h2>
+ * {@code alerts.routes} maps an action to its own webhook (and optionally template), so e.g. {@code spend_alert}
+ * can page a finance channel while {@code capability_denied} pages security. Actions without a route fall back
+ * to {@code alerts.webhook-url} and {@code alerts.template}.
+ *
+ * <h2>Templates</h2>
+ * {@code alerts.template} (or a route's template) shapes the payload via {@code {ts} {time} {user} {action}
+ * {target} {outcome}} placeholders (string fields JSON-escaped). {@link #validateTemplate} flags issues and
+ * {@code POST /admin/alerts/test} previews/sends a sample. Off by default.
  */
 @Component
 public class AlertSink {
 
     private static final Logger log = LoggerFactory.getLogger(AlertSink.class);
+
+    private static final Set<String> KNOWN_PLACEHOLDERS =
+            Set.of("ts", "time", "user", "action", "target", "outcome");
 
     @Value("${alerts.enabled:false}") private boolean enabled;
     @Value("${alerts.webhook-url:}") private String webhookUrl;
@@ -60,26 +72,37 @@ public class AlertSink {
     @Value("${alerts.dead-letter-capacity:100}") private int deadLetterCapacity;
     @Value("${alerts.template:}") private String template;
     @Value("${alerts.dead-letter-persistent:true}") private boolean deadLetterPersistent;
+    @Value("${alerts.routes:}") private String routesCfg;
 
     private final AuditLog audit;
     private final Database db;
     private Set<String> actions = Set.of();
+    private Map<String, Route> routes = Map.of();
 
     private HttpClient http;
     private ScheduledExecutorService scheduler;
 
-    // in-flight delivery count (bounds memory); dead-letter ring of permanently-failed payloads
     private final AtomicInteger inFlight = new AtomicInteger();
-    private final Deque<String> deadLetter = new ArrayDeque<>();
+    private final Deque<String> deadLetter = new ArrayDeque<>(); // in-memory fallback (no DB)
     private final Object dlLock = new Object();
 
-    // delivery counters (exposed via stats() and Prometheus)
     private final AtomicLong queued = new AtomicLong();
     private final AtomicLong sent = new AtomicLong();
-    private final AtomicLong failed = new AtomicLong();    // individual attempt failures
-    private final AtomicLong retried = new AtomicLong();   // re-scheduled attempts
+    private final AtomicLong failed = new AtomicLong();
+    private final AtomicLong retried = new AtomicLong();
     private final AtomicLong deadLettered = new AtomicLong();
-    private final AtomicLong dropped = new AtomicLong();   // shed because the buffer was full
+    private final AtomicLong dropped = new AtomicLong();
+    private final AtomicLong replayed = new AtomicLong();
+
+    /** A per-action route: a webhook URL and an optional template (null = use the global template). */
+    public record Route(String url, String template) {}
+
+    /** One unit of delivery work: payload + destination, current attempt, and the dead-letter row id (or null). */
+    private record Delivery(String payload, String url, int attemptNo, String dlId) {}
+
+    /** A dead-lettered delivery row (durable rows carry an id/status/history; memory rows are payload-only). */
+    public record DeadLetter(String id, long ts, String payload, String url, int attempts,
+                             String lastError, String status, long lastAttemptAt) {}
 
     public AlertSink(AuditLog audit, Database db) {
         this.audit = audit;
@@ -95,6 +118,7 @@ public class AlertSink {
     @jakarta.annotation.PostConstruct
     public void init() {
         this.actions = parseActions(actionsCfg);
+        this.routes = parseRoutes(routesCfg);
         if (enabled) {
             this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             this.scheduler = Executors.newScheduledThreadPool(1, r -> {
@@ -103,8 +127,17 @@ public class AlertSink {
                 return t;
             });
             audit.addListener(this::onEntry);
-            log.info("[alerts] enabled for actions " + actions
-                    + (webhookUrl != null && !webhookUrl.isBlank()
+            // crash recovery: any row left mid-replay becomes replayable again
+            if (dlPersistent()) {
+                try {
+                    int reset = db.update("UPDATE alerts_dead_letter SET status='failed' WHERE status='replaying'");
+                    if (reset > 0) log.info("[alerts] reset " + reset + " stuck 'replaying' dead-letter(s) to 'failed'");
+                } catch (Exception ex) {
+                    log.warn("[alerts] could not reset replaying dead-letters: " + ex.getMessage());
+                }
+            }
+            log.info("[alerts] enabled for actions " + actions + " routes=" + routes.keySet()
+                    + (webhookUrl != null && !webhookUrl.isBlank() || !routes.isEmpty()
                         ? " -> webhook (retries=" + maxRetries + ")" : " (log only)"));
         }
     }
@@ -125,19 +158,57 @@ public class AlertSink {
         return out;
     }
 
+    /**
+     * Pure: parse routes. Routes are separated by {@code ;;}; each is {@code action|url|template} where the
+     * template (which may contain anything but {@code ;;}) is optional. Pipes split the first two fields only,
+     * so a URL with no pipe and a template are handled. Malformed routes (missing action/url) are skipped.
+     */
+    static Map<String, Route> parseRoutes(String cfg) {
+        Map<String, Route> out = new LinkedHashMap<>();
+        if (cfg == null || cfg.isBlank()) return out;
+        for (String entry : cfg.split(";;")) {
+            String e = entry.trim();
+            if (e.isEmpty()) continue;
+            int p1 = e.indexOf('|');
+            if (p1 <= 0) continue;
+            String action = e.substring(0, p1).trim();
+            String rest = e.substring(p1 + 1);
+            int p2 = rest.indexOf('|');
+            String url = (p2 < 0 ? rest : rest.substring(0, p2)).trim();
+            String tmpl = (p2 < 0 ? null : rest.substring(p2 + 1));
+            if (action.isEmpty() || url.isEmpty()) continue;
+            out.put(action, new Route(url, (tmpl == null || tmpl.isBlank()) ? null : tmpl));
+        }
+        return out;
+    }
+
     /** Pure: should an entry with this action be forwarded, given current config? */
     boolean shouldForward(String action) {
         return enabled && action != null && actions.contains(action);
     }
 
+    /** Resolve the webhook URL for an action: the route's URL, else the default. Blank if neither set. */
+    String urlFor(String action) {
+        Route r = routes.get(action);
+        if (r != null && r.url() != null && !r.url().isBlank()) return r.url();
+        return webhookUrl;
+    }
+
+    /** Resolve the template for an action: the route's template, else the global one (may be blank). */
+    String templateFor(String action) {
+        Route r = routes.get(action);
+        if (r != null && r.template() != null && !r.template().isBlank()) return r.template();
+        return template;
+    }
+
     /** Pure: backoff delay (ms) before the given retry attempt (1-based), capped at 60s. */
     static long backoffMs(int attempt, long base) {
         long b = base <= 0 ? 1 : base;
-        long delay = b * (1L << Math.min(Math.max(attempt - 1, 0), 16)); // exponential, guard shift
+        long delay = b * (1L << Math.min(Math.max(attempt - 1, 0), 16));
         return Math.min(delay, 60_000L);
     }
 
-    /** Pure: build the JSON payload posted to the webhook. */
+    /** Pure: build the built-in JSON payload. */
     static String toJson(AuditLog.Entry e) {
         StringBuilder sb = new StringBuilder(160);
         sb.append('{');
@@ -151,12 +222,7 @@ public class AlertSink {
         return sb.toString();
     }
 
-    /**
-     * Pure: render an operator-supplied template by substituting placeholders with the entry's fields. The
-     * supported placeholders are {@code {ts} {time} {user} {action} {target} {outcome}}. String fields are
-     * JSON-string-escaped (so a template shaped like Slack/PagerDuty JSON stays valid); {@code {ts}} is the
-     * raw numeric timestamp. Unknown placeholders are left as-is.
-     */
+    /** Pure: substitute placeholders ({ts} numeric; string fields JSON-escaped); unknown ones left intact. */
     static String applyTemplate(String template, AuditLog.Entry e) {
         if (template == null) return "";
         return template
@@ -168,22 +234,81 @@ public class AlertSink {
                 .replace("{outcome}", esc(e.outcome()));
     }
 
-    /** The payload for an entry: the operator template if configured, else the built-in JSON shape. */
-    String payloadFor(AuditLog.Entry e) {
-        return (template == null || template.isBlank()) ? toJson(e) : applyTemplate(template, e);
+    /**
+     * Pure: validate a template, returning human-readable issues (empty = OK). Flags unknown {@code {word}}
+     * placeholders, unbalanced braces/brackets, and unbalanced double quotes — a lightweight check that
+     * catches the common mistakes without a full JSON parser.
+     */
+    static List<String> validateTemplate(String template) {
+        List<String> issues = new ArrayList<>();
+        if (template == null || template.isBlank()) return issues;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{([a-z_]+)\\}").matcher(template);
+        while (m.find()) {
+            if (!KNOWN_PLACEHOLDERS.contains(m.group(1))) {
+                issues.add("unknown placeholder {" + m.group(1) + "}");
+            }
+        }
+        int curly = 0, square = 0; boolean inStr = false; char prev = 0; int quotes = 0;
+        for (int i = 0; i < template.length(); i++) {
+            char c = template.charAt(i);
+            if (c == '"' && prev != '\\') { inStr = !inStr; quotes++; }
+            if (!inStr) {
+                if (c == '{') curly++;
+                else if (c == '}') curly--;
+                else if (c == '[') square++;
+                else if (c == ']') square--;
+            }
+            prev = c;
+        }
+        if (curly != 0) issues.add("unbalanced curly braces");
+        if (square != 0) issues.add("unbalanced square brackets");
+        if (quotes % 2 != 0) issues.add("unbalanced double quotes");
+        return issues;
+    }
+
+    /** A fixed sample entry used by the dry-run preview. */
+    static AuditLog.Entry sampleEntry() {
+        long now = System.currentTimeMillis();
+        return new AuditLog.Entry("sample", now, java.time.Instant.ofEpochMilli(now).toString(),
+                "alice", "capability_denied", "tool:run_command", "outside scope of role 'reader'");
+    }
+
+    /**
+     * Dry-run preview: render the given template (or the configured global template when null) against a
+     * sample event, returning the rendered payload + validation issues. When {@code send} is true and a
+     * webhook is configured, also enqueues one real delivery of the rendered sample.
+     */
+    public Map<String, Object> preview(String templateOverride, boolean send) {
+        String tmpl = (templateOverride != null) ? templateOverride : template;
+        AuditLog.Entry sample = sampleEntry();
+        String rendered = (tmpl == null || tmpl.isBlank()) ? toJson(sample) : applyTemplate(tmpl, sample);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("template", tmpl == null ? "" : tmpl);
+        out.put("rendered", rendered);
+        out.put("issues", validateTemplate(tmpl));
+        out.put("default_webhook_configured", webhookUrl != null && !webhookUrl.isBlank());
+        boolean didSend = false;
+        if (send && enabled && webhookUrl != null && !webhookUrl.isBlank() && scheduler != null) {
+            enqueue(rendered, webhookUrl, null);
+            didSend = true;
+        }
+        out.put("sent", didSend);
+        return out;
     }
 
     private void onEntry(AuditLog.Entry e) {
         if (!shouldForward(e.action())) return;
         log.warn("[alert] " + e.action() + " user=" + e.user() + " target=" + e.target()
                 + " outcome=" + e.outcome());
-        enqueue(payloadFor(e));
+        String url = urlFor(e.action());
+        String tmpl = templateFor(e.action());
+        String payload = (tmpl == null || tmpl.isBlank()) ? toJson(e) : applyTemplate(tmpl, e);
+        enqueue(payload, url, null);
     }
 
-    /** Submit a payload for delivery if the webhook is configured and the buffer isn't saturated. */
-    private void enqueue(String payload) {
-        if (webhookUrl == null || webhookUrl.isBlank() || http == null || scheduler == null) return;
-        // Bound in-flight memory: shed the newest alert if the buffer is saturated.
+    /** Submit a payload for delivery to {@code url} if configured and the buffer isn't saturated. */
+    private void enqueue(String payload, String url, String dlId) {
+        if (url == null || url.isBlank() || http == null || scheduler == null) return;
         if (inFlight.get() >= Math.max(1, queueCapacity)) {
             dropped.incrementAndGet();
             log.warn("[alerts] delivery buffer full (" + queueCapacity + "); dropping alert");
@@ -191,61 +316,83 @@ public class AlertSink {
         }
         inFlight.incrementAndGet();
         queued.incrementAndGet();
-        scheduler.submit(() -> attempt(payload, 1));
+        scheduler.submit(() -> attempt(new Delivery(payload, url, 1, dlId)));
     }
 
-    /** One delivery attempt; on failure, reschedule with backoff or dead-letter. Runs on the scheduler. */
-    private void attempt(String payload, int attemptNo) {
+    /** One delivery attempt; on failure reschedule with backoff or dead-letter. Runs on the scheduler. */
+    private void attempt(Delivery d) {
         boolean ok = false;
+        String err = null;
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(webhookUrl))
+            HttpRequest req = HttpRequest.newBuilder(URI.create(d.url()))
                     .timeout(Duration.ofSeconds(5))
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(payload))
+                    .POST(HttpRequest.BodyPublishers.ofString(d.payload()))
                     .build();
             HttpResponse<Void> resp = http.send(req, HttpResponse.BodyHandlers.discarding());
             ok = resp.statusCode() / 100 == 2;
-            if (!ok) log.warn("[alerts] webhook returned HTTP " + resp.statusCode()
-                    + " (attempt " + attemptNo + ")");
+            if (!ok) { err = "HTTP " + resp.statusCode(); log.warn("[alerts] webhook " + err + " (attempt " + d.attemptNo() + ")"); }
         } catch (Exception ex) {
-            log.warn("[alerts] webhook post failed (attempt " + attemptNo + "): " + ex.getMessage());
+            err = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+            log.warn("[alerts] webhook post failed (attempt " + d.attemptNo() + "): " + ex.getMessage());
         }
         if (ok) {
             sent.incrementAndGet();
             inFlight.decrementAndGet();
+            if (d.dlId() != null) deleteDeadLetter(d.dlId()); // confirmed delivery of a replayed row
             return;
         }
         failed.incrementAndGet();
-        if (attemptNo <= maxRetries) {
+        if (d.attemptNo() <= maxRetries) {
             retried.incrementAndGet();
-            long delay = backoffMs(attemptNo, retryBackoffMs);
+            long delay = backoffMs(d.attemptNo(), retryBackoffMs);
+            final String fe = err;
             try {
-                scheduler.schedule(() -> attempt(payload, attemptNo + 1), delay, TimeUnit.MILLISECONDS);
+                scheduler.schedule(() -> attempt(new Delivery(d.payload(), d.url(), d.attemptNo() + 1, d.dlId())),
+                        delay, TimeUnit.MILLISECONDS);
             } catch (Exception schedEx) {
-                // scheduler shutting down — dead-letter rather than lose silently
-                toDeadLetter(payload);
+                exhausted(d, fe);
             }
         } else {
-            toDeadLetter(payload);
+            exhausted(d, err);
         }
     }
 
-    private void toDeadLetter(String payload) {
+    /** Final failure: persist (or update, if this was a replay) the dead-letter row + history. */
+    private void exhausted(Delivery d, String err) {
         deadLettered.incrementAndGet();
         inFlight.decrementAndGet();
+        String reason = err == null ? "exhausted retries" : err;
         if (dlPersistent()) {
             try {
-                db.update("INSERT INTO alerts_dead_letter(id, ts, payload, attempts, last_error) VALUES(?,?,?,?,?)",
-                        java.util.UUID.randomUUID().toString(), System.currentTimeMillis(), payload,
-                        maxRetries + 1, "exhausted retries");
+                if (d.dlId() != null) {
+                    // replayed row that failed again — update history, restore to 'failed' (keep the id)
+                    db.update("UPDATE alerts_dead_letter SET attempts = attempts + ?, last_error = ?, "
+                                    + "status = 'failed', last_attempt_at = ? WHERE id = ?",
+                            maxRetries + 1, reason, System.currentTimeMillis(), d.dlId());
+                } else {
+                    db.update("INSERT INTO alerts_dead_letter(id, ts, payload, url, attempts, last_error, "
+                                    + "status, last_attempt_at) VALUES(?,?,?,?,?,?,?,?)",
+                            java.util.UUID.randomUUID().toString(), System.currentTimeMillis(), d.payload(),
+                            d.url(), maxRetries + 1, reason, "failed", System.currentTimeMillis());
+                }
             } catch (Exception ex) {
                 log.warn("[alerts] could not persist dead-letter, keeping in memory: " + ex.getMessage());
-                ringAdd(payload);
+                ringAdd(d.payload());
             }
         } else {
-            ringAdd(payload);
+            ringAdd(d.payload());
         }
-        log.warn("[alerts] alert dead-lettered after " + maxRetries + " retries");
+        log.warn("[alerts] alert dead-lettered after " + maxRetries + " retries (" + reason + ")");
+    }
+
+    private void deleteDeadLetter(String id) {
+        if (!dlPersistent()) return;
+        try {
+            db.update("DELETE FROM alerts_dead_letter WHERE id=?", id);
+        } catch (Exception ex) {
+            log.warn("[alerts] could not delete dead-letter row " + id + ": " + ex.getMessage());
+        }
     }
 
     private void ringAdd(String payload) {
@@ -265,8 +412,10 @@ public class AlertSink {
         m.put("retried", retried.get());
         m.put("dead_lettered", deadLettered.get());
         m.put("dropped", dropped.get());
+        m.put("replayed", replayed.get());
         m.put("in_flight", (long) inFlight.get());
         m.put("dead_letter_persistent", dlPersistent());
+        m.put("routes", routes.keySet());
         m.put("dead_letter_size", (long) deadLetterSize());
         return m;
     }
@@ -274,7 +423,7 @@ public class AlertSink {
     private int deadLetterSize() {
         if (dlPersistent()) {
             try {
-                var rows = db.query("SELECT COUNT(*) FROM alerts_dead_letter", rs -> rs.getInt(1));
+                var rows = db.query("SELECT COUNT(*) FROM alerts_dead_letter WHERE status='failed'", rs -> rs.getInt(1));
                 return rows.isEmpty() ? 0 : rows.get(0);
             } catch (Exception ex) {
                 return 0;
@@ -283,17 +432,14 @@ public class AlertSink {
         synchronized (dlLock) { return deadLetter.size(); }
     }
 
-    /** A dead-lettered delivery (durable rows carry an id for targeted replay; memory rows have a null id). */
-    public record DeadLetter(String id, long ts, String payload, int attempts, String lastError) {}
-
     /** Dead-letter entries, newest first (for {@code GET /admin/alerts/failed}). */
     public List<DeadLetter> deadLetterEntries() {
         if (dlPersistent()) {
             try {
-                return db.query("SELECT id, ts, payload, attempts, last_error FROM alerts_dead_letter "
-                                + "ORDER BY ts DESC LIMIT 500",
-                        rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3),
-                                rs.getInt(4), rs.getString(5)));
+                return db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at "
+                                + "FROM alerts_dead_letter ORDER BY ts DESC LIMIT 500",
+                        rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
+                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8)));
             } catch (Exception ex) {
                 log.warn("[alerts] could not read dead-letter table: " + ex.getMessage());
                 return List.of();
@@ -301,7 +447,8 @@ public class AlertSink {
         }
         List<DeadLetter> out = new ArrayList<>();
         synchronized (dlLock) {
-            for (String p : deadLetter) out.add(new DeadLetter(null, 0L, p, maxRetries + 1, "exhausted retries"));
+            for (String p : deadLetter) out.add(new DeadLetter(null, 0L, p, null, maxRetries + 1,
+                    "exhausted retries", "failed", 0L));
         }
         return out;
     }
@@ -314,34 +461,42 @@ public class AlertSink {
     }
 
     /**
-     * Re-enqueue dead-lettered alerts for delivery, removing them from the durable store first (they will be
-     * re-persisted if they fail again). With a {@code id}, replays just that row; otherwise replays all.
-     * Returns the number re-enqueued. No-op when alerting/webhook is not configured.
+     * Crash-safe replay: mark matching {@code failed} rows {@code replaying} (without deleting), then
+     * re-enqueue them carrying their id. A confirmed delivery deletes the row; a repeated failure restores it
+     * to {@code failed} with updated history. With {@code id}, replays just that row; otherwise all failed
+     * rows. Returns the number re-enqueued. No-op when alerting isn't configured.
      */
     public synchronized int replay(String id) {
-        if (!enabled || webhookUrl == null || webhookUrl.isBlank() || scheduler == null) return 0;
-        List<DeadLetter> toReplay = new ArrayList<>();
+        if (!enabled || scheduler == null) return 0;
+        int n = 0;
         if (dlPersistent()) {
-            List<DeadLetter> all = deadLetterEntries();
-            for (DeadLetter d : all) {
-                if (id == null || id.equals(d.id())) toReplay.add(d);
-            }
-            for (DeadLetter d : toReplay) {
+            List<DeadLetter> rows = deadLetterEntries();
+            for (DeadLetter d : rows) {
+                if (!"failed".equals(d.status())) continue;
+                if (id != null && !id.equals(d.id())) continue;
+                String url = (d.url() != null && !d.url().isBlank()) ? d.url() : webhookUrl;
+                if (url == null || url.isBlank()) continue; // nowhere to send
                 try {
-                    db.update("DELETE FROM alerts_dead_letter WHERE id=?", d.id());
+                    db.update("UPDATE alerts_dead_letter SET status='replaying', last_attempt_at=? WHERE id=?",
+                            System.currentTimeMillis(), d.id());
                 } catch (Exception ex) {
-                    log.warn("[alerts] could not delete dead-letter row " + d.id() + ": " + ex.getMessage());
+                    log.warn("[alerts] could not mark replaying " + d.id() + ": " + ex.getMessage());
+                    continue;
                 }
+                enqueue(d.payload(), url, d.id());
+                n++;
             }
         } else {
-            synchronized (dlLock) {
-                for (String p : deadLetter) toReplay.add(new DeadLetter(null, 0L, p, 0, null));
-                deadLetter.clear();
+            List<String> snapshot;
+            synchronized (dlLock) { snapshot = new ArrayList<>(deadLetter); deadLetter.clear(); }
+            for (String p : snapshot) {
+                if (webhookUrl == null || webhookUrl.isBlank()) break;
+                enqueue(p, webhookUrl, null);
+                n++;
             }
         }
-        for (DeadLetter d : toReplay) enqueue(d.payload());
-        if (!toReplay.isEmpty()) log.info("[alerts] replaying " + toReplay.size() + " dead-lettered alert(s)");
-        return toReplay.size();
+        if (n > 0) { replayed.addAndGet(n); log.info("[alerts] replaying " + n + " dead-lettered alert(s)"); }
+        return n;
     }
 
     private static String esc(String s) {

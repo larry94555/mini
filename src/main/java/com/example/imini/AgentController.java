@@ -520,6 +520,20 @@ public class AgentController {
     }
 
     /**
+     * Dry-run an alert template: render it against a sample event and return the payload + validation issues.
+     * With {@code ?send=true}, also enqueues one real delivery to the default webhook. With a request body,
+     * previews that template string instead of the configured one. Admin only.
+     */
+    @PostMapping("/admin/alerts/test")
+    public Map<String, Object> adminAlertsTest(
+            @RequestParam(name = "send", defaultValue = "false") boolean send,
+            @RequestBody(required = false) String templateOverride) {
+        requireAdmin();
+        String tmpl = (templateOverride != null && !templateOverride.isBlank()) ? templateOverride : null;
+        return alertSink.preview(tmpl, send);
+    }
+
+    /**
      * Consolidated admin/observability snapshot: uptime, run counts + success rate, latency, concurrency,
      * top tool calls, scheduled-task and plugin/skill summaries, recent audit, and server capability flags.
      * One call powers the web-UI admin dashboard. Admin only.
