@@ -32,6 +32,18 @@ public class AuditLog {
         this.db = db;
     }
 
+    /**
+     * Optional listeners notified (best-effort, after persistence) of every recorded entry. Used by the
+     * alert sink to forward security-relevant events to an external channel. Held as a copy-on-write list so
+     * {@link #record} stays lock-free; a listener throwing never affects the audit write or the run.
+     */
+    private final java.util.List<java.util.function.Consumer<Entry>> listeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void addListener(java.util.function.Consumer<Entry> listener) {
+        if (listener != null) listeners.add(listener);
+    }
+
     /** Record one privileged action. Best-effort: never throws into the caller's request path. */
     public void record(String user, String action, String target, String outcome) {
         long ts = System.currentTimeMillis();
@@ -47,6 +59,13 @@ public class AuditLog {
             }
         } catch (Exception ex) {
             log.warn("[audit] could not record " + action + ": " + ex.getMessage());
+        }
+        for (java.util.function.Consumer<Entry> l : listeners) {
+            try {
+                l.accept(e);
+            } catch (Exception ex) {
+                log.warn("[audit] listener failed for " + action + ": " + ex.getMessage());
+            }
         }
     }
 
@@ -124,6 +143,41 @@ public class AuditLog {
             if (windowed.size() >= lim) break;
         }
         return windowed;
+    }
+
+    /**
+     * A single page of entries matching user/action/target within [since, until] (0 = unbounded), newest
+     * first, skipping {@code offset} matches and returning up to {@code limit}.
+     */
+    public List<Entry> pageRange(String user, String action, String target,
+                                 long since, long until, int offset, int limit) {
+        return filterRangePaged(allEntries(), user, action, target, since, until, offset, limit);
+    }
+
+    /** Total number of entries matching the same filters (for pagination math). */
+    public int countRange(String user, String action, String target, long since, long until) {
+        return filterRange(allEntries(), user, action, target, since, until, HARD_CAP).size();
+    }
+
+    private List<Entry> allEntries() {
+        if (db.available()) {
+            return db.query("SELECT id, ts, user, action, target, outcome FROM audit ORDER BY ts DESC, rowid DESC LIMIT ?",
+                    rs -> new Entry(rs.getString(1), rs.getLong(2), Instant.ofEpochMilli(rs.getLong(2)).toString(),
+                            rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6)),
+                    HARD_CAP);
+        }
+        return new ArrayList<>(mem);
+    }
+
+    /** Pure: filter by user/action/target + [since, until], then apply offset/limit paging. */
+    public static List<Entry> filterRangePaged(List<Entry> entries, String user, String action, String target,
+                                               long since, long until, int offset, int limit) {
+        List<Entry> matched = filterRange(entries, user, action, target, since, until, HARD_CAP);
+        int off = Math.max(0, offset);
+        int lim = limit <= 0 ? 100 : Math.min(limit, HARD_CAP);
+        List<Entry> out = new ArrayList<>();
+        for (int i = off; i < matched.size() && out.size() < lim; i++) out.add(matched.get(i));
+        return out;
     }
 
     /** Pure: render entries as CSV (header + RFC-4180-escaped rows). */

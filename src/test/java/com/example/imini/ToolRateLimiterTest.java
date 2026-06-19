@@ -36,7 +36,7 @@ class ToolRateLimiterTest {
 
     @Test
     void allowsUpToLimitThenThrottles() throws Exception {
-        ToolRateLimiter rl = new ToolRateLimiter();
+        ToolRateLimiter rl = new ToolRateLimiter(null);
         set(rl, "enabled", true);
         set(rl, "limits", Map.of("web_fetch", new long[]{3L, 60_000L}));
         long t = 1_000_000L;
@@ -50,7 +50,7 @@ class ToolRateLimiterTest {
 
     @Test
     void perTenantIsolationAndUnconfiguredToolsUnlimited() throws Exception {
-        ToolRateLimiter rl = new ToolRateLimiter();
+        ToolRateLimiter rl = new ToolRateLimiter(null);
         set(rl, "enabled", true);
         set(rl, "limits", Map.of("web_fetch", new long[]{1L, 60_000L}));
         long t = 2_000_000L;
@@ -64,7 +64,7 @@ class ToolRateLimiterTest {
 
     @Test
     void disabledAllowsEverything() throws Exception {
-        ToolRateLimiter rl = new ToolRateLimiter();
+        ToolRateLimiter rl = new ToolRateLimiter(null);
         set(rl, "enabled", false);
         set(rl, "limits", Map.of("web_fetch", new long[]{1L, 60_000L}));
         long t = 3_000_000L;
