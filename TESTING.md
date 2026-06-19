@@ -3793,3 +3793,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** `GET /admin/alerts/failed` rows now include `escalationTier`, `escalatedAt`, and `ackedAt`
   alongside the existing fields.
+
+---
+
+# CSRF guard, dedup-digest summary panel, escalation-tier ack-SLA timing
+
+## 454. CSRF guard (CsrfGuardTest)
+
+- **Run:** `./mvnw -Dtest=CsrfGuardTest test`.
+- **Observe:** `constantTimeEquals` matches equal strings and rejects differing/length-mismatched/null inputs;
+  a guard yields a stable non-empty token; when enabled, `valid` accepts only the real token and `require`
+  throws 403 otherwise.
+- **Live:** with `alerts.admin-csrf=true`, `POST /admin/alerts/ack?id=...` without `X-CSRF-Token` returns 403;
+  the viewer (which embeds the token) and `GET /admin/alerts/csrf` both supply it.
+
+## 455. Ack-SLA aggregation (AlertSlaDigestPanelTest)
+
+- **Run:** `./mvnw -Dtest=AlertSlaDigestPanelTest test`.
+- **Observe:** `aggregateSla` produces per-tier `count`/`avg_ms`/`max_ms`, ignoring tier 0 and negative
+  latencies; empty input yields an empty map. `ackSlaByTier` is empty without a DB.
+- **Live:** `GET /metrics/prom` shows `imini_alerts_ack_latency_avg_ms{tier}`/`_max_ms{tier}` once escalated
+  dead-letters have been acked.
+
+## 456. Dedup-digest summary panel (AlertSlaDigestPanelTest + manual)
+
+- **Observe (unit):** the viewer renders a "Top suppressed keys" table from a `DedupSummary` list (and omits
+  it when empty); `dedupSummary` is empty without suppressions.
+- **Observe (manual, needs DB):** with dedup on and a suppressed storm, `GET /admin/alerts/digests` and the
+  viewer panel list the most-suppressed keys (descending).
+
+## 457. CSRF token embedded + sent by viewer (AlertSlaDigestPanelTest)
+
+- **Observe:** the rendered viewer embeds `var CSRF="..."` and the `act()` helper sends it as the
+  `X-CSRF-Token` header on every replay/ack/delete/bulk request.

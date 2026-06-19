@@ -16,6 +16,12 @@ public final class DeadLetterDashboard {
 
     public static String render(List<AlertSink.DeadLetter> rows, String action, String status, String q,
                                 int offset, int limit, int total) {
+        return render(rows, action, status, q, offset, limit, total, "", List.of());
+    }
+
+    public static String render(List<AlertSink.DeadLetter> rows, String action, String status, String q,
+                                int offset, int limit, int total, String csrfToken,
+                                List<AlertSink.DedupSummary> digests) {
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
         sb.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
@@ -36,6 +42,7 @@ public final class DeadLetterDashboard {
         sb.append("tr.acked{opacity:.55;} td.err{color:#a00;} form.act{display:inline;margin:0;}");
         sb.append(".bulk{margin:.5rem 0;display:flex;gap:.5rem;}");
         sb.append(".badge{display:inline-block;font-size:.7rem;background:#3b7;color:#fff;border-radius:3px;padding:0 .35rem;vertical-align:middle;}");
+        sb.append("h2.sub{font-size:1.05rem;margin-top:1.5rem;}");
         sb.append("code{background:#f3f3f3;padding:0 .2rem;border-radius:3px;word-break:break-all;}");
         sb.append("td.payload{max-width:32rem;}");
         sb.append("</style></head><body>");
@@ -108,6 +115,19 @@ public final class DeadLetterDashboard {
           .append(link(action, status, q, nextOffset, limit)).append("\">Next \u2192</a>");
         sb.append("</div>");
 
+        // dedup-digest summary panel: which keys are currently being throttled the most
+        if (digests != null && !digests.isEmpty()) {
+            sb.append("<h2 class=\"sub\">Top suppressed keys (active dedup windows)</h2>");
+            sb.append("<table><thead><tr><th>action</th><th>target</th><th>suppressed</th></tr></thead><tbody>");
+            for (AlertSink.DedupSummary d : digests) {
+                sb.append("<tr><td>").append(esc(d.action())).append("</td>");
+                sb.append("<td>").append(esc(snippet(d.target(), 80))).append("</td>");
+                sb.append("<td>").append(d.suppressed()).append("</td></tr>");
+            }
+            sb.append("</tbody></table>");
+        }
+
+        sb.append("<script>var CSRF=\"").append(esc(csrfToken == null ? "" : csrfToken)).append("\";</script>");
         sb.append(ACT_SCRIPT);
         sb.append("</body></html>");
         return sb.toString();
@@ -125,7 +145,7 @@ public final class DeadLetterDashboard {
     }
 
     private static final String ACT_SCRIPT =
-            "<script>function act(m,u){fetch(u,{method:m.toUpperCase()})"
+            "<script>function act(m,u){fetch(u,{method:m.toUpperCase(),headers:{'X-CSRF-Token':CSRF}})"
             + ".then(function(r){if(!r.ok)alert('Request failed: '+r.status);location.reload();})"
             + ".catch(function(e){alert('Request error: '+e);});}</script>";
 
