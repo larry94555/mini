@@ -341,13 +341,26 @@ Those are useful limits because they make the next engineering steps obvious.
 
 ## 8. What to study next after this document
 
-After reading this file, the best next learning path is:
+This document gives you the shape. The next step is to do — which is what the learning materials below
+are for.
 
-1. `README.md` for feature overview,
-2. `TESTING.md` for hands-on behavior,
-3. `AgentController.java` and `AgentLoop.java` for request entry,
-4. `AgentEngine.java` for the core loop,
-5. `PermissionService.java` and `Sandbox.java` for policy,
-6. `LoopCorrectnessTest.java` and `SandboxTest.java` for deterministic harness tests.
+**Self-study (go at your own pace):**
+Work through [`docs/LEARNING_PATH.md`](docs/LEARNING_PATH.md). It has 14 hands-on modules that move
+from running a single model call all the way through MCP, prompt-injection fencing, and the
+deterministic test suite. Modules 2–3 map directly onto sections 2–3 of this document; Modules 4–6
+cover plan mode, checkpoints, and safety, which sections 5–6 here motivate. Each module ends with a
+suggested reading list of the source files it exercises.
 
-That sequence moves from concept -> product surface -> execution loop -> safety -> testability.
+**Guided session (90 minutes, alone or with a group):**
+Use [`docs/WORKSHOP.md`](docs/WORKSHOP.md) instead of the learning path. It packages the same
+material into five labs with a `./mvnw test` checkpoint after each, making it easy to run as a
+structured workshop or a focused solo session.
+
+**Connecting the ideas to Claude Code and other tools:**
+[`docs/CONCEPT_MAP.md`](docs/CONCEPT_MAP.md) maps each imini concept to its Claude Code counterpart
+— harness to agent loop, `PermissionService` to permission modes, and so on. Read it near the end,
+once the imini pieces feel familiar, so the ideas transfer cleanly.
+
+You will know you have got it when you can explain, in your own words, why the model and the harness
+are separate, and how a tool call is validated and executed. At that point the source files will be
+easy to read on their own.
