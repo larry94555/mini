@@ -107,7 +107,10 @@ public class Database {
             "CREATE TABLE trace_spans (span_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, parent_id TEXT, "
                     + "name TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, "
                     + "attributes TEXT, status TEXT)",
-            "CREATE INDEX idx_span_trace ON trace_spans(trace_id, start_ms)");
+            "CREATE INDEX idx_span_trace ON trace_spans(trace_id, start_ms)",
+            // durable dead-letter for alert deliveries that exhausted their retries (replayable)
+            "CREATE TABLE alerts_dead_letter (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, payload TEXT NOT NULL, "
+                    + "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

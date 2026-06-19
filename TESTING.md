@@ -3602,3 +3602,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** with `tool-rate-limit.limits=web_fetch=1/60`, exhaust the limit. The next call's observation
   reads `RATE_LIMITED: tool 'web_fetch' exceeded its per-tenant rate limit; retry after ~Ns.` with N close to
   the remaining window seconds.
+
+---
+
+# Durable dead-lettering + replay, alert templates, ops bundle
+
+## 430. Alert payload templates (AlertTemplateReplayTest)
+
+- **Run:** `./mvnw -Dtest=AlertTemplateReplayTest test`.
+- **Observe:** `AlertSink.applyTemplate` substitutes `{ts}/{time}/{user}/{action}/{target}/{outcome}`,
+  JSON-escapes string fields (so a Slack/PagerDuty-shaped JSON template stays valid), and leaves unknown
+  placeholders intact; `payloadFor` uses the template when configured, else the built-in JSON.
+
+## 431. Dead-letter fallback & replay no-op (AlertTemplateReplayTest)
+
+- **Observe:** with no database, a fresh sink reports `dead_letter_persistent=false`, an empty
+  `deadLetterEntries()`, and `replay(null) == 0` when alerting/webhook is unconfigured.
+
+## 432. Durable dead-letter + replay end-to-end (manual, needs DB)
+
+- **Observe:** with SQLite enabled, `alerts.enabled=true`, an unreachable `alerts.webhook-url`, and low
+  `alerts.max-retries`, trigger a `capability_denied`. After retries, a row appears in `alerts_dead_letter`
+  and `GET /admin/alerts/failed` lists it with an `id`. Restart the app — the dead-letter is still there.
+  Point the webhook at a real receiver and `POST /admin/alerts/replay`; the row is re-enqueued, delivered,
+  and removed (`sent` increments). `POST /admin/alerts/replay?id=<id>` replays a single entry.
+
+## 433. Ops bundle: Grafana dashboard & Prometheus rules (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` loads cleanly via Prometheus `rule_files`, and
+  `ops/grafana/imini-dashboard.json` imports into Grafana (pick the Prometheus datasource). Panels and rules
+  reference the live `imini_*` series (security-event rates, `imini_alerts_*`, SLOs). See `ops/README.md`.
