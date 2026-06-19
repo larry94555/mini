@@ -3454,12 +3454,13 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 # JSON-profile redaction, audited denials/alerts, sub-agent/MCP capability scoping
 
-## 409. JSON log redaction (RedactingJsonEncoderTest)
+## 409. JSON log redaction (manual / live)
 
-- **Run:** `./mvnw -Dtest=RedactingJsonEncoderTest test`.
-- **Observe:** `RedactingJsonEncoder.toJson` emits a one-line JSON object with ts/level/logger/thread/message,
-  scrubs secrets/PII from the message, JSON-escapes values, and emits MDC keys sorted. Live: run with
-  `--spring.profiles.active=json` and confirm a log line containing `api_key=secret` is masked.
+- **Observe:** run with `--spring.profiles.active=json`. The `json` profile logs through
+  `MessageRedactingAppender`, which scrubs secrets/PII from the message before Logback's built-in
+  `JsonEncoder` serializes it. A log line containing `api_key=secret` or an email is masked in the JSON
+  output, while the line shape (timestamp/level/logger/message) is unchanged. The masking itself is covered
+  by `RedactPiiTest` (`Redact.scrubPii`).
 
 ## 410. Capability prefix / MCP-server scoping (CapabilityPrefixTest)
 

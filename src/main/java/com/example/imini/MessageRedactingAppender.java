@@ -3,73 +3,94 @@ package com.example.imini;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.AppenderBase;
+import ch.qos.logback.core.spi.AppenderAttachable;
+import ch.qos.logback.core.spi.AppenderAttachableImpl;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Iterator;
 
 /**
- * A Logback {@link AppenderBase} that redacts secret- and PII-shaped substrings from the formatted log
- * message before forwarding the event to its delegate appenders. This keeps the built-in
- * {@code ch.qos.logback.classic.encoder.JsonEncoder} in the config XML — satisfying the existing
- * {@code LoggingConfigTest} contract — while ensuring the structured JSON log output is still scrubbed.
+ * A Logback appender that redacts secret- and PII-shaped substrings from the formatted log message before
+ * forwarding the event to nested delegate appenders (typically the JSON console appender that uses
+ * {@code ch.qos.logback.classic.encoder.JsonEncoder}). This keeps the built-in {@code JsonEncoder} in the
+ * config -- satisfying {@code LoggingConfigTest} -- while ensuring the structured JSON log output is scrubbed.
  *
- * <p>If the message is unchanged by redaction, the original event is forwarded as-is (zero copy). When
- * scrubbing does alter it, a {@link LoggingEvent} copy is created with the scrubbed message as both the
- * format string and the pre-formatted message; all other fields are preserved. Wired in
- * {@code logback-spring.xml} as the outermost appender for the {@code json} profile, with the real
- * {@code JSON} appender (using {@code JsonEncoder}) registered as a delegate.
+ * <p>It implements {@link AppenderAttachable} so Logback's Joran configurator wires nested
+ * {@code <appender-ref>} elements into it the same way the root logger accepts appender references. When a
+ * message is altered by redaction, a thin {@link ILoggingEvent} wrapper carries the scrubbed text and
+ * delegates every other field to the original event; when nothing changes, the original event is forwarded
+ * unwrapped (zero copy).
+ *
+ * <p>Like the other Logback classes in imini, this compiles against Logback on the Spring Boot classpath
+ * and is exercised only by the real logging stack; the masking logic it delegates to is unit-tested.
  */
-public class MessageRedactingAppender extends AppenderBase<ILoggingEvent> {
+public class MessageRedactingAppender extends AppenderBase<ILoggingEvent>
+        implements AppenderAttachable<ILoggingEvent> {
 
-    private final List<Appender<ILoggingEvent>> delegates = new ArrayList<>();
-
-    /** Called by Logback XML wiring for each nested {@code <appender>} element. */
-    public void addAppender(Appender<ILoggingEvent> appender) {
-        delegates.add(appender);
-    }
+    private final AppenderAttachableImpl<ILoggingEvent> aai = new AppenderAttachableImpl<>();
 
     @Override
     protected void append(ILoggingEvent event) {
         String original = event.getFormattedMessage();
         String scrubbed = Redact.scrubPii(original);
-        ILoggingEvent forwarded = scrubbed.equals(original) ? event : redacted(event, scrubbed);
-        for (Appender<ILoggingEvent> d : delegates) {
-            d.doAppend(forwarded);
-        }
+        ILoggingEvent forwarded = (scrubbed == null || scrubbed.equals(original))
+                ? event
+                : new ScrubbedEvent(event, scrubbed);
+        aai.appendLoopOnAppenders(forwarded);
     }
 
     @Override
     public void start() {
-        for (Appender<ILoggingEvent> d : delegates) {
-            if (!d.isStarted()) d.start();
+        for (Iterator<Appender<ILoggingEvent>> it = aai.iteratorForAppenders(); it.hasNext(); ) {
+            Appender<ILoggingEvent> a = it.next();
+            if (!a.isStarted()) a.start();
         }
         super.start();
     }
 
-    /**
-     * Build a copy of {@code event} with the message field replaced by {@code scrubbed}. We subclass
-     * {@code ILoggingEvent} as an anonymous inner class so we only need to override the two message
-     * accessors; everything else delegates to the original event and thus requires no knowledge of the
-     * concrete implementation class.
-     */
-    private static ILoggingEvent redacted(ILoggingEvent event, String scrubbed) {
-        return new ch.qos.logback.classic.spi.LoggingEventVO() {
-            {
-                // LoggingEventVO is a plain JavaBean; we can't super() it over an arbitrary ILoggingEvent,
-                // so we set the fields we control and delegate the rest through overrides.
-            }
+    @Override
+    public void stop() {
+        aai.detachAndStopAllAppenders();
+        super.stop();
+    }
 
-            @Override public String getMessage()          { return scrubbed; }
-            @Override public String getFormattedMessage() { return scrubbed; }
-            @Override public Object[] getArgumentArray()  { return null; }
+    // --- AppenderAttachable: delegate to AppenderAttachableImpl ----------------
 
-            @Override public long getTimeStamp()           { return event.getTimeStamp(); }
-            @Override public String getLoggerName()        { return event.getLoggerName(); }
-            @Override public String getThreadName()        { return event.getThreadName(); }
-            @Override public java.util.Map<String,String> getMDCPropertyMap() { return event.getMDCPropertyMap(); }
-            @Override public ch.qos.logback.classic.spi.IThrowableProxy getThrowableProxy() { return event.getThrowableProxy(); }
-            @Override public StackTraceElement[] getCallerData()  { return null; }
-            @Override public boolean hasCallerData()              { return false; }
-        };
+    @Override public void addAppender(Appender<ILoggingEvent> newAppender) { aai.addAppender(newAppender); }
+    @Override public Iterator<Appender<ILoggingEvent>> iteratorForAppenders() { return aai.iteratorForAppenders(); }
+    @Override public Appender<ILoggingEvent> getAppender(String name) { return aai.getAppender(name); }
+    @Override public boolean isAttached(Appender<ILoggingEvent> appender) { return aai.isAttached(appender); }
+    @Override public void detachAndStopAllAppenders() { aai.detachAndStopAllAppenders(); }
+    @Override public boolean detachAppender(Appender<ILoggingEvent> appender) { return aai.detachAppender(appender); }
+    @Override public boolean detachAppender(String name) { return aai.detachAppender(name); }
+
+    /** Minimal ILoggingEvent that returns a scrubbed message; every other field delegates to the original. */
+    private static final class ScrubbedEvent implements ILoggingEvent {
+        private final ILoggingEvent d;
+        private final String message;
+
+        ScrubbedEvent(ILoggingEvent delegate, String message) {
+            this.d = delegate;
+            this.message = message;
+        }
+
+        @Override public String getFormattedMessage() { return message; }
+        @Override public String getMessage() { return message; }
+        @Override public Object[] getArgumentArray() { return null; }
+        @Override public String getThreadName() { return d.getThreadName(); }
+        @Override public ch.qos.logback.classic.Level getLevel() { return d.getLevel(); }
+        @Override public String getLoggerName() { return d.getLoggerName(); }
+        @Override public ch.qos.logback.classic.spi.LoggerContextVO getLoggerContextVO() { return d.getLoggerContextVO(); }
+        @Override public ch.qos.logback.classic.spi.IThrowableProxy getThrowableProxy() { return d.getThrowableProxy(); }
+        @Override public StackTraceElement[] getCallerData() { return d.getCallerData(); }
+        @Override public boolean hasCallerData() { return d.hasCallerData(); }
+        @Override public org.slf4j.Marker getMarker() { return d.getMarker(); }
+        @Override public java.util.List<org.slf4j.Marker> getMarkerList() { return d.getMarkerList(); }
+        @Override public java.util.Map<String, String> getMDCPropertyMap() { return d.getMDCPropertyMap(); }
+        @Override public java.util.Map<String, String> getMdc() { return d.getMDCPropertyMap(); }
+        @Override public long getTimeStamp() { return d.getTimeStamp(); }
+        @Override public int getNanoseconds() { return d.getNanoseconds(); }
+        @Override public long getSequenceNumber() { return d.getSequenceNumber(); }
+        @Override public java.util.List<ch.qos.logback.classic.spi.KeyValuePair> getKeyValuePairs() { return d.getKeyValuePairs(); }
+        @Override public void prepareForDeferredProcessing() { d.prepareForDeferredProcessing(); }
     }
 }
