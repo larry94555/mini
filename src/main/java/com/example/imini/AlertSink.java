@@ -73,6 +73,8 @@ public class AlertSink {
     @Value("${alerts.template:}") private String template;
     @Value("${alerts.dead-letter-persistent:true}") private boolean deadLetterPersistent;
     @Value("${alerts.routes:}") private String routesCfg;
+    @Value("${alerts.dead-letter-retention-hours:168}") private long retentionHours;
+    @Value("${alerts.dedup-window-seconds:0}") private long dedupWindowSeconds;
 
     private final AuditLog audit;
     private final Database db;
@@ -93,16 +95,27 @@ public class AlertSink {
     private final AtomicLong deadLettered = new AtomicLong();
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong replayed = new AtomicLong();
+    private final AtomicLong suppressed = new AtomicLong(); // collapsed duplicate alerts
+
+    // per-route delivery counters: action -> [sent, failed, dead_lettered]
+    private final Map<String, long[]> byRoute = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // dedup windows: key (action|target) -> mutable window state
+    private final Map<String, long[]> dedupState = new java.util.concurrent.ConcurrentHashMap<>(); // [windowStart, suppressed]
+    private final Object dedupLock = new Object();
 
     /** A per-action route: a webhook URL and an optional template (null = use the global template). */
     public record Route(String url, String template) {}
 
-    /** One unit of delivery work: payload + destination, current attempt, and the dead-letter row id (or null). */
-    private record Delivery(String payload, String url, int attemptNo, String dlId) {}
+    /** One unit of delivery work: payload + destination, current attempt, dead-letter row id, route label. */
+    private record Delivery(String payload, String url, int attemptNo, String dlId, String action) {}
+
+    /** Pure dedup decision: whether to forward now, and how many were suppressed in the just-closed window. */
+    record DedupResult(boolean forward, int suppressedSincePrev) {}
 
     /** A dead-lettered delivery row (durable rows carry an id/status/history; memory rows are payload-only). */
     public record DeadLetter(String id, long ts, String payload, String url, int attempts,
-                             String lastError, String status, long lastAttemptAt) {}
+                             String lastError, String status, long lastAttemptAt, String action) {}
 
     public AlertSink(AuditLog audit, Database db) {
         this.audit = audit;
@@ -289,7 +302,7 @@ public class AlertSink {
         out.put("default_webhook_configured", webhookUrl != null && !webhookUrl.isBlank());
         boolean didSend = false;
         if (send && enabled && webhookUrl != null && !webhookUrl.isBlank() && scheduler != null) {
-            enqueue(rendered, webhookUrl, null);
+            enqueue(rendered, webhookUrl, null, "test");
             didSend = true;
         }
         out.put("sent", didSend);
@@ -298,16 +311,43 @@ public class AlertSink {
 
     private void onEntry(AuditLog.Entry e) {
         if (!shouldForward(e.action())) return;
+        // Dedup/throttle: collapse repeated identical (action|target) alerts within the configured window.
+        DedupResult dd = dedupDecide(e.action() + "|" + e.target(), System.currentTimeMillis());
+        if (!dd.forward()) {
+            suppressed.incrementAndGet();
+            return; // suppressed; not even logged at WARN to avoid log storms
+        }
         log.warn("[alert] " + e.action() + " user=" + e.user() + " target=" + e.target()
-                + " outcome=" + e.outcome());
+                + " outcome=" + e.outcome()
+                + (dd.suppressedSincePrev() > 0 ? " (+" + dd.suppressedSincePrev() + " suppressed since prev)" : ""));
         String url = urlFor(e.action());
         String tmpl = templateFor(e.action());
         String payload = (tmpl == null || tmpl.isBlank()) ? toJson(e) : applyTemplate(tmpl, e);
-        enqueue(payload, url, null);
+        enqueue(payload, url, null, e.action());
+    }
+
+    /**
+     * Dedup decision for a key at {@code nowMs}. Returns forward=true and resets the window when the key is
+     * new or its window has elapsed (reporting the prior window's suppressed count); otherwise forward=false
+     * and increments the suppressed count. A window of 0 disables dedup (always forwards).
+     */
+    DedupResult dedupDecide(String key, long nowMs) {
+        long windowMs = dedupWindowSeconds * 1000L;
+        if (windowMs <= 0) return new DedupResult(true, 0);
+        synchronized (dedupLock) {
+            long[] st = dedupState.get(key);
+            if (st == null || nowMs - st[0] >= windowMs) {
+                int prevSuppressed = st == null ? 0 : (int) st[1];
+                dedupState.put(key, new long[]{nowMs, 0});
+                return new DedupResult(true, prevSuppressed);
+            }
+            st[1]++; // within window: suppress
+            return new DedupResult(false, 0);
+        }
     }
 
     /** Submit a payload for delivery to {@code url} if configured and the buffer isn't saturated. */
-    private void enqueue(String payload, String url, String dlId) {
+    private void enqueue(String payload, String url, String dlId, String action) {
         if (url == null || url.isBlank() || http == null || scheduler == null) return;
         if (inFlight.get() >= Math.max(1, queueCapacity)) {
             dropped.incrementAndGet();
@@ -316,7 +356,13 @@ public class AlertSink {
         }
         inFlight.incrementAndGet();
         queued.incrementAndGet();
-        scheduler.submit(() -> attempt(new Delivery(payload, url, 1, dlId)));
+        scheduler.submit(() -> attempt(new Delivery(payload, url, 1, dlId, action)));
+    }
+
+    private void routeInc(String action, int idx) {
+        if (action == null || action.isBlank()) action = "default";
+        long[] c = byRoute.computeIfAbsent(action, k -> new long[3]);
+        synchronized (c) { c[idx]++; }
     }
 
     /** One delivery attempt; on failure reschedule with backoff or dead-letter. Runs on the scheduler. */
@@ -338,17 +384,19 @@ public class AlertSink {
         }
         if (ok) {
             sent.incrementAndGet();
+            routeInc(d.action(), 0);
             inFlight.decrementAndGet();
             if (d.dlId() != null) deleteDeadLetter(d.dlId()); // confirmed delivery of a replayed row
             return;
         }
         failed.incrementAndGet();
+        routeInc(d.action(), 1);
         if (d.attemptNo() <= maxRetries) {
             retried.incrementAndGet();
             long delay = backoffMs(d.attemptNo(), retryBackoffMs);
             final String fe = err;
             try {
-                scheduler.schedule(() -> attempt(new Delivery(d.payload(), d.url(), d.attemptNo() + 1, d.dlId())),
+                scheduler.schedule(() -> attempt(new Delivery(d.payload(), d.url(), d.attemptNo() + 1, d.dlId(), d.action())),
                         delay, TimeUnit.MILLISECONDS);
             } catch (Exception schedEx) {
                 exhausted(d, fe);
@@ -361,6 +409,7 @@ public class AlertSink {
     /** Final failure: persist (or update, if this was a replay) the dead-letter row + history. */
     private void exhausted(Delivery d, String err) {
         deadLettered.incrementAndGet();
+        routeInc(d.action(), 2);
         inFlight.decrementAndGet();
         String reason = err == null ? "exhausted retries" : err;
         if (dlPersistent()) {
@@ -372,9 +421,9 @@ public class AlertSink {
                             maxRetries + 1, reason, System.currentTimeMillis(), d.dlId());
                 } else {
                     db.update("INSERT INTO alerts_dead_letter(id, ts, payload, url, attempts, last_error, "
-                                    + "status, last_attempt_at) VALUES(?,?,?,?,?,?,?,?)",
+                                    + "status, last_attempt_at, action) VALUES(?,?,?,?,?,?,?,?,?)",
                             java.util.UUID.randomUUID().toString(), System.currentTimeMillis(), d.payload(),
-                            d.url(), maxRetries + 1, reason, "failed", System.currentTimeMillis());
+                            d.url(), maxRetries + 1, reason, "failed", System.currentTimeMillis(), d.action());
                 }
             } catch (Exception ex) {
                 log.warn("[alerts] could not persist dead-letter, keeping in memory: " + ex.getMessage());
@@ -413,11 +462,76 @@ public class AlertSink {
         m.put("dead_lettered", deadLettered.get());
         m.put("dropped", dropped.get());
         m.put("replayed", replayed.get());
+        m.put("suppressed", suppressed.get());
         m.put("in_flight", (long) inFlight.get());
         m.put("dead_letter_persistent", dlPersistent());
         m.put("routes", routes.keySet());
+        m.put("by_route", byRouteSnapshot());
         m.put("dead_letter_size", (long) deadLetterSize());
         return m;
+    }
+
+    /** Per-route counters as action -> {sent, failed, dead_lettered} for the metrics snapshot. */
+    private Map<String, Map<String, Long>> byRouteSnapshot() {
+        Map<String, Map<String, Long>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, long[]> e : byRoute.entrySet()) {
+            long[] c = e.getValue();
+            Map<String, Long> m = new LinkedHashMap<>();
+            synchronized (c) {
+                m.put("sent", c[0]);
+                m.put("failed", c[1]);
+                m.put("dead_lettered", c[2]);
+            }
+            out.put(e.getKey(), m);
+        }
+        return out;
+    }
+
+    /** Pure: the epoch-ms cutoff before which failed dead-letters should be purged (0 = keep forever). */
+    static long cutoff(long nowMs, long retentionHours) {
+        if (retentionHours <= 0) return 0L;
+        return nowMs - retentionHours * 3_600_000L;
+    }
+
+    /**
+     * Age out failed dead-letters older than {@code retentionHours} (called by the reaper). Rows currently
+     * {@code replaying} are never purged. Returns the number removed; 0 when retention is disabled, there's no
+     * database, or nothing qualifies. The in-memory ring is already size-bounded, so this is a no-op there.
+     */
+    public int purgeOlderThan(long retentionHours, long nowMs) {
+        long cut = cutoff(nowMs, retentionHours);
+        if (cut <= 0 || !dlPersistent()) return 0;
+        try {
+            int removed = db.update("DELETE FROM alerts_dead_letter WHERE status='failed' AND ts < ?", cut);
+            if (removed > 0) log.info("[alerts] purged " + removed + " dead-letter(s) older than "
+                    + retentionHours + "h");
+            return removed;
+        } catch (Exception ex) {
+            log.warn("[alerts] dead-letter purge failed: " + ex.getMessage());
+            return 0;
+        }
+    }
+
+    /** The configured retention window in hours (0 = keep forever); used by the reaper. */
+    public long retentionHours() { return retentionHours; }
+
+    /** Delete all dead-letters (or one by {@code id}). Clears the in-memory ring when not persistent. */
+    public int purgeAll(String id) {
+        if (dlPersistent()) {
+            try {
+                return (id == null || id.isBlank())
+                        ? db.update("DELETE FROM alerts_dead_letter")
+                        : db.update("DELETE FROM alerts_dead_letter WHERE id=?", id);
+            } catch (Exception ex) {
+                log.warn("[alerts] dead-letter purge-all failed: " + ex.getMessage());
+                return 0;
+            }
+        }
+        synchronized (dlLock) {
+            int n = deadLetter.size();
+            deadLetter.clear();
+            return n;
+        }
     }
 
     private int deadLetterSize() {
@@ -436,10 +550,10 @@ public class AlertSink {
     public List<DeadLetter> deadLetterEntries() {
         if (dlPersistent()) {
             try {
-                return db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at "
+                return db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at, action "
                                 + "FROM alerts_dead_letter ORDER BY ts DESC LIMIT 500",
                         rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
-                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8)));
+                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9)));
             } catch (Exception ex) {
                 log.warn("[alerts] could not read dead-letter table: " + ex.getMessage());
                 return List.of();
@@ -448,7 +562,7 @@ public class AlertSink {
         List<DeadLetter> out = new ArrayList<>();
         synchronized (dlLock) {
             for (String p : deadLetter) out.add(new DeadLetter(null, 0L, p, null, maxRetries + 1,
-                    "exhausted retries", "failed", 0L));
+                    "exhausted retries", "failed", 0L, null));
         }
         return out;
     }
@@ -483,7 +597,7 @@ public class AlertSink {
                     log.warn("[alerts] could not mark replaying " + d.id() + ": " + ex.getMessage());
                     continue;
                 }
-                enqueue(d.payload(), url, d.id());
+                enqueue(d.payload(), url, d.id(), d.action());
                 n++;
             }
         } else {
@@ -491,7 +605,7 @@ public class AlertSink {
             synchronized (dlLock) { snapshot = new ArrayList<>(deadLetter); deadLetter.clear(); }
             for (String p : snapshot) {
                 if (webhookUrl == null || webhookUrl.isBlank()) break;
-                enqueue(p, webhookUrl, null);
+                enqueue(p, webhookUrl, null, "replay");
                 n++;
             }
         }
