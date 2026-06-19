@@ -152,7 +152,7 @@ No cloud API key is required.
 | `Rbac.java` / `Principal.java` / `RequestContext.java` | role policy and per-request caller identity |
 | `Ownership.java` | per-resource access policy (owner / admin / unowned) + `canRead` for shared sessions |
 | `AuditLog.java` | append-only audit trail of privileged actions |
-| `RateLimiter.java` | Fixed-window per-key rate limiter |
+| `RateLimiter.java` | Per-key rate limiter: fixed or sliding window, optional SQLite persistence, stale-window pruning |
 | `Metrics.java` | In-process metrics snapshot and run logs |
 | `static/index.html` | Browser UI |
 | `Dockerfile` | Container image for the app |
@@ -369,7 +369,7 @@ Transient llama-server failures (network errors, HTTP 5xx) are retried with expo
 
 ### Session lifecycle & rate limiting
 
-Set `agent.session-ttl-hours` (default 0 = disabled) to have a background reaper prune sessions idle longer than the TTL every `agent.session-reap-interval-minutes` (default 60); `GET /sessions/summary` (admin) shows the age/size distribution and `POST /sessions/prune` (admin) runs a pass on demand. The per-key rate limiter (`auth.rate-limit-per-minute`) is now **persistent** by default (`auth.rate-limit-persistent=true`) — windows are stored in SQLite so limits survive a restart; set it to `false` for the old in-memory behavior. The streaming model path now retries the **connection step** (before any tokens flow) under the same circuit breaker as the non-streaming calls; mid-stream failures are still surfaced to the caller.
+Set `agent.session-ttl-hours` (default 0 = disabled) to have a background reaper prune sessions idle longer than the TTL every `agent.session-reap-interval-minutes` (default 60); `GET /sessions/summary` (admin) shows the age/size distribution and `POST /sessions/prune` (admin) runs a pass on demand. Pruning a session now **cascades** to every dependent table (owners, shares, titles, checkpoints, plans, plan steps, plan history, per-session skill state and settings, and bound scheduled tasks), and each reaper pass also runs an **orphan sweep** that removes child rows whose parent session no longer exists (cleaning up data left by older builds). The per-key rate limiter (`auth.rate-limit-per-minute`) is **persistent** by default (`auth.rate-limit-persistent=true`) — windows are stored in SQLite so limits survive a restart; set it to `false` for in-memory. Choose the algorithm with `auth.rate-limit-algorithm`: `fixed` (default) or `sliding` — the sliding-window counter removes the burst-at-window-boundary weakness of the fixed window by weighting the previous window's count into the current rate. A background pruner (`auth.rate-limit-reap-interval-minutes`, default 10) drops stale rate-limit windows for keys that have gone quiet so the table stays bounded. The streaming model path retries the **connection step** (before any tokens flow) under the same circuit breaker as the non-streaming calls; mid-stream failures are still surfaced to the caller.
 
 **Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
 the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is

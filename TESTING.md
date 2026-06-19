@@ -3279,3 +3279,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** if the llama-server is briefly unavailable when a `/chat/stream` starts, the connection step
   retries with backoff under the circuit breaker; once tokens are flowing a failure is surfaced (not retried).
+
+---
+
+# Cascade prune, sliding-window rate limiting, scheduled rate-limit pruning
+
+## 384. Cascade session prune (SessionCascadePruneTest)
+
+- **Run:** `./mvnw -Dtest=SessionCascadePruneTest test` (real SQLite; self-skips otherwise).
+- **Observe:** pruning an expired session deletes its rows from every child table (owners, shares, titles,
+  checkpoints, plans, plan_steps, plan_history, session_skill_state, session_settings, scheduled_tasks) — no
+  orphans remain.
+
+## 385. Orphan sweep (SessionCascadePruneTest)
+
+- **Run:** same class, `sweepOrphansRemovesRowsWithNoParentSession`.
+- **Observe:** child rows referencing a non-existent session are removed; rows for live sessions are kept.
+
+## 386. Sliding-window math (SlidingWindowRateLimiterTest)
+
+- **Run:** `./mvnw -Dtest=SlidingWindowRateLimiterTest test`.
+- **Observe:** `slidingStep` weights the previous window by the fraction still in view; history clears after
+  two idle windows; the weighted count is `current + prev * (remaining fraction)`.
+
+## 387. Sliding vs fixed boundary burst (SlidingWindowRateLimiterTest)
+
+- **Observe:** with the same per-window limit, the fixed window allows a full second batch immediately after
+  a window boundary (a 2x burst), while the sliding window blocks at the boundary because the previous
+  window is still in view.
+
+## 388. Scheduled rate-limit pruning (manual)
+
+- **Observe:** with `auth.rate-limit-per-minute` > 0 the run.sh log shows `[ratelimit] reaper enabled`. The
+  reaper calls `RateLimiter.pruneStale` every `auth.rate-limit-reap-interval-minutes` (default 10), logging
+  `[ratelimit] pruned N stale window(s)` when keys go quiet. Set the interval to 0 to disable.

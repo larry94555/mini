@@ -95,7 +95,9 @@ public class Database {
                     + "embedding TEXT NOT NULL, updated_at INTEGER NOT NULL)",
             // persistent per-key rate-limit windows so limits survive a restart
             "CREATE TABLE rate_limits (rl_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, "
-                    + "count INTEGER NOT NULL)");
+                    + "count INTEGER NOT NULL)",
+            // sliding-window rate limiting keeps the previous window's count too (weighted into the rate)
+            "ALTER TABLE rate_limits ADD COLUMN prev_count INTEGER NOT NULL DEFAULT 0");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

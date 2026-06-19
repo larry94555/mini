@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Cascade session prune + sliding-window rate limiting + scheduled rate-limit pruning: pruneExpired now deletes every session_id-keyed child table (checkpoints, plans, plan steps/history, skill state, settings, scheduled tasks) and a periodic orphan sweep removes child rows whose session is gone; the rate limiter gained a selectable sliding-window algorithm (auth.rate-limit-algorithm=sliding) that fixes the boundary burst; a RateLimitReaper periodically calls pruneStale so the rate_limits table stays bounded.
+
 - Session expiry + streaming resilience + persistent rate limiting: a SessionReaper prunes sessions idle past
   agent.session-ttl-hours (with /sessions/summary + /sessions/prune); the streaming chat path now retries the
   connection step under the circuit breaker; the rate limiter persists its windows in SQLite so limits
