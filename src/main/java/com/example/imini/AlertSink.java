@@ -103,6 +103,7 @@ public class AlertSink {
     private final AtomicLong suppressed = new AtomicLong(); // collapsed duplicate alerts
     private final AtomicLong escalated = new AtomicLong();   // re-paged to the escalation route
     private final AtomicLong digested = new AtomicLong();    // dedup-digest notifications emitted
+    private final AtomicLong slaBreaches = new AtomicLong();  // re-escalations triggered by an ack-SLA breach
 
     private List<Tier> escalationTiers = List.of();
 
@@ -119,7 +120,9 @@ public class AlertSink {
     public record Route(String url, String template) {}
 
     /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}. */
-    public record Tier(long afterMs, String url, String template) {}
+    /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}; if
+     * {@code slaMs > 0}, a row sitting at this tier longer than {@code slaMs} without an ack is re-escalated. */
+    public record Tier(long afterMs, String url, String template, long slaMs) {}
 
     /** One unit of delivery work: payload + destination, current attempt, dead-letter row id, route label. */
     private record Delivery(String payload, String url, int attemptNo, String dlId, String action) {}
@@ -624,6 +627,7 @@ public class AlertSink {
         m.put("suppressed", suppressed.get());
         m.put("escalated", escalated.get());
         m.put("digested", digested.get());
+        m.put("sla_breaches", slaBreaches.get());
         m.put("by_tier", byTierSnapshot());
         m.put("ack_sla_by_tier", ackSlaByTier());
         m.put("in_flight", (long) inFlight.get());
@@ -782,9 +786,20 @@ public class AlertSink {
             String rest = e.substring(p1 + 1);
             int p2 = rest.indexOf('|');
             String url = (p2 < 0 ? rest : rest.substring(0, p2)).trim();
-            String tmpl = (p2 < 0 ? null : rest.substring(p2 + 1));
+            String tail = (p2 < 0 ? "" : rest.substring(p2 + 1));
+            // tail may be "template" or "template|sla"; sla is the last |-segment if it parses as a duration
+            String tmpl = tail;
+            long sla = 0;
+            int p3 = tail.lastIndexOf('|');
+            if (p3 >= 0) {
+                long maybe = parseDuration(tail.substring(p3 + 1));
+                if (maybe > 0) { sla = maybe; tmpl = tail.substring(0, p3); }
+            } else {
+                long maybe = parseDuration(tail); // bare "template" that is actually an sla duration
+                if (maybe > 0 && tail.matches("\\s*\\d+[smhd]?\\s*")) { sla = maybe; tmpl = ""; }
+            }
             if (after < 0 || url.isEmpty()) continue;
-            out.add(new Tier(after, url, (tmpl == null || tmpl.isBlank()) ? null : tmpl));
+            out.add(new Tier(after, url, (tmpl == null || tmpl.isBlank()) ? null : tmpl, sla));
         }
         out.sort(java.util.Comparator.comparingLong(Tier::afterMs));
         return out;
@@ -795,7 +810,7 @@ public class AlertSink {
         List<Tier> t = parseTiers(escalateTiersCfg);
         if (!t.isEmpty()) return t;
         if (escalateAfterMinutes > 0 && escalateUrl != null && !escalateUrl.isBlank()) {
-            return List.of(new Tier(escalateAfterMinutes * 60_000L, escalateUrl, null));
+            return List.of(new Tier(escalateAfterMinutes * 60_000L, escalateUrl, null, 0));
         }
         return List.of();
     }
@@ -808,14 +823,13 @@ public class AlertSink {
      */
     public int escalateStale(long nowMs) {
         if (!escalationEnabled() || !dlPersistent() || scheduler == null) return 0;
-        record EscRow(String id, long ts, String payload, int tier, String action) {}
+        record EscRow(String id, long ts, String payload, int tier, String action, long escalatedAt) {}
         List<EscRow> rows;
         try {
-            rows = db.query("SELECT id, ts, payload, escalation_tier, action FROM alerts_dead_letter "
-                            + "WHERE status='failed' AND acked_at IS NULL AND escalation_tier < ? "
-                            + "ORDER BY ts ASC LIMIT 200",
-                    rs -> new EscRow(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getInt(4), rs.getString(5)),
-                    escalationTiers.size());
+            rows = db.query("SELECT id, ts, payload, escalation_tier, action, escalated_at FROM alerts_dead_letter "
+                            + "WHERE status='failed' AND acked_at IS NULL ORDER BY ts ASC LIMIT 200",
+                    rs -> new EscRow(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getInt(4),
+                            rs.getString(5), rs.getLong(6)));
         } catch (Exception ex) {
             log.warn("[alerts] escalation query failed: " + ex.getMessage());
             return 0;
@@ -824,25 +838,52 @@ public class AlertSink {
         for (EscRow d : rows) {
             int cur = d.tier();
             int next = cur + 1;
-            if (next > escalationTiers.size()) continue;
-            Tier tier = escalationTiers.get(next - 1);
-            if (nowMs - d.ts() < tier.afterMs()) continue; // not due yet
-            int claimed;
-            try {
-                claimed = db.update("UPDATE alerts_dead_letter SET escalation_tier=?, escalated_at=? "
-                                + "WHERE id=? AND escalation_tier=? AND status='failed' AND acked_at IS NULL",
-                        next, nowMs, d.id(), cur);
-            } catch (Exception ex) {
-                log.warn("[alerts] escalation claim failed for " + d.id() + ": " + ex.getMessage());
-                continue;
+            int size = escalationTiers.size();
+            boolean ageDue = next <= size && nowMs - d.ts() >= escalationTiers.get(next - 1).afterMs();
+            long curSla = cur >= 1 ? escalationTiers.get(cur - 1).slaMs() : 0;
+            boolean breachDue = cur >= 1 && curSla > 0 && d.escalatedAt() > 0
+                    && nowMs - d.escalatedAt() >= curSla;
+            if (!ageDue && !breachDue) continue;
+
+            if (next <= size) {
+                // advance to the next tier (covers normal age-based advance and breach-with-room-above)
+                int claimed;
+                try {
+                    claimed = db.update("UPDATE alerts_dead_letter SET escalation_tier=?, escalated_at=? "
+                                    + "WHERE id=? AND escalation_tier=? AND status='failed' AND acked_at IS NULL",
+                            next, nowMs, d.id(), cur);
+                } catch (Exception ex) {
+                    log.warn("[alerts] escalation claim failed for " + d.id() + ": " + ex.getMessage());
+                    continue;
+                }
+                if (claimed != 1) continue; // lost the race to another instance/tick
+                enqueue(d.payload(), escalationTiers.get(next - 1).url(), null, "escalation_t" + next);
+                escalated.incrementAndGet();
+                byTier.computeIfAbsent(next, k -> new AtomicLong()).incrementAndGet();
+                if (breachDue && !ageDue) slaBreaches.incrementAndGet();
+                n++;
+            } else if (breachDue) {
+                // already at the top tier and SLA-breached: re-page the top tier, atomically guarded on the
+                // prior escalated_at so concurrent reapers re-page at most once per SLA window
+                int claimed;
+                try {
+                    claimed = db.update("UPDATE alerts_dead_letter SET escalated_at=? "
+                                    + "WHERE id=? AND escalation_tier=? AND escalated_at=? "
+                                    + "AND status='failed' AND acked_at IS NULL",
+                            nowMs, d.id(), cur, d.escalatedAt());
+                } catch (Exception ex) {
+                    log.warn("[alerts] top-tier re-page claim failed for " + d.id() + ": " + ex.getMessage());
+                    continue;
+                }
+                if (claimed != 1) continue;
+                enqueue(d.payload(), escalationTiers.get(cur - 1).url(), null, "escalation_t" + cur + "_repage");
+                escalated.incrementAndGet();
+                byTier.computeIfAbsent(cur, k -> new AtomicLong()).incrementAndGet();
+                slaBreaches.incrementAndGet();
+                n++;
             }
-            if (claimed != 1) continue; // lost the race to another instance/tick
-            enqueue(d.payload(), tier.url(), null, "escalation_t" + next);
-            escalated.incrementAndGet();
-            byTier.computeIfAbsent(next, k -> new AtomicLong()).incrementAndGet();
-            n++;
         }
-        if (n > 0) log.warn("[alerts] escalated " + n + " un-acked dead-letter(s) up the ladder");
+        if (n > 0) log.warn("[alerts] escalated " + n + " un-acked dead-letter(s) (incl. SLA breaches)");
         return n;
     }
 

@@ -3826,3 +3826,35 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** the rendered viewer embeds `var CSRF="..."` and the `act()` helper sends it as the
   `X-CSRF-Token` header on every replay/ack/delete/bulk request.
+
+---
+
+# SLA-breach re-escalation, alerting-overview dashboard, signed/rotating CSRF tokens
+
+## 458. Tier ack-SLA parsing (AlertSlaBreachOverviewTest)
+
+- **Run:** `./mvnw -Dtest=AlertSlaBreachOverviewTest test`.
+- **Observe:** `parseTiers` reads an optional 4th `sla` field (`delay|url|template|sla`, or `delay|url|sla`
+  with no template); absent SLA defaults to 0 (no breach behaviour).
+
+## 459. SLA-breach re-escalation (manual, needs DB)
+
+- **Observe:** with `alerts.escalate-tiers=1m|<primary>||2m;;5m|<secondary>` (tier 1 SLA 2m), produce a
+  dead-letter. After 1m it pages tier 1; if still un-acked 2m later (SLA breach) it is re-escalated to tier 2
+  even though the 5m age threshold hasn't elapsed. At the top tier, a breach re-pages that tier once per SLA
+  window. `imini_alerts_sla_breaches` increments; `POST /admin/alerts/ack?id=` stops it.
+
+## 460. Alerting-overview dashboard (AlertSlaBreachOverviewTest)
+
+- **Run:** same class.
+- **Observe:** `AlertsOverview.render` shows top-line counter cards (incl. `sla breaches`), a By-route table,
+  an Escalation-tiers table (paged + acked + avg/max ack latency), and Top-suppressed-keys; it tolerates an
+  empty/`null` stats map. Live: `GET /admin/alerts/overview.html` (admin).
+
+## 461. Signed/rotating CSRF tokens (CsrfGuardTest)
+
+- **Run:** `./mvnw -Dtest=CsrfGuardTest test`.
+- **Observe:** `mint`/`verify` round-trip with the same key within the TTL; expired, wrong-key, tampered,
+  garbage, and null tokens are rejected; a token minted with a shared secret verifies on another instance
+  using the same secret (multi-instance). The enabled guard requires a valid token (`require` throws 403
+  otherwise).

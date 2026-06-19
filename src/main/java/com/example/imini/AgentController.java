@@ -554,6 +554,15 @@ public class AgentController {
         return out;
     }
 
+    /** A single operator overview of the alerting pipeline (counters, routes, tiers, top suppressed). Admin. */
+    @GetMapping(value = "/admin/alerts/overview.html", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> adminAlertsOverview() {
+        requireAdmin();
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(AlertsOverview.render(alertSink.stats(), alertSink.dedupSummary(10)));
+    }
+
     /** A short-lived per-process CSRF token for the viewer's state-changing actions. Admin only. */
     @GetMapping("/admin/alerts/csrf")
     public Map<String, Object> adminAlertsCsrf() {
