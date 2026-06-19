@@ -225,8 +225,10 @@ public class AgentEngine {
                 } else if (futures.get(ci) == null && !toolRateLimiter.allow(callerTenant, ci.name)) {
                     // Per-tool rate limit: this tenant has called this tool too often in the window.
                     // (Skipped when a future already exists — that tool was allowed at pre-submission.)
-                    result = "RATE_LIMITED: tool '" + ci.name + "' exceeded its per-tenant rate limit; try again shortly.";
-                    sink.log("[" + label + ":ratelimit] throttled " + ci.name);
+                    long retryAfter = toolRateLimiter.retryAfterSeconds(callerTenant, ci.name);
+                    result = "RATE_LIMITED: tool '" + ci.name + "' exceeded its per-tenant rate limit; "
+                            + "retry after ~" + retryAfter + "s.";
+                    sink.log("[" + label + ":ratelimit] throttled " + ci.name + " (retry after ~" + retryAfter + "s)");
                     capabilities.auditToolRateLimited(ci.name);
                 } else if (!ci.tool.mutating) {
                     sink.log("[" + label + ":tool] " + ci.name + " " + ci.args + (parallelNote ? " (parallel)" : ""));

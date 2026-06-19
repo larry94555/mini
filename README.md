@@ -164,6 +164,7 @@ No cloud API key is required.
 | `ToolRateLimiter.java` | Per-tenant, per-tool sliding-window rate limiting (SQLite-persisted), enforced before tool execution |
 | `RedactionConfig.java` | Loads operator-supplied redaction patterns from config into `Redact` at startup |
 | `AlertSink.java` | Forwards selected audit events (denials, spend alerts, rate limits) to a webhook + log |
+| `AuditMetrics.java` | Counts audit actions into Metrics so denials/alerts/throttles are scrapable |
 | `Metrics.java` | In-process metrics snapshot and run logs |
 | `static/index.html` | Browser UI |
 | `Dockerfile` | Container image for the app |
@@ -396,11 +397,11 @@ Set `agent.session-ttl-hours` (default 0 = disabled) to have a background reaper
 
 **Per-tenant spend alerts.** With `cost.alert-token-threshold` and/or `cost.alert-percent` set, imini logs a one-time warning the first time a tenant's monthly tokens cross the threshold (the lower of the absolute count and the percent-of-quota), **and records it to the audit log** (`spend_alert`) so it survives a restart and is queryable at `GET /audit`. Recent alerts also appear in `GET /admin/cost` and on the dashboard. **Usage dashboard.** `GET /admin/usage` (admin) renders a self-contained HTML page of per-tenant token usage, cost, run counts, quota-use bars, and recent spend alerts — a human-readable view of the same data `/admin/cost` returns as JSON.
 
-**Per-tool rate limiting.** On top of capability scoping ("*may* you use this tool?"), you can cap *how often* an expensive tool runs per tenant with `tool-rate-limit.enabled=true` and `tool-rate-limit.limits` — comma-separated `tool=limit/windowSeconds` entries (e.g. `web_fetch=10/60, run_command=5/60`). Limits use the same sliding-window estimator as the HTTP limiter and are keyed per tenant, so one noisy tenant can't exhaust another's budget; a tool with no entry is unlimited. A throttled call returns `RATE_LIMITED: tool '...'` to the model (which can proceed with what it has) and is recorded to the audit log (`tool_rate_limited`). View the configured limits at `GET /admin/tool-rate-limits` (admin). Window state is **persisted** in the shared `rate_limits` SQLite table (under `tool:`-prefixed keys) when persistence is on, so limits survive a restart and are shared across instances on the same database; set `tool-rate-limit.persistent=false` (or run without a database) to keep purely in-memory state. Off by default.
+**Per-tool rate limiting.** On top of capability scoping ("*may* you use this tool?"), you can cap *how often* an expensive tool runs per tenant with `tool-rate-limit.enabled=true` and `tool-rate-limit.limits` — comma-separated `tool=limit/windowSeconds` entries (e.g. `web_fetch=10/60, run_command=5/60`). Limits use the same sliding-window estimator as the HTTP limiter and are keyed per tenant, so one noisy tenant can't exhaust another's budget; a tool with no entry is unlimited. A throttled call returns `RATE_LIMITED: tool '...'; retry after ~Ns.` to the model — the **retry-after hint** is the estimated seconds until the window frees, so the model can back off intelligently — and is recorded to the audit log (`tool_rate_limited`). View the configured limits at `GET /admin/tool-rate-limits` (admin). Window state is **persisted** in the shared `rate_limits` SQLite table (under `tool:`-prefixed keys) when persistence is on, so limits survive a restart and are shared across instances on the same database; set `tool-rate-limit.persistent=false` (or run without a database) to keep purely in-memory state. Off by default.
 
 **Audit-log viewer.** `GET /admin/audit.html` (admin) renders a filterable HTML view over the audit table — the same data as `GET /audit`, but browsable. Filter by user, action, and target, and now also by **time range** (`since`/`until`, accepting an ISO-8601 instant, a `YYYY-MM-DD` date, or epoch millis) via the form, which round-trips to query params. Results are **paginated** — the page shows "Showing X–Y of Z" with Prev/Next links that preserve the active filters (`offset`/`limit` params) — so it stays usable on a busy deployment. Capability denials, spend alerts, and tool rate-limit rejections are highlighted. Raw JSON remains at `/audit`, and CSV/JSON export at `/audit/export`.
 
-**Alert notification sink.** Security-relevant audit events can page an operator instead of only being browsable. Set `alerts.enabled=true` to forward events whose action is in `alerts.actions` (default `capability_denied,spend_alert,tool_rate_limited`): each is logged at `WARN` and, if `alerts.webhook-url` is set, POSTed as a small JSON payload to that endpoint (e.g. a Slack/PagerDuty-compatible webhook) on a background thread. Forwarding is best-effort and never blocks or breaks a run; the audit write happens regardless. Off by default (no forwarding).
+**Alert notification sink.** Security-relevant audit events can page an operator instead of only being browsable. Set `alerts.enabled=true` to forward events whose action is in `alerts.actions` (default `capability_denied,spend_alert,tool_rate_limited`): each is logged at `WARN` and, if `alerts.webhook-url` is set, POSTed as a small JSON payload to that endpoint (e.g. a Slack/PagerDuty-compatible webhook) on a background thread. Forwarding is best-effort and never blocks or breaks a run; the audit write happens regardless. **Delivery is buffered and resilient:** a failed POST is retried with exponential backoff (`alerts.max-retries`, `alerts.retry-backoff-ms`), and an alert that exhausts its retries is moved to a bounded dead-letter ring rather than lost — inspect it at `GET /admin/alerts/failed`. If more than `alerts.queue-capacity` deliveries are in flight the newest is dropped (counted). Delivery counters (`sent`/`failed`/`retried`/`dead_lettered`/`dropped`) and per-action audit counts are exported to Prometheus. Off by default (no forwarding).
 
 **Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
 the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is
@@ -504,6 +505,7 @@ Set `IMINI_URL` to target a non-default address (the `.sh` scripts read it; defa
 | `GET /session/runs?sessionId=&limit=` | Recent runs for one session (session read access) |
 | `GET /schedule/runs?id=&limit=` | Recent executions of one scheduled task (session read access) |
 | `GET /metrics/prom` | Metrics in Prometheus text format, for scraping (admin) |
+| `GET /admin/alerts/failed` | Dead-lettered alert deliveries + delivery stats (admin) |
 | `GET /workspace/export` | Download the whole workspace as one bundle (admin) |
 | `GET /workspace/keys` | Inspect the verifier keyring: trusted keys, expiry, revoked/signer flags (admin) |
 | `POST /workspace/keygen` | Mint an Ed25519 key pair for bundle signing (admin) |
@@ -1618,6 +1620,7 @@ text exposition format**, so an external Prometheus/Grafana stack can scrape the
 
 ```
 curl "localhost:8080/metrics/prom" -H "X-API-Key: <admin-key>"
+# includes imini_counter{name="audit_capability_denied"|...}, imini_alerts_sent, imini_alerts_dead_lettered, ...
 # imini_counter{name="runs_ok"} 5
 # imini_tool_calls{tool="read_file"} 3
 # imini_run_latency_avg_ms 120
