@@ -3730,3 +3730,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `matchesFilter` honours action (exact), status (case-insensitive), and `q` (payload
   substring); `deadLetterPage`/`deadLetterCount` are empty/zero without a DB. Live: `GET /admin/alerts/failed
   ?action=spend_alert&q=acct-9&offset=0&limit=20` returns the filtered page plus `total`.
+
+---
+
+# Escalation ladder + atomic claim, HTML dead-letter viewer, dedup digests
+
+## 446. Escalation ladder & duration parsing (AlertLadderDigestTest)
+
+- **Run:** `./mvnw -Dtest=AlertLadderDigestTest test`.
+- **Observe:** `parseDuration` handles `30s`/`15m`/`2h`/`1d`/bare-ms (and rejects junk); `parseTiers` sorts
+  tiers by delay ascending, keeps optional per-tier templates, and skips malformed entries.
+
+## 447. Atomic escalation ladder end-to-end (manual, needs DB)
+
+- **Observe:** with SQLite and `alerts.escalate-tiers=1m|<primary>;;3m|<secondary>`, produce a dead-letter.
+  After 1m the reaper pages tier 1 (`escalation_tier`=1); after 3m it pages tier 2. Run two instances against
+  the same DB — each tier is paged exactly once (the `UPDATE ... WHERE escalation_tier=k` claim). `POST
+  /admin/alerts/ack?id=` stops further escalation. `imini_alerts_escalated` increments per page.
+
+## 448. HTML dead-letter viewer (DeadLetterDashboardTest)
+
+- **Run:** `./mvnw -Dtest=DeadLetterDashboardTest test`.
+- **Observe:** `DeadLetterDashboard.render` shows the "Showing X–Y of Z" line, the action/status/q filter
+  form (round-tripping values), per-row Replay/Ack/Delete controls targeting the admin endpoints, an escaped
+  payload snippet, and a filter-preserving pager. Live: `GET /admin/alerts.html` (admin) renders the backlog.
+
+## 449. Dedup digests (AlertLadderDigestTest + manual)
+
+- **Observe (unit):** `digestPayload` summarizes a dedup key (action/target/suppressed/window); digests +
+  escalation are no-ops by default.
+- **Observe (manual, needs DB):** with `alerts.dedup-window-seconds=60` and `alerts.dedup-digest=true`, cause
+  a suppressed storm for one key, then wait a window. The reaper emits a single digest (routed to that
+  action's webhook) summarizing the suppressed count and clears the window; `imini_alerts_digested`
+  increments.

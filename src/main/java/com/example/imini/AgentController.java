@@ -519,6 +519,27 @@ public class AgentController {
         return out;
     }
 
+    /** Human-readable dead-letter viewer: a filterable, paginated HTML page with ack/replay/delete. Admin. */
+    @GetMapping(value = "/admin/alerts.html", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> adminAlertsHtml(
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "status", defaultValue = "") String status,
+            @RequestParam(name = "q", defaultValue = "") String q,
+            @RequestParam(name = "offset", defaultValue = "0") int offset,
+            @RequestParam(name = "limit", defaultValue = "50") int limit) {
+        requireAdmin();
+        String a = action.isBlank() ? null : action;
+        String st = status.isBlank() ? null : status;
+        String query = q.isBlank() ? null : q;
+        int off = Math.max(0, offset);
+        int capped = Math.max(1, Math.min(limit, 500));
+        var rows = alertSink.deadLetterPage(a, st, query, off, capped);
+        int total = alertSink.deadLetterCount(a, st, query);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(DeadLetterDashboard.render(rows, action, status, q, off, capped, total));
+    }
+
     /** Acknowledge a dead-letter so it no longer escalates. Admin only. */
     @PostMapping("/admin/alerts/ack")
     public Map<String, Object> adminAlertsAck(@RequestParam(name = "id") String id) {

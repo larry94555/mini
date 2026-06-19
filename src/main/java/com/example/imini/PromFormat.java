@@ -78,6 +78,7 @@ public final class PromFormat {
             number(sb, "alerts_replayed", "Dead-lettered alerts re-enqueued", "counter", alerts.get("replayed"));
             number(sb, "alerts_suppressed", "Duplicate alerts collapsed by dedup", "counter", alerts.get("suppressed"));
             number(sb, "alerts_escalated", "Un-acked dead-letters re-paged to escalation route", "counter", alerts.get("escalated"));
+            number(sb, "alerts_digested", "Dedup-digest notifications emitted", "counter", alerts.get("digested"));
             number(sb, "alerts_in_flight", "Alert deliveries in flight", "gauge", alerts.get("in_flight"));
             number(sb, "alerts_dead_letter_size", "Dead-letter ring size", "gauge", alerts.get("dead_letter_size"));
             if (alerts.get("by_route") instanceof Map<?, ?> byRoute) {
