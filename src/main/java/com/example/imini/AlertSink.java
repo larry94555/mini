@@ -75,6 +75,9 @@ public class AlertSink {
     @Value("${alerts.routes:}") private String routesCfg;
     @Value("${alerts.dead-letter-retention-hours:168}") private long retentionHours;
     @Value("${alerts.dedup-window-seconds:0}") private long dedupWindowSeconds;
+    @Value("${alerts.dedup-shared:true}") private boolean dedupShared;
+    @Value("${alerts.escalate-after-minutes:0}") private long escalateAfterMinutes;
+    @Value("${alerts.escalate-url:}") private String escalateUrl;
 
     private final AuditLog audit;
     private final Database db;
@@ -96,6 +99,7 @@ public class AlertSink {
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong replayed = new AtomicLong();
     private final AtomicLong suppressed = new AtomicLong(); // collapsed duplicate alerts
+    private final AtomicLong escalated = new AtomicLong();   // re-paged to the escalation route
 
     // per-route delivery counters: action -> [sent, failed, dead_lettered]
     private final Map<String, long[]> byRoute = new java.util.concurrent.ConcurrentHashMap<>();
@@ -315,6 +319,7 @@ public class AlertSink {
         DedupResult dd = dedupDecide(e.action() + "|" + e.target(), System.currentTimeMillis());
         if (!dd.forward()) {
             suppressed.incrementAndGet();
+            routeInc(e.action(), 3);
             return; // suppressed; not even logged at WARN to avoid log storms
         }
         log.warn("[alert] " + e.action() + " user=" + e.user() + " target=" + e.target()
@@ -326,23 +331,60 @@ public class AlertSink {
         enqueue(payload, url, null, e.action());
     }
 
+    /** Pure dedup outcome for a window state at {@code nowMs}: whether to forward, and the next state. */
+    record DedupOutcome(boolean forward, long newWindowStart, int newSuppressed, int suppressedSincePrev) {}
+
     /**
-     * Dedup decision for a key at {@code nowMs}. Returns forward=true and resets the window when the key is
-     * new or its window has elapsed (reporting the prior window's suppressed count); otherwise forward=false
-     * and increments the suppressed count. A window of 0 disables dedup (always forwards).
+     * Pure: given the current window (start + suppressed count, or null state via windowStart&lt;0) decide the
+     * next state. A new/elapsed window forwards and resets (reporting the prior window's suppressed count);
+     * within a window it suppresses and increments the count.
+     */
+    static DedupOutcome dedupOutcome(long windowStart, int suppressed, long nowMs, long windowMs) {
+        boolean fresh = windowStart < 0 || nowMs - windowStart >= windowMs;
+        if (fresh) {
+            int prev = windowStart < 0 ? 0 : suppressed;
+            return new DedupOutcome(true, nowMs, 0, prev);
+        }
+        return new DedupOutcome(false, windowStart, suppressed + 1, 0);
+    }
+
+    boolean dedupPersistent() {
+        return dedupShared && db != null && db.available();
+    }
+
+    /**
+     * Dedup decision for a key at {@code nowMs}. Backed by the shared {@code alert_dedup} SQLite table when
+     * available (so throttling is cluster-wide), else an in-memory map. A window of 0 disables dedup.
      */
     DedupResult dedupDecide(String key, long nowMs) {
         long windowMs = dedupWindowSeconds * 1000L;
         if (windowMs <= 0) return new DedupResult(true, 0);
+        if (dedupPersistent()) {
+            synchronized (dedupLock) { // serialize the read-modify-write within this process
+                try {
+                    var rows = db.query("SELECT window_start, suppressed FROM alert_dedup WHERE dk_key=?",
+                            rs -> new long[]{rs.getLong(1), rs.getLong(2)}, key);
+                    long ws = rows.isEmpty() ? -1 : rows.get(0)[0];
+                    int sup = rows.isEmpty() ? 0 : (int) rows.get(0)[1];
+                    DedupOutcome o = dedupOutcome(ws, sup, nowMs, windowMs);
+                    db.update("INSERT INTO alert_dedup(dk_key, window_start, suppressed) VALUES(?,?,?) "
+                                    + "ON CONFLICT(dk_key) DO UPDATE SET window_start=excluded.window_start, "
+                                    + "suppressed=excluded.suppressed",
+                            key, o.newWindowStart(), (long) o.newSuppressed());
+                    return new DedupResult(o.forward(), o.suppressedSincePrev());
+                } catch (Exception ex) {
+                    log.warn("[alerts] shared dedup failed, using in-memory: " + ex.getMessage());
+                    // fall through to in-memory
+                }
+            }
+        }
         synchronized (dedupLock) {
             long[] st = dedupState.get(key);
-            if (st == null || nowMs - st[0] >= windowMs) {
-                int prevSuppressed = st == null ? 0 : (int) st[1];
-                dedupState.put(key, new long[]{nowMs, 0});
-                return new DedupResult(true, prevSuppressed);
-            }
-            st[1]++; // within window: suppress
-            return new DedupResult(false, 0);
+            long ws = st == null ? -1 : st[0];
+            int sup = st == null ? 0 : (int) st[1];
+            DedupOutcome o = dedupOutcome(ws, sup, nowMs, windowMs);
+            dedupState.put(key, new long[]{o.newWindowStart(), o.newSuppressed()});
+            return new DedupResult(o.forward(), o.suppressedSincePrev());
         }
     }
 
@@ -361,7 +403,7 @@ public class AlertSink {
 
     private void routeInc(String action, int idx) {
         if (action == null || action.isBlank()) action = "default";
-        long[] c = byRoute.computeIfAbsent(action, k -> new long[3]);
+        long[] c = byRoute.computeIfAbsent(action, k -> new long[4]); // sent, failed, dead_lettered, suppressed
         synchronized (c) { c[idx]++; }
     }
 
@@ -463,6 +505,7 @@ public class AlertSink {
         m.put("dropped", dropped.get());
         m.put("replayed", replayed.get());
         m.put("suppressed", suppressed.get());
+        m.put("escalated", escalated.get());
         m.put("in_flight", (long) inFlight.get());
         m.put("dead_letter_persistent", dlPersistent());
         m.put("routes", routes.keySet());
@@ -481,6 +524,7 @@ public class AlertSink {
                 m.put("sent", c[0]);
                 m.put("failed", c[1]);
                 m.put("dead_lettered", c[2]);
+                m.put("suppressed", c[3]);
             }
             out.put(e.getKey(), m);
         }
@@ -515,6 +559,59 @@ public class AlertSink {
     /** The configured retention window in hours (0 = keep forever); used by the reaper. */
     public long retentionHours() { return retentionHours; }
 
+    /** The escalation threshold in minutes (0 = disabled), for the reaper. */
+    public long escalateAfterMinutes() { return escalateAfterMinutes; }
+    boolean escalationEnabled() {
+        return escalateAfterMinutes > 0 && escalateUrl != null && !escalateUrl.isBlank();
+    }
+
+    /**
+     * Re-page un-acknowledged dead-letters older than {@code escalate-after-minutes} to the escalation webhook,
+     * once each. A row qualifies when it is still {@code failed}, not acked, not already escalated, and older
+     * than the threshold. Marks {@code escalated_at} so it fires only once. Returns the number escalated.
+     * No-op unless escalation is configured and the durable store is in use.
+     */
+    public int escalateStale(long nowMs) {
+        if (!escalationEnabled() || !dlPersistent() || scheduler == null) return 0;
+        long cut = nowMs - escalateAfterMinutes * 60_000L;
+        List<DeadLetter> rows;
+        try {
+            rows = db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at, action "
+                            + "FROM alerts_dead_letter WHERE status='failed' AND acked_at IS NULL "
+                            + "AND escalated_at IS NULL AND ts < ? ORDER BY ts ASC LIMIT 200",
+                    rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
+                            rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9)),
+                    cut);
+        } catch (Exception ex) {
+            log.warn("[alerts] escalation query failed: " + ex.getMessage());
+            return 0;
+        }
+        int n = 0;
+        for (DeadLetter d : rows) {
+            try {
+                db.update("UPDATE alerts_dead_letter SET escalated_at=? WHERE id=?", nowMs, d.id());
+            } catch (Exception ex) {
+                log.warn("[alerts] could not mark escalated " + d.id() + ": " + ex.getMessage());
+                continue;
+            }
+            enqueue(d.payload(), escalateUrl, null, "escalation");
+            n++;
+        }
+        if (n > 0) { escalated.addAndGet(n); log.warn("[alerts] escalated " + n + " un-acked dead-letter(s)"); }
+        return n;
+    }
+
+    /** Acknowledge a dead-letter so it stops counting toward escalation. Returns rows affected. */
+    public int ack(String id) {
+        if (id == null || id.isBlank() || !dlPersistent()) return 0;
+        try {
+            return db.update("UPDATE alerts_dead_letter SET acked_at=? WHERE id=?", System.currentTimeMillis(), id);
+        } catch (Exception ex) {
+            log.warn("[alerts] ack failed for " + id + ": " + ex.getMessage());
+            return 0;
+        }
+    }
+
     /** Delete all dead-letters (or one by {@code id}). Clears the in-memory ring when not persistent. */
     public int purgeAll(String id) {
         if (dlPersistent()) {
@@ -544,6 +641,68 @@ public class AlertSink {
             }
         }
         synchronized (dlLock) { return deadLetter.size(); }
+    }
+
+    /** Pure: does a dead-letter match the given filters? (action exact; status exact; q = payload substring) */
+    static boolean matchesFilter(DeadLetter d, String action, String status, String q) {
+        if (action != null && !action.isBlank() && !action.equals(d.action())) return false;
+        if (status != null && !status.isBlank() && !status.equalsIgnoreCase(d.status())) return false;
+        if (q != null && !q.isBlank() && (d.payload() == null || !d.payload().contains(q))) return false;
+        return true;
+    }
+
+    /**
+     * A filtered, paginated page of dead-letters (newest first). Filters: {@code action} (exact),
+     * {@code status} (exact), {@code q} (payload substring). Uses SQL when durable, else filters the ring.
+     */
+    public List<DeadLetter> deadLetterPage(String action, String status, String q, int offset, int limit) {
+        int off = Math.max(0, offset);
+        int lim = limit <= 0 ? 50 : Math.min(limit, 500);
+        if (dlPersistent()) {
+            StringBuilder sql = new StringBuilder("SELECT id, ts, payload, url, attempts, last_error, status, "
+                    + "last_attempt_at, action FROM alerts_dead_letter WHERE 1=1");
+            List<Object> params = new ArrayList<>();
+            if (action != null && !action.isBlank()) { sql.append(" AND action=?"); params.add(action); }
+            if (status != null && !status.isBlank()) { sql.append(" AND status=?"); params.add(status); }
+            if (q != null && !q.isBlank()) { sql.append(" AND payload LIKE ?"); params.add("%" + q + "%"); }
+            sql.append(" ORDER BY ts DESC LIMIT ? OFFSET ?");
+            params.add(lim); params.add(off);
+            try {
+                return db.query(sql.toString(),
+                        rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
+                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9)),
+                        params.toArray());
+            } catch (Exception ex) {
+                log.warn("[alerts] dead-letter page query failed: " + ex.getMessage());
+                return List.of();
+            }
+        }
+        List<DeadLetter> all = deadLetterEntries();
+        List<DeadLetter> filtered = new ArrayList<>();
+        for (DeadLetter d : all) if (matchesFilter(d, action, status, q)) filtered.add(d);
+        List<DeadLetter> out = new ArrayList<>();
+        for (int i = off; i < filtered.size() && out.size() < lim; i++) out.add(filtered.get(i));
+        return out;
+    }
+
+    /** Total dead-letters matching the same filters (for pagination math). */
+    public int deadLetterCount(String action, String status, String q) {
+        if (dlPersistent()) {
+            StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM alerts_dead_letter WHERE 1=1");
+            List<Object> params = new ArrayList<>();
+            if (action != null && !action.isBlank()) { sql.append(" AND action=?"); params.add(action); }
+            if (status != null && !status.isBlank()) { sql.append(" AND status=?"); params.add(status); }
+            if (q != null && !q.isBlank()) { sql.append(" AND payload LIKE ?"); params.add("%" + q + "%"); }
+            try {
+                var rows = db.query(sql.toString(), rs -> rs.getInt(1), params.toArray());
+                return rows.isEmpty() ? 0 : rows.get(0);
+            } catch (Exception ex) {
+                return 0;
+            }
+        }
+        int n = 0;
+        for (DeadLetter d : deadLetterEntries()) if (matchesFilter(d, action, status, q)) n++;
+        return n;
     }
 
     /** Dead-letter entries, newest first (for {@code GET /admin/alerts/failed}). */

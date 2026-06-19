@@ -36,9 +36,11 @@ public class AlertDeadLetterReaper {
 
     @PostConstruct
     public void start() {
-        if (!enabled || intervalMinutes <= 0 || alerts.retentionHours() <= 0) {
+        boolean work = alerts.retentionHours() > 0 || alerts.escalateAfterMinutes() > 0;
+        if (!enabled || intervalMinutes <= 0 || !work) {
             log.info("[alerts] dead-letter reaper disabled (enabled=" + enabled
-                    + ", interval=" + intervalMinutes + "min, retention=" + alerts.retentionHours() + "h)");
+                    + ", interval=" + intervalMinutes + "min, retention=" + alerts.retentionHours()
+                    + "h, escalate-after=" + alerts.escalateAfterMinutes() + "min)");
             return;
         }
         ticker = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -54,7 +56,9 @@ public class AlertDeadLetterReaper {
     /** One purge pass; safe to call manually. Returns the number of aged-out dead-letters removed. */
     public int reap() {
         try {
-            return alerts.purgeOlderThan(alerts.retentionHours(), System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            alerts.escalateStale(now); // re-page un-acked dead-letters past the threshold
+            return alerts.purgeOlderThan(alerts.retentionHours(), now);
         } catch (Exception e) {
             log.warn("[alerts] dead-letter reap failed: " + e.getMessage());
             return 0;
