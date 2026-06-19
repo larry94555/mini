@@ -122,7 +122,9 @@ public class Database {
             "ALTER TABLE alerts_dead_letter ADD COLUMN acked_at INTEGER",
             // shared alert-dedup windows so throttling is cluster-wide, not per-process
             "CREATE TABLE alert_dedup (dk_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, "
-                    + "suppressed INTEGER NOT NULL DEFAULT 0)");
+                    + "suppressed INTEGER NOT NULL DEFAULT 0)",
+            // multi-tier escalation ladder: how many tiers a dead-letter has already been paged to
+            "ALTER TABLE alerts_dead_letter ADD COLUMN escalation_tier INTEGER NOT NULL DEFAULT 0");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

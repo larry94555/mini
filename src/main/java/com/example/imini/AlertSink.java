@@ -78,6 +78,8 @@ public class AlertSink {
     @Value("${alerts.dedup-shared:true}") private boolean dedupShared;
     @Value("${alerts.escalate-after-minutes:0}") private long escalateAfterMinutes;
     @Value("${alerts.escalate-url:}") private String escalateUrl;
+    @Value("${alerts.escalate-tiers:}") private String escalateTiersCfg;
+    @Value("${alerts.dedup-digest:true}") private boolean dedupDigest;
 
     private final AuditLog audit;
     private final Database db;
@@ -100,6 +102,9 @@ public class AlertSink {
     private final AtomicLong replayed = new AtomicLong();
     private final AtomicLong suppressed = new AtomicLong(); // collapsed duplicate alerts
     private final AtomicLong escalated = new AtomicLong();   // re-paged to the escalation route
+    private final AtomicLong digested = new AtomicLong();    // dedup-digest notifications emitted
+
+    private List<Tier> escalationTiers = List.of();
 
     // per-route delivery counters: action -> [sent, failed, dead_lettered]
     private final Map<String, long[]> byRoute = new java.util.concurrent.ConcurrentHashMap<>();
@@ -110,6 +115,9 @@ public class AlertSink {
 
     /** A per-action route: a webhook URL and an optional template (null = use the global template). */
     public record Route(String url, String template) {}
+
+    /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}. */
+    public record Tier(long afterMs, String url, String template) {}
 
     /** One unit of delivery work: payload + destination, current attempt, dead-letter row id, route label. */
     private record Delivery(String payload, String url, int attemptNo, String dlId, String action) {}
@@ -136,6 +144,7 @@ public class AlertSink {
     public void init() {
         this.actions = parseActions(actionsCfg);
         this.routes = parseRoutes(routesCfg);
+        this.escalationTiers = resolveTiers();
         if (enabled) {
             this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             this.scheduler = Executors.newScheduledThreadPool(1, r -> {
@@ -388,6 +397,66 @@ public class AlertSink {
         }
     }
 
+    /** True when dedup digests should be emitted (dedup window set and digests enabled). */
+    boolean digestEnabled() { return dedupWindowSeconds > 0 && dedupDigest; }
+
+    /** Pure: a small JSON digest payload summarizing how many alerts a dedup key suppressed. */
+    static String digestPayload(String key, long count, long windowSeconds) {
+        String action = key, target = "";
+        int bar = key == null ? -1 : key.indexOf('|');
+        if (bar >= 0) { action = key.substring(0, bar); target = key.substring(bar + 1); }
+        return "{\"digest\":true,\"action\":\"" + esc(action) + "\",\"target\":\"" + esc(target)
+                + "\",\"suppressed\":" + count + ",\"window_seconds\":" + windowSeconds + "}";
+    }
+
+    /**
+     * Emit a digest for each dedup window that has elapsed with suppressions, then clear it — so a suppressed
+     * storm stays visible (one summary per key) without flooding. Routed to the action's webhook. Runs on the
+     * reaper tick. Returns the number of digests emitted. No-op unless dedup + digests are enabled.
+     */
+    public int dedupDigestSweep(long nowMs) {
+        if (!digestEnabled() || scheduler == null) return 0;
+        long windowMs = dedupWindowSeconds * 1000L;
+        int n = 0;
+        if (dedupPersistent()) {
+            record DRow(String key, long suppressed) {}
+            List<DRow> due;
+            try {
+                synchronized (dedupLock) {
+                    due = db.query("SELECT dk_key, suppressed FROM alert_dedup WHERE suppressed > 0 AND ? - window_start >= ?",
+                            rs -> new DRow(rs.getString(1), rs.getLong(2)), nowMs, windowMs);
+                    for (DRow r : due) db.update("DELETE FROM alert_dedup WHERE dk_key=?", r.key());
+                }
+            } catch (Exception ex) {
+                log.warn("[alerts] dedup digest sweep failed: " + ex.getMessage());
+                return 0;
+            }
+            for (DRow r : due) {
+                String action = r.key().contains("|") ? r.key().substring(0, r.key().indexOf('|')) : r.key();
+                enqueue(digestPayload(r.key(), r.suppressed(), dedupWindowSeconds), urlFor(action), null, action);
+                digested.incrementAndGet();
+                n++;
+            }
+        } else {
+            List<Map.Entry<String, long[]>> due = new ArrayList<>();
+            synchronized (dedupLock) {
+                for (var e : dedupState.entrySet()) {
+                    if (e.getValue()[1] > 0 && nowMs - e.getValue()[0] >= windowMs) due.add(e);
+                }
+                for (var e : due) dedupState.remove(e.getKey());
+            }
+            for (var e : due) {
+                String key = e.getKey();
+                String action = key.contains("|") ? key.substring(0, key.indexOf('|')) : key;
+                enqueue(digestPayload(key, e.getValue()[1], dedupWindowSeconds), urlFor(action), null, action);
+                digested.incrementAndGet();
+                n++;
+            }
+        }
+        if (n > 0) log.info("[alerts] emitted " + n + " dedup digest(s)");
+        return n;
+    }
+
     /** Submit a payload for delivery to {@code url} if configured and the buffer isn't saturated. */
     private void enqueue(String payload, String url, String dlId, String action) {
         if (url == null || url.isBlank() || http == null || scheduler == null) return;
@@ -506,6 +575,7 @@ public class AlertSink {
         m.put("replayed", replayed.get());
         m.put("suppressed", suppressed.get());
         m.put("escalated", escalated.get());
+        m.put("digested", digested.get());
         m.put("in_flight", (long) inFlight.get());
         m.put("dead_letter_persistent", dlPersistent());
         m.put("routes", routes.keySet());
@@ -559,45 +629,115 @@ public class AlertSink {
     /** The configured retention window in hours (0 = keep forever); used by the reaper. */
     public long retentionHours() { return retentionHours; }
 
-    /** The escalation threshold in minutes (0 = disabled), for the reaper. */
+    /** The escalation threshold in minutes (legacy single-tier accessor); 0 = none. */
     public long escalateAfterMinutes() { return escalateAfterMinutes; }
-    boolean escalationEnabled() {
-        return escalateAfterMinutes > 0 && escalateUrl != null && !escalateUrl.isBlank();
+
+    /** True when at least one escalation tier is configured (new ladder or legacy single tier). */
+    boolean escalationEnabled() { return !escalationTiers.isEmpty(); }
+
+    /** The resolved escalation ladder (sorted by delay), for inspection/tests. */
+    List<Tier> tiers() { return escalationTiers; }
+
+    /**
+     * Pure: a duration like {@code 15m}, {@code 30s}, {@code 2h}, {@code 1d}, or a bare number of milliseconds,
+     * to milliseconds. Returns -1 if unparseable.
+     */
+    static long parseDuration(String s) {
+        if (s == null || s.isBlank()) return -1;
+        String v = s.trim().toLowerCase();
+        try {
+            char unit = v.charAt(v.length() - 1);
+            long mult = switch (unit) {
+                case 's' -> 1000L;
+                case 'm' -> 60_000L;
+                case 'h' -> 3_600_000L;
+                case 'd' -> 86_400_000L;
+                default -> 1L; // bare ms
+            };
+            String num = Character.isLetter(unit) ? v.substring(0, v.length() - 1) : v;
+            long n = Long.parseLong(num.trim());
+            return n < 0 ? -1 : n * mult;
+        } catch (Exception ex) {
+            return -1;
+        }
     }
 
     /**
-     * Re-page un-acknowledged dead-letters older than {@code escalate-after-minutes} to the escalation webhook,
-     * once each. A row qualifies when it is still {@code failed}, not acked, not already escalated, and older
-     * than the threshold. Marks {@code escalated_at} so it fires only once. Returns the number escalated.
-     * No-op unless escalation is configured and the durable store is in use.
+     * Pure: parse an escalation ladder. Tiers are separated by {@code ;;}; each is {@code delay|url|template}
+     * (template optional). Invalid tiers are skipped. Result is sorted by delay ascending.
+     */
+    static List<Tier> parseTiers(String cfg) {
+        List<Tier> out = new ArrayList<>();
+        if (cfg == null || cfg.isBlank()) return out;
+        for (String entry : cfg.split(";;")) {
+            String e = entry.trim();
+            if (e.isEmpty()) continue;
+            int p1 = e.indexOf('|');
+            if (p1 <= 0) continue;
+            long after = parseDuration(e.substring(0, p1));
+            String rest = e.substring(p1 + 1);
+            int p2 = rest.indexOf('|');
+            String url = (p2 < 0 ? rest : rest.substring(0, p2)).trim();
+            String tmpl = (p2 < 0 ? null : rest.substring(p2 + 1));
+            if (after < 0 || url.isEmpty()) continue;
+            out.add(new Tier(after, url, (tmpl == null || tmpl.isBlank()) ? null : tmpl));
+        }
+        out.sort(java.util.Comparator.comparingLong(Tier::afterMs));
+        return out;
+    }
+
+    /** Resolve the ladder: the new tiered config if present, else synthesize one tier from the legacy keys. */
+    private List<Tier> resolveTiers() {
+        List<Tier> t = parseTiers(escalateTiersCfg);
+        if (!t.isEmpty()) return t;
+        if (escalateAfterMinutes > 0 && escalateUrl != null && !escalateUrl.isBlank()) {
+            return List.of(new Tier(escalateAfterMinutes * 60_000L, escalateUrl, null));
+        }
+        return List.of();
+    }
+
+    /**
+     * Walk un-acknowledged dead-letters up the escalation ladder: a row at tier {@code k} is paged to tier
+     * {@code k+1} once its age crosses that tier's delay. The advance is an <b>atomic claim</b>
+     * ({@code UPDATE ... WHERE escalation_tier=k}), so when several instances run the reaper only one wins and
+     * the alert is paged once per tier. Advances at most one tier per row per call. Returns the number paged.
      */
     public int escalateStale(long nowMs) {
         if (!escalationEnabled() || !dlPersistent() || scheduler == null) return 0;
-        long cut = nowMs - escalateAfterMinutes * 60_000L;
-        List<DeadLetter> rows;
+        record EscRow(String id, long ts, String payload, int tier, String action) {}
+        List<EscRow> rows;
         try {
-            rows = db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at, action "
-                            + "FROM alerts_dead_letter WHERE status='failed' AND acked_at IS NULL "
-                            + "AND escalated_at IS NULL AND ts < ? ORDER BY ts ASC LIMIT 200",
-                    rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
-                            rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9)),
-                    cut);
+            rows = db.query("SELECT id, ts, payload, escalation_tier, action FROM alerts_dead_letter "
+                            + "WHERE status='failed' AND acked_at IS NULL AND escalation_tier < ? "
+                            + "ORDER BY ts ASC LIMIT 200",
+                    rs -> new EscRow(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getInt(4), rs.getString(5)),
+                    escalationTiers.size());
         } catch (Exception ex) {
             log.warn("[alerts] escalation query failed: " + ex.getMessage());
             return 0;
         }
         int n = 0;
-        for (DeadLetter d : rows) {
+        for (EscRow d : rows) {
+            int cur = d.tier();
+            int next = cur + 1;
+            if (next > escalationTiers.size()) continue;
+            Tier tier = escalationTiers.get(next - 1);
+            if (nowMs - d.ts() < tier.afterMs()) continue; // not due yet
+            int claimed;
             try {
-                db.update("UPDATE alerts_dead_letter SET escalated_at=? WHERE id=?", nowMs, d.id());
+                claimed = db.update("UPDATE alerts_dead_letter SET escalation_tier=?, escalated_at=? "
+                                + "WHERE id=? AND escalation_tier=? AND status='failed' AND acked_at IS NULL",
+                        next, nowMs, d.id(), cur);
             } catch (Exception ex) {
-                log.warn("[alerts] could not mark escalated " + d.id() + ": " + ex.getMessage());
+                log.warn("[alerts] escalation claim failed for " + d.id() + ": " + ex.getMessage());
                 continue;
             }
-            enqueue(d.payload(), escalateUrl, null, "escalation");
+            if (claimed != 1) continue; // lost the race to another instance/tick
+            enqueue(d.payload(), tier.url(), null, "escalation_t" + next);
+            escalated.incrementAndGet();
             n++;
         }
-        if (n > 0) { escalated.addAndGet(n); log.warn("[alerts] escalated " + n + " un-acked dead-letter(s)"); }
+        if (n > 0) log.warn("[alerts] escalated " + n + " un-acked dead-letter(s) up the ladder");
         return n;
     }
 
