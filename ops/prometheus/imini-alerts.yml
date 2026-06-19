@@ -1,0 +1,81 @@
+# Prometheus alerting rules for imini (https://github.com/larry94555/mini).
+# Load via prometheus.yml: rule_files: [ "imini-alerts.yml" ]. Metrics come from GET /metrics/prom.
+# Adjust thresholds/for-durations to your traffic. All rates use a 5m window.
+groups:
+  - name: imini-security
+    rules:
+      - alert: IminiCapabilityDenialsSpiking
+        expr: sum(rate(imini_counter{name="audit_capability_denied"}[5m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini capability denials are spiking"
+          description: "More than 0.2 capability_denied/s over 5m for 10m — a caller may be mis-scoped or probing."
+
+      - alert: IminiToolRateLimitingHot
+        expr: sum(rate(imini_counter{name="audit_tool_rate_limited"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini tool rate-limiting is firing frequently"
+          description: "Tenants are being throttled often; consider raising limits or investigating a runaway agent."
+
+      - alert: IminiSpendAlertFiring
+        expr: increase(imini_counter{name="audit_spend_alert"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini spend alert fired"
+          description: "A tenant crossed its spend threshold in the last 15m."
+
+  - name: imini-alerting-pipeline
+    rules:
+      - alert: IminiAlertDeadLettersGrowing
+        expr: increase(imini_alerts_dead_lettered[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini alerts are being dead-lettered"
+          description: "Webhook delivery is failing past retries; check the receiver and POST /admin/alerts/replay after fixing."
+
+      - alert: IminiAlertsDropped
+        expr: increase(imini_alerts_dropped[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini alert delivery buffer is dropping alerts"
+          description: "The in-flight buffer is saturated (alerts.queue-capacity); deliveries are being shed."
+
+      - alert: IminiAlertDeadLetterBacklog
+        expr: imini_alerts_dead_letter_size > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini dead-letter backlog is non-empty"
+          description: "Dead-lettered alerts have been waiting >30m. Inspect GET /admin/alerts/failed and replay."
+
+  - name: imini-slo
+    rules:
+      - alert: IminiRunSuccessRateLow
+        expr: imini_run_success_rate < 95
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini run success rate below 95%"
+          description: "Run success rate has been under 95% for 10m."
+
+      - alert: IminiRunLatencyP95High
+        expr: imini_run_latency_p95_ms > 30000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini p95 run latency is high"
+          description: "p95 run latency has exceeded 30s for 10m."

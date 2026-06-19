@@ -25,7 +25,7 @@ class AlertSinkBufferTest {
 
     @Test
     void statsExposesDeliveryCounters() {
-        AlertSink s = new AlertSink(null);
+        AlertSink s = new AlertSink(null, null);
         var stats = s.stats();
         assertTrue(stats.containsKey("sent"));
         assertTrue(stats.containsKey("failed"));
@@ -38,6 +38,6 @@ class AlertSinkBufferTest {
 
     @Test
     void deadLettersEmptyInitially() {
-        assertTrue(new AlertSink(null).deadLetters().isEmpty());
+        assertTrue(new AlertSink(null, null).deadLetters().isEmpty());
     }
 }

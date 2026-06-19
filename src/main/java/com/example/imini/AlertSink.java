@@ -58,8 +58,11 @@ public class AlertSink {
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
     @Value("${alerts.queue-capacity:1000}") private int queueCapacity;
     @Value("${alerts.dead-letter-capacity:100}") private int deadLetterCapacity;
+    @Value("${alerts.template:}") private String template;
+    @Value("${alerts.dead-letter-persistent:true}") private boolean deadLetterPersistent;
 
     private final AuditLog audit;
+    private final Database db;
     private Set<String> actions = Set.of();
 
     private HttpClient http;
@@ -78,8 +81,13 @@ public class AlertSink {
     private final AtomicLong deadLettered = new AtomicLong();
     private final AtomicLong dropped = new AtomicLong();   // shed because the buffer was full
 
-    public AlertSink(AuditLog audit) {
+    public AlertSink(AuditLog audit, Database db) {
         this.audit = audit;
+        this.db = db;
+    }
+
+    boolean dlPersistent() {
+        return deadLetterPersistent && db != null && db.available();
     }
 
     public boolean enabled() { return enabled; }
@@ -143,20 +151,46 @@ public class AlertSink {
         return sb.toString();
     }
 
+    /**
+     * Pure: render an operator-supplied template by substituting placeholders with the entry's fields. The
+     * supported placeholders are {@code {ts} {time} {user} {action} {target} {outcome}}. String fields are
+     * JSON-string-escaped (so a template shaped like Slack/PagerDuty JSON stays valid); {@code {ts}} is the
+     * raw numeric timestamp. Unknown placeholders are left as-is.
+     */
+    static String applyTemplate(String template, AuditLog.Entry e) {
+        if (template == null) return "";
+        return template
+                .replace("{ts}", Long.toString(e.ts()))
+                .replace("{time}", esc(e.time()))
+                .replace("{user}", esc(e.user()))
+                .replace("{action}", esc(e.action()))
+                .replace("{target}", esc(e.target()))
+                .replace("{outcome}", esc(e.outcome()));
+    }
+
+    /** The payload for an entry: the operator template if configured, else the built-in JSON shape. */
+    String payloadFor(AuditLog.Entry e) {
+        return (template == null || template.isBlank()) ? toJson(e) : applyTemplate(template, e);
+    }
+
     private void onEntry(AuditLog.Entry e) {
         if (!shouldForward(e.action())) return;
         log.warn("[alert] " + e.action() + " user=" + e.user() + " target=" + e.target()
                 + " outcome=" + e.outcome());
+        enqueue(payloadFor(e));
+    }
+
+    /** Submit a payload for delivery if the webhook is configured and the buffer isn't saturated. */
+    private void enqueue(String payload) {
         if (webhookUrl == null || webhookUrl.isBlank() || http == null || scheduler == null) return;
         // Bound in-flight memory: shed the newest alert if the buffer is saturated.
         if (inFlight.get() >= Math.max(1, queueCapacity)) {
             dropped.incrementAndGet();
-            log.warn("[alerts] delivery buffer full (" + queueCapacity + "); dropping alert for " + e.action());
+            log.warn("[alerts] delivery buffer full (" + queueCapacity + "); dropping alert");
             return;
         }
         inFlight.incrementAndGet();
         queued.incrementAndGet();
-        final String payload = toJson(e);
         scheduler.submit(() -> attempt(payload, 1));
     }
 
@@ -199,11 +233,26 @@ public class AlertSink {
     private void toDeadLetter(String payload) {
         deadLettered.incrementAndGet();
         inFlight.decrementAndGet();
+        if (dlPersistent()) {
+            try {
+                db.update("INSERT INTO alerts_dead_letter(id, ts, payload, attempts, last_error) VALUES(?,?,?,?,?)",
+                        java.util.UUID.randomUUID().toString(), System.currentTimeMillis(), payload,
+                        maxRetries + 1, "exhausted retries");
+            } catch (Exception ex) {
+                log.warn("[alerts] could not persist dead-letter, keeping in memory: " + ex.getMessage());
+                ringAdd(payload);
+            }
+        } else {
+            ringAdd(payload);
+        }
+        log.warn("[alerts] alert dead-lettered after " + maxRetries + " retries");
+    }
+
+    private void ringAdd(String payload) {
         synchronized (dlLock) {
             deadLetter.addFirst(payload);
             while (deadLetter.size() > Math.max(0, deadLetterCapacity)) deadLetter.removeLast();
         }
-        log.warn("[alerts] alert dead-lettered after " + maxRetries + " retries");
     }
 
     /** Snapshot of delivery counters (for {@code /metrics} and Prometheus). */
@@ -217,13 +266,82 @@ public class AlertSink {
         m.put("dead_lettered", deadLettered.get());
         m.put("dropped", dropped.get());
         m.put("in_flight", (long) inFlight.get());
-        synchronized (dlLock) { m.put("dead_letter_size", (long) deadLetter.size()); }
+        m.put("dead_letter_persistent", dlPersistent());
+        m.put("dead_letter_size", (long) deadLetterSize());
         return m;
     }
 
-    /** The dead-letter payloads, newest first (for {@code GET /admin/alerts/failed}). */
+    private int deadLetterSize() {
+        if (dlPersistent()) {
+            try {
+                var rows = db.query("SELECT COUNT(*) FROM alerts_dead_letter", rs -> rs.getInt(1));
+                return rows.isEmpty() ? 0 : rows.get(0);
+            } catch (Exception ex) {
+                return 0;
+            }
+        }
+        synchronized (dlLock) { return deadLetter.size(); }
+    }
+
+    /** A dead-lettered delivery (durable rows carry an id for targeted replay; memory rows have a null id). */
+    public record DeadLetter(String id, long ts, String payload, int attempts, String lastError) {}
+
+    /** Dead-letter entries, newest first (for {@code GET /admin/alerts/failed}). */
+    public List<DeadLetter> deadLetterEntries() {
+        if (dlPersistent()) {
+            try {
+                return db.query("SELECT id, ts, payload, attempts, last_error FROM alerts_dead_letter "
+                                + "ORDER BY ts DESC LIMIT 500",
+                        rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3),
+                                rs.getInt(4), rs.getString(5)));
+            } catch (Exception ex) {
+                log.warn("[alerts] could not read dead-letter table: " + ex.getMessage());
+                return List.of();
+            }
+        }
+        List<DeadLetter> out = new ArrayList<>();
+        synchronized (dlLock) {
+            for (String p : deadLetter) out.add(new DeadLetter(null, 0L, p, maxRetries + 1, "exhausted retries"));
+        }
+        return out;
+    }
+
+    /** Backward-compatible: the dead-letter payloads, newest first. */
     public List<String> deadLetters() {
-        synchronized (dlLock) { return new ArrayList<>(deadLetter); }
+        List<String> out = new ArrayList<>();
+        for (DeadLetter d : deadLetterEntries()) out.add(d.payload());
+        return out;
+    }
+
+    /**
+     * Re-enqueue dead-lettered alerts for delivery, removing them from the durable store first (they will be
+     * re-persisted if they fail again). With a {@code id}, replays just that row; otherwise replays all.
+     * Returns the number re-enqueued. No-op when alerting/webhook is not configured.
+     */
+    public synchronized int replay(String id) {
+        if (!enabled || webhookUrl == null || webhookUrl.isBlank() || scheduler == null) return 0;
+        List<DeadLetter> toReplay = new ArrayList<>();
+        if (dlPersistent()) {
+            List<DeadLetter> all = deadLetterEntries();
+            for (DeadLetter d : all) {
+                if (id == null || id.equals(d.id())) toReplay.add(d);
+            }
+            for (DeadLetter d : toReplay) {
+                try {
+                    db.update("DELETE FROM alerts_dead_letter WHERE id=?", d.id());
+                } catch (Exception ex) {
+                    log.warn("[alerts] could not delete dead-letter row " + d.id() + ": " + ex.getMessage());
+                }
+            }
+        } else {
+            synchronized (dlLock) {
+                for (String p : deadLetter) toReplay.add(new DeadLetter(null, 0L, p, 0, null));
+                deadLetter.clear();
+            }
+        }
+        for (DeadLetter d : toReplay) enqueue(d.payload());
+        if (!toReplay.isEmpty()) log.info("[alerts] replaying " + toReplay.size() + " dead-lettered alert(s)");
+        return toReplay.size();
     }
 
     private static String esc(String s) {

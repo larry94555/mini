@@ -23,7 +23,7 @@ class AlertSinkTest {
 
     @Test
     void shouldForwardRespectsEnabledAndSet() throws Exception {
-        AlertSink s = new AlertSink(null);
+        AlertSink s = new AlertSink(null, null);
         set(s, "enabled", true);
         set(s, "actions", Set.of("spend_alert"));
         assertTrue(s.shouldForward("spend_alert"));

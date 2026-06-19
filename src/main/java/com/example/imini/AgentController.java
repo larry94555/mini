@@ -501,7 +501,21 @@ public class AgentController {
         requireAdmin();
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("stats", alertSink.stats());
-        out.put("dead_letters", alertSink.deadLetters());
+        out.put("dead_letters", alertSink.deadLetterEntries());
+        return out;
+    }
+
+    /**
+     * Re-attempt delivery of dead-lettered alerts. With {@code ?id=...} replays a single one; otherwise all.
+     * Returns the number re-enqueued. Admin only.
+     */
+    @PostMapping("/admin/alerts/replay")
+    public Map<String, Object> adminAlertsReplay(@RequestParam(name = "id", required = false) String id) {
+        requireAdmin();
+        int n = alertSink.replay(id);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("replayed", n);
+        out.put("stats", alertSink.stats());
         return out;
     }
 
