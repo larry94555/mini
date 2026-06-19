@@ -3357,3 +3357,54 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** set `cost.monthly-token-quota` to a small number; once a tenant's monthly tokens exceed it,
   `/ask` returns HTTP 429. `GET /admin/cost` shows per-tenant token totals and micro-USD for the month.
+
+---
+
+# OTLP export + trace propagation, CI eval gate, tiered quotas
+
+## 396. Inbound traceparent parsing (TracePropagationTest)
+
+- **Run:** `./mvnw -Dtest=TracePropagationTest test`.
+- **Observe:** `parseTraceparent` accepts a valid `00-<32hex>-<16hex>-01` header and returns
+  `[traceId, parentSpanId]`; it rejects null, garbage, a non-`00` version, wrong-length ids, and the
+  all-zero trace/span ids the W3C spec forbids.
+
+## 397. Cross-service trace continuation (TracePropagationTest / live)
+
+- **Observe:** `startWithContext(name, traceparent)` continues the caller's trace (same `traceId`, new
+  `spanId`, parent = caller's span) when the header is valid, and starts a fresh trace when it's absent.
+  Live: send a `traceparent` header to `/ask` with tracing on and confirm `GET /admin/traces` shows the
+  same trace id.
+
+## 398. OTLP/JSON serialization (TracePropagationTest)
+
+- **Observe:** `otlpJson` emits an OTLP `resourceSpans` envelope with `service.name`, the span's
+  `traceId`/`spanId`, nanosecond `startTimeUnixNano`/`endTimeUnixNano`, attributes as key/stringValue, and
+  a status code of 1 for OK / 2 for ERROR.
+
+## 399. OTLP export to a collector (manual / live)
+
+- **Observe:** set `tracing.otlp-endpoint=http://localhost:4318/v1/traces` (a running OTLP/HTTP collector,
+  e.g. the OTel Collector or Jaeger), make a request, and confirm the span arrives in the collector. With
+  the endpoint blank (default) no export is attempted. Export is off the request thread; a collector that
+  is down logs a warning and never affects the response.
+
+## 400. CI eval gate (manual / CI)
+
+- **Observe:** the `Eval gate` workflow (`.github/workflows/eval-gate.yml`) is opt-in — it runs on manual
+  dispatch or when a PR carries the `run-eval-gate` label, not on every push. It boots a tiny GGUF +
+  llama-server + imini, calls `POST /admin/eval`, and fails if `passRate` is below `min_pass_rate`
+  (default 0.75) or if the suite self-skipped (no model). Logs upload as an artifact on failure.
+
+## 401. Quota enforced on all run endpoints (manual)
+
+- **Observe:** with a small `cost.monthly-token-quota`, once a tenant is over quota, **each** of `/ask`,
+  `/chat`, `/ask/stream`, `/chat/stream` returns HTTP 429 (streaming endpoints reject before the stream
+  opens). Previously only `/ask` was gated.
+
+## 402. Tiered quota resolution (TieredQuotaTest)
+
+- **Run:** `./mvnw -Dtest=TieredQuotaTest test`.
+- **Observe:** `parseTiers` and `parseAssignments` read the CSV config (skipping malformed entries);
+  `resolveQuota` returns the assigned tier's quota, falling back to the default quota when a tenant is
+  unassigned or points at an unknown tier. `GET /admin/cost` reports the configured tiers.

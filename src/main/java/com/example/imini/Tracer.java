@@ -35,6 +35,8 @@ public class Tracer {
     @Value("${tracing.enabled:false}") private boolean enabled;
     @Value("${tracing.persist:true}") private boolean persist;
     @Value("${tracing.ring-size:512}") private int ringSize;
+    @Value("${tracing.otlp-endpoint:}") private String otlpEndpoint; // blank => no network export
+    @Value("${tracing.service-name:imini}") private String serviceName;
 
     private final Database db;
 
@@ -110,6 +112,42 @@ public class Tracer {
         return new Span("0".repeat(32), "0".repeat(16), null, name, System.currentTimeMillis());
     }
 
+    /**
+     * Start a ROOT span whose parent is an inbound caller, given that caller's W3C {@code traceparent}
+     * header (e.g. {@code 00-<32hex traceId>-<16hex spanId>-01}). When the header is present and valid,
+     * the new span continues the caller's trace (same traceId, parent = caller's spanId) — this is
+     * cross-service trace propagation. When it's absent or malformed, this behaves exactly like
+     * {@link #start(String)} and begins a fresh trace.
+     */
+    public Span startWithContext(String name, String traceparent) {
+        if (!enabled) return noop(name);
+        String[] ctx = parseTraceparent(traceparent);
+        if (ctx == null) return start(name);
+        Deque<Span> s = stack.get();
+        // The inbound context only seeds a ROOT span; if we're already inside a span, normal nesting wins.
+        if (s.peek() != null) return start(name);
+        Span span = new Span(ctx[0], hex(8), ctx[1], name, System.currentTimeMillis());
+        s.push(span);
+        return span;
+    }
+
+    /**
+     * Parse a W3C {@code traceparent} into {@code [traceId, parentSpanId]}, or null if invalid. Format is
+     * {@code version-traceid-spanid-flags}; we accept version 00 and require 32-hex trace + 16-hex span,
+     * neither all-zero (per the spec, an all-zero id is invalid).
+     */
+    static String[] parseTraceparent(String tp) {
+        if (tp == null) return null;
+        String t = tp.trim();
+        String[] parts = t.split("-");
+        if (parts.length < 4) return null;
+        String version = parts[0], traceId = parts[1], spanId = parts[2];
+        if (!version.equals("00")) return null;
+        if (!traceId.matches("[0-9a-f]{32}") || traceId.equals("0".repeat(32))) return null;
+        if (!spanId.matches("[0-9a-f]{16}") || spanId.equals("0".repeat(16))) return null;
+        return new String[]{traceId, spanId};
+    }
+
     private void finish(Span span) {
         if (!enabled) return;
         Deque<Span> s = stack.get();
@@ -128,6 +166,35 @@ public class Tracer {
                 log.warn("[trace] persist failed: " + e.getMessage());
             }
         }
+        exportOtlp(span);
+    }
+
+    /**
+     * Best-effort export of one finished span to an OTLP/HTTP collector as OTLP/JSON. No-op when no
+     * endpoint is configured (the default). Failures are logged and swallowed — tracing must never break a
+     * request. Uses only the JDK HTTP client (no OpenTelemetry SDK dependency). Fire-and-forget on a daemon
+     * thread so the request path is never blocked by the collector.
+     */
+    private void exportOtlp(Span span) {
+        if (otlpEndpoint == null || otlpEndpoint.isBlank()) return;
+        final String payload = otlpJson(span, serviceName);
+        Thread t = new Thread(() -> {
+            try {
+                java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                        .connectTimeout(java.time.Duration.ofSeconds(2)).build();
+                java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(otlpEndpoint))
+                        .timeout(java.time.Duration.ofSeconds(5))
+                        .header("Content-Type", "application/json")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload))
+                        .build();
+                client.send(req, java.net.http.HttpResponse.BodyHandlers.discarding());
+            } catch (Exception e) {
+                log.warn("[trace] OTLP export failed: " + e.getMessage());
+            }
+        }, "otlp-export");
+        t.setDaemon(true);
+        t.start();
     }
 
     /** Recent spans (newest first) as OTLP-ish maps, for GET /admin/traces. */
@@ -175,6 +242,43 @@ public class Tracer {
             sb.append('"').append(esc(e.getKey())).append("\":\"").append(esc(e.getValue())).append('"');
         }
         return sb.append('}').toString();
+    }
+
+    /**
+     * Serialize one span as an OTLP/JSON {@code ExportTraceServiceRequest} (a single resourceSpans →
+     * scopeSpans → spans entry). This is the wire format an OTLP/HTTP collector accepts at
+     * {@code /v1/traces}. Times are nanoseconds since epoch (OTLP uses nanos); attributes become OTLP
+     * key/value pairs with stringValue. Pure and deterministic, so it is unit-tested without a collector.
+     */
+    static String otlpJson(Span span, String serviceName) {
+        long startNano = span.startMs * 1_000_000L;
+        long endNano = span.endMs * 1_000_000L;
+        // OTLP status: 0=UNSET, 1=OK, 2=ERROR. We map our OK/ERROR onto 1/2.
+        int statusCode = "ERROR".equals(span.status) ? 2 : 1;
+        StringBuilder attrs = new StringBuilder("[");
+        boolean first = true;
+        for (Map.Entry<String, String> e : span.attributes.entrySet()) {
+            if (!first) attrs.append(',');
+            first = false;
+            attrs.append("{\"key\":\"").append(esc(e.getKey()))
+                 .append("\",\"value\":{\"stringValue\":\"").append(esc(e.getValue())).append("\"}}");
+        }
+        attrs.append(']');
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"resourceSpans\":[{\"resource\":{\"attributes\":[")
+          .append("{\"key\":\"service.name\",\"value\":{\"stringValue\":\"").append(esc(serviceName)).append("\"}}]},")
+          .append("\"scopeSpans\":[{\"scope\":{\"name\":\"imini\"},\"spans\":[{")
+          .append("\"traceId\":\"").append(span.traceId).append("\",")
+          .append("\"spanId\":\"").append(span.spanId).append("\",");
+        if (span.parentId != null) sb.append("\"parentSpanId\":\"").append(span.parentId).append("\",");
+        sb.append("\"name\":\"").append(esc(span.name)).append("\",")
+          .append("\"kind\":1,")
+          .append("\"startTimeUnixNano\":\"").append(startNano).append("\",")
+          .append("\"endTimeUnixNano\":\"").append(endNano).append("\",")
+          .append("\"attributes\":").append(attrs).append(',')
+          .append("\"status\":{\"code\":").append(statusCode).append("}")
+          .append("}]}]}]}");
+        return sb.toString();
     }
 
     static String esc(String s) {

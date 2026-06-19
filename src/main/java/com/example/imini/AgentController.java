@@ -147,7 +147,8 @@ public class AgentController {
         audit.record(tenant, planAction("ask", plan, resume), "session:" + sessionId, "started");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
-        Tracer.Span span = tracer.start("ask").attr("session", sessionId).attr("tenant", tenant)
+        Tracer.Span span = tracer.startWithContext("ask", RequestContext.traceparent())
+                .attr("session", sessionId).attr("tenant", tenant)
                 .attr("mode", mode.name().toLowerCase());
         try {
             int inTokens = llama.countTokens(q);
@@ -177,26 +178,42 @@ public class AgentController {
     public Map<String, String> chat(@RequestBody Map<String, String> body) throws Exception {
         final String sessionId = resolveSession(body.get("sessionId"));
         requireAccess(sessionId);
-        sessions.claim(sessionId, currentUser());
+        final String tenant = currentUser();
+        if (!cost.allow(tenant)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                    "monthly token quota exceeded for " + tenant);
+        }
+        sessions.claim(sessionId, tenant);
         final Mode mode = effectiveMode(sessionId, body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
         final boolean resume = isPlan(body.get("resume"));
-        audit.record(currentUser(), planAction("chat", plan, resume), "session:" + sessionId, "started");
+        audit.record(tenant, planAction("chat", plan, resume), "session:" + sessionId, "started");
         final String message = body.getOrDefault("message", "");
         metrics.inc("runs_started");
         long t0 = System.nanoTime();
+        Tracer.Span span = tracer.startWithContext("chat", RequestContext.traceparent())
+                .attr("session", sessionId).attr("tenant", tenant).attr("mode", mode.name().toLowerCase());
         try {
+            int inTokens = llama.countTokens(message);
             String answer = runService.runBounded(() ->
                     (plan && resume) ? loop.resumePlan(sessionId, mode, new ConsoleSink())
                          : plan ? loop.runPlan(sessionId, message, mode, new ConsoleSink())
                          : loop.chat(sessionId, message, mode, new ConsoleSink()));
             long ms = (System.nanoTime() - t0) / 1_000_000L;
+            int outTokens = answer == null ? 0 : Math.max(0, answer.length() / 4);
+            long micro = cost.record(tenant, "/chat", sessionId, Math.max(0, inTokens), outTokens);
+            span.attr("input_tokens", Math.max(0, inTokens)).attr("output_tokens", outTokens)
+                .attr("micro_usd", micro).attr("latency_ms", ms);
             metrics.recordRun("/chat", sessionId, mode.name().toLowerCase(), ms, true);
             metrics.logRun("/chat", sessionId, null, ms, true);
             return Map.of("sessionId", sessionId, "answer", answer);
         } catch (Exception e) {
+            span.error(e.getMessage());
             metrics.recordRun("/chat", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
             throw e;
+        } finally {
+            span.end();
         }
     }
 
@@ -206,33 +223,50 @@ public class AgentController {
     public SseEmitter chatStream(@RequestBody Map<String, String> body) {
         final String sessionId = resolveSession(body.get("sessionId"));
         requireAccess(sessionId);
-        sessions.claim(sessionId, currentUser());
+        final String tenant = currentUser();
+        if (!cost.allow(tenant)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                    "monthly token quota exceeded for " + tenant);
+        }
+        sessions.claim(sessionId, tenant);
         final Mode mode = effectiveMode(sessionId, body.get("mode"));
         final boolean plan = isPlan(body.get("plan"));
         final boolean resume = isPlan(body.get("resume"));
-        audit.record(currentUser(), planAction("chat/stream", plan, resume), "session:" + sessionId, "started");
+        audit.record(tenant, planAction("chat/stream", plan, resume), "session:" + sessionId, "started");
         final String message = body.getOrDefault("message", "");
+        final String traceparent = RequestContext.traceparent(); // capture before leaving the request thread
         SseEmitter emitter = new SseEmitter(0L); // no server-side timeout
         metrics.inc("runs_started");
         runService.submitAsync(() -> {
             RunSink sink = sseSink(emitter);
             long t0 = System.nanoTime();
+            Tracer.Span span = tracer.startWithContext("chat/stream", traceparent)
+                    .attr("session", sessionId).attr("tenant", tenant).attr("mode", mode.name().toLowerCase());
             try {
                 send(emitter, "session", sessionId);
+                int inTokens = llama.countTokens(message);
                 String answer = runService.runBounded(() ->
                         (plan && resume) ? loop.resumePlan(sessionId, mode, sink)
                              : plan ? loop.runPlan(sessionId, message, mode, sink)
                              : loop.chat(sessionId, message, mode, sink));
                 long ms = (System.nanoTime() - t0) / 1_000_000L;
+                int outTokens = answer == null ? 0 : Math.max(0, answer.length() / 4);
+                long micro = cost.record(tenant, "/chat/stream", sessionId, Math.max(0, inTokens), outTokens);
+                span.attr("input_tokens", Math.max(0, inTokens)).attr("output_tokens", outTokens)
+                    .attr("micro_usd", micro).attr("latency_ms", ms);
                 metrics.recordRun("/chat/stream", sessionId, mode.name().toLowerCase(), ms, true);
                 metrics.logRun("/chat/stream", sessionId, null, ms, true);
                 send(emitter, "answer", answer);
                 send(emitter, "done", "");
                 emitter.complete();
             } catch (Exception e) {
+                span.error(e.getMessage());
                 metrics.recordRun("/chat/stream", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
                 send(emitter, "error", String.valueOf(e.getMessage()));
                 emitter.complete();
+            } finally {
+                span.end();
             }
         });
         return emitter;
@@ -245,29 +279,46 @@ public class AgentController {
         final String q = body.getOrDefault("question", "");
         final boolean plan = isPlan(body.get("plan"));
         final boolean resume = isPlan(body.get("resume"));
-        sessions.claim(sessionId, currentUser());
-        audit.record(currentUser(), planAction("ask/stream", plan, resume), "session:" + sessionId, "started");
+        final String tenant = currentUser();
+        if (!cost.allow(tenant)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                    "monthly token quota exceeded for " + tenant);
+        }
+        sessions.claim(sessionId, tenant);
+        audit.record(tenant, planAction("ask/stream", plan, resume), "session:" + sessionId, "started");
+        final String traceparent = RequestContext.traceparent(); // capture before leaving the request thread
         SseEmitter emitter = new SseEmitter(0L);
         metrics.inc("runs_started");
         runService.submitAsync(() -> {
             RunSink sink = sseSink(emitter);
             long t0 = System.nanoTime();
+            Tracer.Span span = tracer.startWithContext("ask/stream", traceparent)
+                    .attr("session", sessionId).attr("tenant", tenant).attr("mode", mode.name().toLowerCase());
             try {
                 send(emitter, "session", sessionId);
+                int inTokens = llama.countTokens(q);
                 String answer = runService.runBounded(() ->
                         (plan && resume) ? loop.resumePlan(sessionId, mode, sink)
                              : plan ? loop.runPlan(sessionId, q, mode, sink)
                              : loop.run(sessionId, q, mode, sink));
                 long ms = (System.nanoTime() - t0) / 1_000_000L;
+                int outTokens = answer == null ? 0 : Math.max(0, answer.length() / 4);
+                long micro = cost.record(tenant, "/ask/stream", sessionId, Math.max(0, inTokens), outTokens);
+                span.attr("input_tokens", Math.max(0, inTokens)).attr("output_tokens", outTokens)
+                    .attr("micro_usd", micro).attr("latency_ms", ms);
                 metrics.recordRun("/ask/stream", sessionId, mode.name().toLowerCase(), ms, true);
                 metrics.logRun("/ask/stream", sessionId, null, ms, true);
                 send(emitter, "answer", answer);
                 send(emitter, "done", "");
                 emitter.complete();
             } catch (Exception e) {
+                span.error(e.getMessage());
                 metrics.recordRun("/ask/stream", sessionId, mode.name().toLowerCase(), (System.nanoTime() - t0) / 1_000_000L, false);
                 send(emitter, "error", String.valueOf(e.getMessage()));
                 emitter.complete();
+            } finally {
+                span.end();
             }
         });
         return emitter;

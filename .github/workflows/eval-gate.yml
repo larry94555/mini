@@ -1,0 +1,123 @@
+name: Eval gate
+
+# OPT-IN agent-quality gate. Unlike ci.yml (deterministic unit tests, no model), this boots a real
+# llama-server with a TINY GGUF, starts imini, runs the in-process eval suite via POST /admin/eval, and
+# fails if the pass-rate is below EVAL_MIN_PASS_RATE. Because it downloads a model and runs CPU inference
+# (slow, a few minutes), it does NOT run on every push/PR. Trigger it manually (workflow_dispatch) or by
+# adding the "run-eval-gate" label to a PR. Tune the model and threshold via the inputs / env below.
+on:
+  workflow_dispatch:
+    inputs:
+      min_pass_rate:
+        description: "Minimum pass-rate (0.0-1.0) required to pass the gate"
+        default: "0.75"
+        required: false
+  pull_request:
+    types: [ labeled ]
+
+permissions:
+  contents: read
+
+jobs:
+  eval-gate:
+    name: Agent eval gate (tiny model)
+    # On PRs, only run when the "run-eval-gate" label is present; always run on manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-eval-gate'
+    runs-on: ubuntu-latest
+    env:
+      # A small instruct GGUF keeps the CI download + inference time reasonable. Override by editing here.
+      MODEL_URL: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+      MODEL_FILE: "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+      EVAL_MIN_PASS_RATE: ${{ github.event.inputs.min_pass_rate || '0.75' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Make the Maven wrapper executable
+        run: chmod +x mvnw
+
+      - name: Build the runnable jar (skip tests; ci.yml covers them)
+        run: ./mvnw -B -ntp -DskipTests package
+
+      - name: Install llama.cpp server (prebuilt release)
+        run: |
+          set -euxo pipefail
+          # Use a prebuilt llama.cpp CPU release to avoid a long compile in CI.
+          sudo apt-get update && sudo apt-get install -y curl libgomp1
+          mkdir -p "$HOME/llama"
+          # Fetch the latest CPU build asset. If the asset name changes upstream, pin a release tag here.
+          LLAMA_URL="$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+            | grep -o 'https://[^"]*ubuntu-x64\.zip' | head -n1)"
+          echo "llama build: $LLAMA_URL"
+          curl -fsSL "$LLAMA_URL" -o "$HOME/llama/llama.zip"
+          unzip -q "$HOME/llama/llama.zip" -d "$HOME/llama"
+          # Locate the server binary in the extracted tree.
+          SERVER_BIN="$(find "$HOME/llama" -name 'llama-server' -type f | head -n1)"
+          echo "SERVER_BIN=$SERVER_BIN" >> "$GITHUB_ENV"
+          chmod +x "$SERVER_BIN"
+
+      - name: Download the tiny eval model
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/models"
+          curl -fsSL "$MODEL_URL" -o "$HOME/models/$MODEL_FILE"
+          ls -lh "$HOME/models/$MODEL_FILE"
+
+      - name: Start llama-server
+        run: |
+          set -euxo pipefail
+          LLAMA_DIR="$(dirname "$SERVER_BIN")"
+          LD_LIBRARY_PATH="$LLAMA_DIR" "$SERVER_BIN" \
+            --model "$HOME/models/$MODEL_FILE" \
+            --host 127.0.0.1 --port 8081 --ctx-size 4096 > llama.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:8081/health >/dev/null 2>&1; then echo "llama up"; break; fi
+            sleep 2
+          done
+          curl -fs http://127.0.0.1:8081/health || (echo "::error::llama-server did not start"; tail -n 50 llama.log; exit 1)
+
+      - name: Start imini
+        run: |
+          set -euxo pipefail
+          JAR="$(ls target/*.jar | grep -v -E 'sources|javadoc' | head -n1)"
+          java -jar "$JAR" \
+            --llama.manage-server=false \
+            --llama.client-host=127.0.0.1 --llama.port=8081 \
+            --tracing.enabled=true \
+            --server.port=8080 > imini.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fs http://localhost:8080/health >/dev/null 2>&1; then echo "imini up"; break; fi
+            sleep 2
+          done
+          curl -fs http://localhost:8080/health || (echo "::error::imini did not start"; tail -n 50 imini.log; exit 1)
+
+      - name: Run the eval suite and enforce the gate
+        run: |
+          set -euxo pipefail
+          RESP="$(curl -fsS -X POST http://localhost:8080/admin/eval)"
+          echo "eval response: $RESP"
+          # If the harness self-skipped (model unreachable / disabled), fail loudly -- the gate needs a model.
+          if echo "$RESP" | grep -q '"skipped":true'; then
+            echo "::error::eval suite skipped (model unreachable); the gate cannot run"; exit 1
+          fi
+          PASS_RATE="$(echo "$RESP" | sed -n 's/.*"passRate":\([0-9.]*\).*/\1/p')"
+          echo "passRate=$PASS_RATE  threshold=$EVAL_MIN_PASS_RATE"
+          awk -v p="$PASS_RATE" -v t="$EVAL_MIN_PASS_RATE" 'BEGIN { exit (p+0 >= t+0) ? 0 : 1 }' \
+            || (echo "::error::eval pass-rate $PASS_RATE is below threshold $EVAL_MIN_PASS_RATE"; exit 1)
+          echo "eval gate passed: $PASS_RATE >= $EVAL_MIN_PASS_RATE"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-gate-logs
+          path: |
+            llama.log
+            imini.log
+          retention-days: 7
