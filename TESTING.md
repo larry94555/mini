@@ -3696,3 +3696,37 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `PromFormat.render` emits `imini_alerts_route_sent{route="..."}` (and `_failed` /
   `_dead_lettered`) from `alerts.by_route`, plus `imini_alerts_suppressed` and `imini_alerts_replayed`.
 - **Live:** `GET /metrics/prom` shows per-route series once alerts have been routed and delivered/failed.
+
+---
+
+# Cluster-wide dedup, escalation on unacked, searchable dead-letter backlog
+
+## 442. Shared-dedup pure outcome (AlertEscalationSearchTest)
+
+- **Run:** `./mvnw -Dtest=AlertEscalationSearchTest test`.
+- **Observe:** `AlertSink.dedupOutcome` forwards + resets on a fresh/elapsed window (reporting the prior
+  window's suppressed count), and suppresses + increments within a window. This pure core backs both the
+  shared (SQLite `alert_dedup`) and in-memory paths.
+
+## 443. Cluster-wide dedup end-to-end (manual, needs DB)
+
+- **Observe:** with SQLite, `alerts.dedup-window-seconds=60`, `alerts.dedup-shared=true`, fire the same
+  `action+target` from two instances pointed at the same database — only the first forwards; the rest are
+  suppressed cluster-wide (rows in `alert_dedup`). Set `alerts.dedup-shared=false` to confirm per-process
+  behaviour returns.
+
+## 444. Escalation / ack (AlertEscalationSearchTest + manual)
+
+- **Observe (unit):** escalation is off without `alerts.escalate-url`; `escalateStale`/`ack` are no-ops with
+  no DB.
+- **Observe (manual, needs DB):** set `alerts.escalate-after-minutes=1`, `alerts.escalate-url=<receiver>`,
+  produce a dead-letter, wait past the threshold (or `POST /admin/alerts/escalate`). It is re-paged once to
+  the escalation URL and `escalated_at` is set; `imini_alerts_escalated` increments. `POST /admin/alerts/ack
+  ?id=<id>` before the threshold prevents escalation.
+
+## 445. Dead-letter search & pagination (AlertEscalationSearchTest)
+
+- **Run:** same class.
+- **Observe:** `matchesFilter` honours action (exact), status (case-insensitive), and `q` (payload
+  substring); `deadLetterPage`/`deadLetterCount` are empty/zero without a DB. Live: `GET /admin/alerts/failed
+  ?action=spend_alert&q=acct-9&offset=0&limit=20` returns the filtered page plus `total`.

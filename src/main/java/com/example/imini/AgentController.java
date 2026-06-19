@@ -498,11 +498,45 @@ public class AgentController {
 
     /** Alert deliveries that exhausted their retries (newest first). Admin only. */
     @GetMapping("/admin/alerts/failed")
-    public Map<String, Object> adminAlertsFailed() {
+    public Map<String, Object> adminAlertsFailed(
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "status", defaultValue = "") String status,
+            @RequestParam(name = "q", defaultValue = "") String q,
+            @RequestParam(name = "offset", defaultValue = "0") int offset,
+            @RequestParam(name = "limit", defaultValue = "50") int limit) {
         requireAdmin();
+        String a = action.isBlank() ? null : action;
+        String st = status.isBlank() ? null : status;
+        String query = q.isBlank() ? null : q;
+        int off = Math.max(0, offset);
+        int capped = Math.max(1, Math.min(limit, 500));
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("stats", alertSink.stats());
-        out.put("dead_letters", alertSink.deadLetterEntries());
+        out.put("total", alertSink.deadLetterCount(a, st, query));
+        out.put("offset", off);
+        out.put("limit", capped);
+        out.put("dead_letters", alertSink.deadLetterPage(a, st, query, off, capped));
+        return out;
+    }
+
+    /** Acknowledge a dead-letter so it no longer escalates. Admin only. */
+    @PostMapping("/admin/alerts/ack")
+    public Map<String, Object> adminAlertsAck(@RequestParam(name = "id") String id) {
+        requireAdmin();
+        int n = alertSink.ack(id);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("acked", n);
+        return out;
+    }
+
+    /** Force an escalation sweep of un-acked dead-letters past the threshold. Admin only. */
+    @PostMapping("/admin/alerts/escalate")
+    public Map<String, Object> adminAlertsEscalate() {
+        requireAdmin();
+        int n = alertSink.escalateStale(System.currentTimeMillis());
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("escalated", n);
+        out.put("stats", alertSink.stats());
         return out;
     }
 
