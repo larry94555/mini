@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Capability scoping + secret/PII redaction + spend alerts & usage dashboard: a CapabilityService restricts which tools each role may invoke (enforced in AgentEngine before execution; GET /admin/capabilities); Redact.scrubPii masks bearer tokens, key=value secrets, sk-/AWS/JWT tokens and emails in trace attributes (redaction.enabled) and in console logs (a %rmsg logback converter); CostService gained one-time per-tenant spend alerts (lower of an absolute or percent-of-quota threshold) surfaced in GET /admin/cost and a new HTML GET /admin/usage dashboard.
+
 - OTLP export + trace propagation, CI eval gate, and tiered quotas on all run endpoints: the Tracer now continues an inbound W3C traceparent (cross-service propagation) and can export finished spans to an OTLP/HTTP collector as OTLP/JSON (tracing.otlp-endpoint, dependency-free, off-thread); an opt-in GitHub Actions workflow (eval-gate.yml) boots a tiny model and fails the build when the eval pass-rate is below a threshold; the monthly token quota is now enforced on /ask, /chat, and both streaming endpoints, with named tiers (cost.tiers + cost.tier-assignments) resolving a per-tenant quota.
 
 - Eval harness + distributed tracing + per-tenant cost/quotas: POST /admin/eval runs a fixed suite through the live agent and reports a pass-rate (pure, tested scoring; self-skips offline); a dependency-free OpenTelemetry-style Tracer emits W3C spans for runs (GET /admin/traces, tracing.enabled); a CostService meters per-tenant tokens into a cost_ledger with micro-USD pricing (GET /admin/cost) and enforces a soft monthly token quota (HTTP 429 on /ask when exceeded).
