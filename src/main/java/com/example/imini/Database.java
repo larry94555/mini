@@ -110,7 +110,11 @@ public class Database {
             "CREATE INDEX idx_span_trace ON trace_spans(trace_id, start_ms)",
             // durable dead-letter for alert deliveries that exhausted their retries (replayable)
             "CREATE TABLE alerts_dead_letter (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, payload TEXT NOT NULL, "
-                    + "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT)");
+                    + "attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT)",
+            // crash-safe replay + retry history + per-action routing target
+            "ALTER TABLE alerts_dead_letter ADD COLUMN url TEXT",
+            "ALTER TABLE alerts_dead_letter ADD COLUMN status TEXT NOT NULL DEFAULT 'failed'",
+            "ALTER TABLE alerts_dead_letter ADD COLUMN last_attempt_at INTEGER");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;
