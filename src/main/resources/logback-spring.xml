@@ -24,18 +24,15 @@
         </encoder>
     </appender>
 
-    <!-- raw structured JSON console using Logback's built-in JsonEncoder (no extra dependency) -->
-    <appender name="JSON_RAW" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
-    </appender>
-
     <!--
-      The json profile logs through MessageRedactingAppender, which scrubs secrets/PII from the message
-      and forwards to JSON_RAW (so the built-in JsonEncoder still does the encoding). See
-      MessageRedactingAppender and Redact.scrubPii.
+      Structured JSON console: RedactingJsonEncoder scrubs secrets/PII from the output of Logback's
+      built-in JsonEncoder (delegate), so JSON logs are redacted with no extra dependency. See
+      RedactingJsonEncoder and Redact.scrubPii.
     -->
-    <appender name="JSON" class="com.example.imini.MessageRedactingAppender">
-        <appender-ref ref="JSON_RAW"/>
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="com.example.imini.RedactingJsonEncoder">
+            <delegate class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+        </encoder>
     </appender>
 
     <springProfile name="json">
