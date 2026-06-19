@@ -93,6 +93,9 @@ public class AuthFilter implements Filter {
         String reqId = Long.toHexString(System.nanoTime());
         org.slf4j.MDC.put("reqId", reqId);
         org.slf4j.MDC.put("path", path == null ? "" : path);
+        // Cross-service trace propagation: remember the caller's W3C traceparent (if any) so the controller
+        // can continue their trace instead of starting a fresh one.
+        RequestContext.setTraceparent(req.getHeader("traceparent"));
         try {
             metrics.inc("requests");
 

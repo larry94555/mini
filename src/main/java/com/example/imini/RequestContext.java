@@ -9,6 +9,7 @@ package com.example.imini;
 public final class RequestContext {
 
     private static final ThreadLocal<Principal> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<String> TRACEPARENT = new ThreadLocal<>();
 
     private RequestContext() {}
 
@@ -18,6 +19,17 @@ public final class RequestContext {
 
     public static void clear() {
         CURRENT.remove();
+        TRACEPARENT.remove();
+    }
+
+    /** Record the inbound W3C traceparent header (set by AuthFilter) for cross-service trace propagation. */
+    public static void setTraceparent(String tp) {
+        if (tp == null || tp.isBlank()) TRACEPARENT.remove(); else TRACEPARENT.set(tp);
+    }
+
+    /** The inbound traceparent for this request, or null when the caller sent none. */
+    public static String traceparent() {
+        return TRACEPARENT.get();
     }
 
     /** The caller, or {@link Principal#ANON} when none was set (e.g. auth disabled / open path). */

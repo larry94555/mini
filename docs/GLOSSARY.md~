@@ -1,0 +1,79 @@
+# Glossary
+
+Eight terms the rest of the imini learning material assumes. Plain language, with "where to see it."
+
+A quick note on the pointers in parentheses: a name ending in `.java` is a source file under
+`src/main/java/com/example/imini/`; a name ending in `.md` is a document (at the repo root, or in
+`docs/` when written that way); a name ending in `.sh` or `.bat` is a script at the repo root. So
+"see `AgentEngine.java`" means open that source file, and "see `docs/TRACE_EDIT.md`" means open that
+document. A fuller index of the code each term points to is at the end.
+
+**Harness.** Everything around the model: the loop, the tools, permissions, sessions, memory, and the
+web/CLI surface. The model only produces text and tool requests; the *harness* decides what actually
+happens. imini is a harness you can read. *(For the big picture, read `ARCHITECTURE.md`; the code starts
+in `AgentLoop.java`, which hands the loop to `AgentEngine.java`.)*
+
+**Agent loop.** The think → act → observe cycle. The model replies with either a final answer or a
+**tool call**; the harness runs the tool, feeds the result back, and asks the model again — until it has a
+final answer or a guard stops it. *(The loop lives in `AgentEngine.java`, in its `converse` method; you
+can watch it run on a real task in `docs/TRACE_EDIT.md`.)*
+
+**Tool call.** A structured request from the model to do something — read a file, search the repo, run a
+command. The harness *validates* it against a schema, runs it, and returns the result as data. Tools are
+how the model affects the world; it can't touch anything the harness doesn't expose. *(The list of tools
+is assembled in `ToolRegistry.java`; each one is implemented in `BuiltinTools.java`.)*
+
+**Plan mode.** A mode where the harness asks the model to *propose* steps without executing any
+file-changing actions. You get a plan to review instead of changes to undo. *(The modes are defined in
+`PermissionService.java`; start a run in plan mode with `plan.sh` or `plan.bat`.)*
+
+**Checkpoint.** A saved snapshot taken before a file is changed, so an edit can be reversed (`rewind`).
+A safe coding harness needs an undo story. *(Snapshots are taken and restored in `CheckpointStore.java`;
+undo a change with `rewind.sh` or `rewind.bat`.)*
+
+**Project memory.** Always-on instructions for a project, kept in an `IMINI.md` file and injected into the
+system prompt every turn (e.g. "prefer concise prose"). Different from a one-off prompt or a slash command.
+*(Loaded by `ProjectContext.java`; to switch it on, copy the template `IMINI.example.md` to `IMINI.md` and
+edit it.)*
+
+**MCP (Model Context Protocol).** A standard way to plug in *external* tool providers. The harness loads
+them, exposes their tools, and fences their output — the model doesn't own them. *(Handled in
+`McpManager.java`, which reads an `mcp.json` you create at the repo root.)*
+
+**Prompt-injection fencing.** Treating tool/web/MCP output as *data, not instructions*. A fetched web page
+might say "ignore your rules"; the harness wraps such output and reminds the model not to obey it.
+*(The wrapping logic is in `Untrusted.java`; Module 11 of `docs/LEARNING_PATH.md` walks through it.)*
+
+Once these eight make sense, the architecture and the learning-path modules will read easily.
+
+---
+
+## Where the code lives
+
+Each term above points at one or two source files. Here they are in one place — what each is, and the
+learning-path module that exercises it — so you can jump straight to the part you want to read.
+
+- **`AgentLoop.java`** — the main agent: builds the system prompt and owns the session, then hands the
+  loop to `AgentEngine`. Exercised in Module 2.
+- **`AgentEngine.java`** — the shared think → act → observe loop (`converse`), used by both the main agent
+  and the sub-agent. It enforces the permission modes and fences tool output. Exercised in Module 2;
+  traced line by line in `docs/TRACE_EDIT.md`.
+- **`ToolRegistry.java`** — the catalogue of tools the model is allowed to call. Add a tool here and the
+  model can use it immediately. Exercised in Module 2.
+- **`BuiltinTools.java`** — the implementations of the built-in tools (`read_file`, `write_file`,
+  `edit_file`, `run_command`, `web_fetch`, and so on). Exercised in Modules 4 and 8.
+- **`PermissionService.java`** — decides whether a tool call may run, based on the mode (`ASK`, `AUTO`,
+  or `PLAN`). Exercised in Modules 4 and 5.
+- **`CheckpointStore.java`** — snapshots a file before it changes and restores it on rewind. Exercised in
+  Module 6.
+- **`ProjectContext.java`** — loads `IMINI.md` (and `CLAUDE.md` / `AGENTS.md`) and adds it to the system
+  prompt every turn. Exercised in Module 7.
+- **`IMINI.example.md`** — the commented template for project memory; copy it to `IMINI.md` to use it.
+  Exercised in Module 7.
+- **`McpManager.java`** — loads external MCP tool servers from `mcp.json` and exposes their tools.
+  Exercised in Module 10.
+- **`Untrusted.java`** — wraps web/MCP output in clear fence markers and flags injection attempts.
+  Exercised in Module 11.
+
+New here? Read in this order: this glossary, then `ARCHITECTURE.md`, then `docs/TRACE_EDIT.md`, then
+`docs/LEARNING_PATH.md` module by module.
