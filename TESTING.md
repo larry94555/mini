@@ -3665,3 +3665,34 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** set `alerts.routes=spend_alert|http://127.0.0.1:9/none;;capability_denied|<real-receiver>`.
   A `capability_denied` is delivered to the real receiver; a `spend_alert` dead-letters (its route is
   unreachable). Unrouted actions use `alerts.webhook-url`.
+
+---
+
+# Dead-letter retention/aging, per-route counters, dedup/throttling
+
+## 438. Retention cutoff & purge no-op (AlertRetentionDedupTest)
+
+- **Run:** `./mvnw -Dtest=AlertRetentionDedupTest test`.
+- **Observe:** `AlertSink.cutoff` returns `now - hours` (0/negative = keep forever); `purgeOlderThan` is a
+  no-op without a database.
+
+## 439. Dead-letter aging end-to-end (manual, needs DB)
+
+- **Observe:** with SQLite, `alerts.dead-letter-retention-hours=1` and a short
+  `alerts.dead-letter-reap-interval-minutes`, create a dead-letter and back-date its `ts` > 1h. The reaper
+  (or `AlertDeadLetterReaper.reap()`) removes it; `replaying` rows are never purged. `DELETE
+  /admin/alerts/failed` removes all (or `?id=` one) immediately.
+
+## 440. Dedup/throttling window (AlertRetentionDedupTest)
+
+- **Run:** same class.
+- **Observe:** `dedupDecide` forwards the first event for a key, suppresses repeats within
+  `alerts.dedup-window-seconds`, and forwards again once the window elapses — reporting how many it collapsed
+  (`suppressedSincePrev`). Window 0 always forwards; distinct keys have independent windows.
+
+## 441. Per-route Prometheus counters (PromFormatRouteTest)
+
+- **Run:** `./mvnw -Dtest=PromFormatRouteTest test`.
+- **Observe:** `PromFormat.render` emits `imini_alerts_route_sent{route="..."}` (and `_failed` /
+  `_dead_lettered`) from `alerts.by_route`, plus `imini_alerts_suppressed` and `imini_alerts_replayed`.
+- **Live:** `GET /metrics/prom` shows per-route series once alerts have been routed and delivered/failed.

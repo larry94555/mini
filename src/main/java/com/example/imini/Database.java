@@ -114,7 +114,9 @@ public class Database {
             // crash-safe replay + retry history + per-action routing target
             "ALTER TABLE alerts_dead_letter ADD COLUMN url TEXT",
             "ALTER TABLE alerts_dead_letter ADD COLUMN status TEXT NOT NULL DEFAULT 'failed'",
-            "ALTER TABLE alerts_dead_letter ADD COLUMN last_attempt_at INTEGER");
+            "ALTER TABLE alerts_dead_letter ADD COLUMN last_attempt_at INTEGER",
+            // route label (audit action) so replays re-attribute to the right per-route counter
+            "ALTER TABLE alerts_dead_letter ADD COLUMN action TEXT");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

@@ -75,14 +75,36 @@ public final class PromFormat {
             number(sb, "alerts_retried", "Alert delivery retries scheduled", "counter", alerts.get("retried"));
             number(sb, "alerts_dead_lettered", "Alerts moved to dead-letter", "counter", alerts.get("dead_lettered"));
             number(sb, "alerts_dropped", "Alerts dropped (buffer full)", "counter", alerts.get("dropped"));
+            number(sb, "alerts_replayed", "Dead-lettered alerts re-enqueued", "counter", alerts.get("replayed"));
+            number(sb, "alerts_suppressed", "Duplicate alerts collapsed by dedup", "counter", alerts.get("suppressed"));
             number(sb, "alerts_in_flight", "Alert deliveries in flight", "gauge", alerts.get("in_flight"));
             number(sb, "alerts_dead_letter_size", "Dead-letter ring size", "gauge", alerts.get("dead_letter_size"));
+            if (alerts.get("by_route") instanceof Map<?, ?> byRoute) {
+                help(sb, "alerts_route_sent", "Alerts delivered by route", "counter");
+                for (Map.Entry<String, Map<String, Long>> e : sortedRoutes((Map<String, Map<String, Long>>) byRoute)) {
+                    line(sb, PREFIX + "alerts_route_sent", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("sent"));
+                }
+                help(sb, "alerts_route_failed", "Alert attempt failures by route", "counter");
+                for (Map.Entry<String, Map<String, Long>> e : sortedRoutes((Map<String, Map<String, Long>>) byRoute)) {
+                    line(sb, PREFIX + "alerts_route_failed", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("failed"));
+                }
+                help(sb, "alerts_route_dead_lettered", "Alerts dead-lettered by route", "counter");
+                for (Map.Entry<String, Map<String, Long>> e : sortedRoutes((Map<String, Map<String, Long>>) byRoute)) {
+                    line(sb, PREFIX + "alerts_route_dead_lettered", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("dead_lettered"));
+                }
+            }
         }
         return sb.toString();
     }
 
     private static List<Map.Entry<String, Long>> sorted(Map<String, Long> m) {
         List<Map.Entry<String, Long>> l = new java.util.ArrayList<>(m.entrySet());
+        l.sort(Map.Entry.comparingByKey());
+        return l;
+    }
+
+    private static List<Map.Entry<String, Map<String, Long>>> sortedRoutes(Map<String, Map<String, Long>> m) {
+        List<Map.Entry<String, Map<String, Long>>> l = new java.util.ArrayList<>(m.entrySet());
         l.sort(Map.Entry.comparingByKey());
         return l;
     }
