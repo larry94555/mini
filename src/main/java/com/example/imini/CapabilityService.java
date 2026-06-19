@@ -43,10 +43,38 @@ public class CapabilityService {
     @Value("${capabilities.scopes:}") private String scopesCfg;
     @Value("${capabilities.default-scope:*}") private String defaultScopeCfg;
 
+    private final AuditLog audit;
+
     private Map<String, Set<String>> scopes = Map.of();
     private Set<String> defaultScope; // null => unrestricted
 
+    // The effective role for the CURRENT execution thread, propagated into sub-agent runs (which execute on
+    // the same engine but may be on a pool thread without a RequestContext). When unset, the caller's role
+    // comes from RequestContext. The engine sets/clears this around each tool execution so a delegated
+    // sub-agent inherits — and is scoped by — the original caller's role.
+    private final ThreadLocal<String> effectiveRole = new ThreadLocal<>();
+
+    public CapabilityService(AuditLog audit) {
+        this.audit = audit;
+    }
+
     public boolean enabled() { return enabled; }
+
+    /** Set the effective role for this thread (engine propagation). Pass null to leave it to RequestContext. */
+    public void setEffectiveRole(String role) {
+        if (role == null) effectiveRole.remove(); else effectiveRole.set(role);
+    }
+
+    public void clearEffectiveRole() { effectiveRole.remove(); }
+
+    /** The raw thread-local effective role (may be null); used by the engine to save/restore across nesting. */
+    public String effectiveRoleRaw() { return effectiveRole.get(); }
+
+    /** The role governing the current execution: the propagated effective role, else the request principal. */
+    public String currentRole() {
+        String r = effectiveRole.get();
+        return r != null ? r : RequestContext.current().role();
+    }
 
     @jakarta.annotation.PostConstruct
     public void init() {
@@ -90,10 +118,22 @@ public class CapabilityService {
         return tools;
     }
 
-    /** Pure: is {@code tool} permitted by {@code scope}? A null scope (or one containing "*") allows all. */
+    /**
+     * Pure: is {@code tool} permitted by {@code scope}? A null scope (or one containing "*") allows all.
+     * A scope token ending in "*" matches by prefix, so {@code github_*} permits every tool exposed by the
+     * {@code github} MCP server ({@code github_search}, {@code github_issue}, ...). Otherwise an exact match
+     * is required.
+     */
     static boolean permits(Set<String> scope, String tool) {
         if (scope == null || scope.contains("*")) return true;
-        return scope.contains(tool);
+        if (tool == null) return false;
+        if (scope.contains(tool)) return true;
+        for (String s : scope) {
+            if (s.length() > 1 && s.endsWith("*") && tool.startsWith(s.substring(0, s.length() - 1))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The tool set allowed for a role: null = unrestricted (admin, or default-scope of "*"). */
@@ -113,10 +153,20 @@ public class CapabilityService {
         return permits(allowedFor(role), tool);
     }
 
-    /** Is the CURRENT caller (from RequestContext) permitted to call the named tool? */
+    /** Is the CURRENT caller (effective role, else RequestContext) permitted to call the named tool? */
     public boolean permitsCurrent(String tool) {
         if (!enabled) return true;
-        return permits(RequestContext.current().role(), tool);
+        return permits(currentRole(), tool);
+    }
+
+    /** Record a capability denial in the audit log (who, which tool, under which role). Best-effort. */
+    public void auditDenial(String tool) {
+        try {
+            audit.record(RequestContext.current().user(), "capability_denied",
+                    "tool:" + tool, "outside scope of role '" + currentRole() + "'");
+        } catch (Exception ignore) {
+            // auditing must never break a run
+        }
     }
 
     /** The resolved scopes, for the /admin/capabilities view. */

@@ -97,6 +97,9 @@ public class AgentEngine {
                                 Mode mode, String label, String sessionId, RunSink sink) throws Exception {
 
         if (sink == null) sink = RunSink.NOOP;
+        // The role governing this run, captured on the current thread (request thread, or the effective role
+        // propagated from a parent run). Used to scope tool calls, including in delegated sub-agent runs.
+        final String callerRole = capabilities.currentRole();
         List<Map<String, Object>> messages = new ArrayList<>(startingMessages);
         List<Map<String, Object>> specs = specsFor(tools);
         boolean interactive = "main".equals(label); // only the main loop honors interrupt/steer
@@ -194,7 +197,7 @@ public class AgentEngine {
                 for (CallInfo ci : infos) {
                     if (ci.tool != null && !ci.tool.mutating && validationErrors.get(ci) == null
                             && capabilities.permitsCurrent(ci.name)) {
-                        futures.put(ci, pool.submit(() -> runTool(sid, s, ci.name, ci.tool, ci.args)));
+                        futures.put(ci, pool.submit(() -> runTool(callerRole, sid, s, ci.name, ci.tool, ci.args)));
                     }
                 }
             }
@@ -211,10 +214,11 @@ public class AgentEngine {
                     // Tool-level capability scoping: this caller's role is not allowed to use this tool.
                     result = "DENIED: tool '" + ci.name + "' is outside this caller's capability scope.";
                     sink.log("[" + label + ":capability] denied " + ci.name);
+                    capabilities.auditDenial(ci.name);
                 } else if (!ci.tool.mutating) {
                     sink.log("[" + label + ":tool] " + ci.name + " " + ci.args + (parallelNote ? " (parallel)" : ""));
                     Future<String> f = futures.get(ci);
-                    result = (f != null) ? join(f) : runTool(sessionId, sink, ci.name, ci.tool, ci.args);
+                    result = (f != null) ? join(f) : runTool(callerRole, sessionId, sink, ci.name, ci.tool, ci.args);
                 } else {
                     String signature = ci.name + "|" + ci.args;
                     int count = callCounts.merge(signature, 1, Integer::sum);
@@ -235,7 +239,7 @@ public class AgentEngine {
                         switch (d.kind()) {
                             case ALLOW -> {
                                 sink.log("[" + label + ":tool] " + ci.name + " " + ci.args);
-                                result = runTool(sessionId, sink, ci.name, ci.tool, ci.args);
+                                result = runTool(callerRole, sessionId, sink, ci.name, ci.tool, ci.args);
                             }
                             case DENY -> result = "DENIED: " + d.note() + ".";
                             case RECORD_PLAN -> {
@@ -282,9 +286,11 @@ public class AgentEngine {
     }
 
     /** Publishes sessionId + sink to the tool executor (via SessionContext), runs hooks + the tool. */
-    private String runTool(String sessionId, RunSink sink, String name, Tool tool, Map<String, Object> args) {
+    private String runTool(String role, String sessionId, RunSink sink, String name, Tool tool, Map<String, Object> args) {
         SessionContext.Ctx prev = SessionContext.get();
         SessionContext.set(new SessionContext.Ctx(sessionId, sink));
+        String prevRole = capabilities.effectiveRoleRaw();
+        capabilities.setEffectiveRole(role); // propagate caller's role onto this (possibly pool) thread
         try {
             metrics.incTool(name);
             String block = hooks.runPre(name, args);
@@ -304,6 +310,7 @@ public class AgentEngine {
             recorder.record(sessionId, name, tool.mutating, args, result);
             return result;
         } finally {
+            capabilities.setEffectiveRole(prevRole);
             SessionContext.set(prev);
         }
     }

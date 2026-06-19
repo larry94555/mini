@@ -49,6 +49,7 @@ public class CostService {
     @Value("${cost.alert-percent:0}") private int alertPercent;
 
     private final Database db;
+    private final AuditLog audit;
 
     private Map<String, Long> tierQuotas = Map.of();      // tier name -> monthly token quota
     private Map<String, String> tenantTiers = Map.of();   // tenant -> tier name
@@ -62,8 +63,9 @@ public class CostService {
     private final java.util.Deque<Map<String, Object>> recentAlerts = new java.util.ArrayDeque<>();
     private final Object alertLock = new Object();
 
-    public CostService(Database db) {
+    public CostService(Database db, AuditLog audit) {
         this.db = db;
+        this.audit = audit;
     }
 
     @jakarta.annotation.PostConstruct
@@ -237,6 +239,13 @@ public class CostService {
                 }
                 log.warn("[cost] ALERT tenant '" + tenant + "' crossed " + threshold + " tokens this month"
                         + (quota > 0 ? " (" + Math.round(now * 100.0 / quota) + "% of quota " + quota + ")" : ""));
+                try {
+                    audit.record(tenant, "spend_alert", "threshold:" + threshold,
+                            "crossed at " + now + " tokens"
+                                    + (quota > 0 ? " (" + Math.round(now * 100.0 / quota) + "% of quota)" : ""));
+                } catch (Exception ignore) {
+                    // auditing must never break a run
+                }
             }
         }
     }
