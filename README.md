@@ -153,6 +153,9 @@ No cloud API key is required.
 | `Ownership.java` | per-resource access policy (owner / admin / unowned) + `canRead` for shared sessions |
 | `AuditLog.java` | append-only audit trail of privileged actions |
 | `RateLimiter.java` | Per-key rate limiter: fixed or sliding window, optional SQLite persistence, stale-window pruning |
+| `EvalHarness.java` | Agent-evaluation suite: pure scoring (contains/regex/normalized) + a model runner that self-skips offline |
+| `Tracer.java` | Dependency-free OpenTelemetry-style tracer (W3C span ids, nesting, ring + SQLite) |
+| `CostService.java` | Per-tenant token metering, micro-USD cost ledger, and monthly token quota |
 | `Metrics.java` | In-process metrics snapshot and run logs |
 | `static/index.html` | Browser UI |
 | `Dockerfile` | Container image for the app |
@@ -370,6 +373,10 @@ Transient llama-server failures (network errors, HTTP 5xx) are retried with expo
 ### Session lifecycle & rate limiting
 
 Set `agent.session-ttl-hours` (default 0 = disabled) to have a background reaper prune sessions idle longer than the TTL every `agent.session-reap-interval-minutes` (default 60); `GET /sessions/summary` (admin) shows the age/size distribution and `POST /sessions/prune` (admin) runs a pass on demand. Pruning a session now **cascades** to every dependent table (owners, shares, titles, checkpoints, plans, plan steps, plan history, per-session skill state and settings, and bound scheduled tasks), and each reaper pass also runs an **orphan sweep** that removes child rows whose parent session no longer exists (cleaning up data left by older builds). The per-key rate limiter (`auth.rate-limit-per-minute`) is **persistent** by default (`auth.rate-limit-persistent=true`) — windows are stored in SQLite so limits survive a restart; set it to `false` for in-memory. Choose the algorithm with `auth.rate-limit-algorithm`: `fixed` (default) or `sliding` — the sliding-window counter removes the burst-at-window-boundary weakness of the fixed window by weighting the previous window's count into the current rate. A background pruner (`auth.rate-limit-reap-interval-minutes`, default 10) drops stale rate-limit windows for keys that have gone quiet so the table stays bounded. The streaming model path retries the **connection step** (before any tokens flow) under the same circuit breaker as the non-streaming calls; mid-stream failures are still surfaced to the caller.
+
+### Eval harness, distributed tracing & per-tenant cost
+
+**Eval harness.** `POST /admin/eval` (admin) runs a small fixed suite through the live agent and returns a pass-rate plus per-case detail, so prompt/model/refactor changes can be checked for quality regressions — not just that the code compiles. It self-skips (returns `{skipped:true}`) when the model is unreachable. The scoring (contains / regex / normalized-equals) is pure and unit-tested; supply your own suite for a real domain. **Distributed tracing.** Set `tracing.enabled=true` to emit OpenTelemetry-style spans (W3C `trace_id`/`span_id`/`parent_id`, timing, attributes) for runs; view recent spans at `GET /admin/traces` (admin). Spans nest within a run and carry a `traceparent` for propagation; they live in a bounded ring and (with `tracing.persist`) the `trace_spans` table. It's dependency-free — a compact, readable tracer rather than the full OTel SDK. **Per-tenant cost & quotas.** Every run records input/output tokens against the calling user in the `cost_ledger`, priced via `cost.input-usd-per-million` / `cost.output-usd-per-million` (0 for a free local model); see per-tenant usage for the month at `GET /admin/cost` (admin). A soft monthly token quota (`cost.monthly-token-quota`, 0 = unlimited) returns HTTP 429 on `/ask` once a tenant exceeds it.
 
 **Context-budget pre-flight.** As you type, a readout under the composer estimates the prompt size against
 the model's window and predicts which actions would fire -- `fits`, `would compact`, or `would trim`. It is

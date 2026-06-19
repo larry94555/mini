@@ -97,7 +97,17 @@ public class Database {
             "CREATE TABLE rate_limits (rl_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, "
                     + "count INTEGER NOT NULL)",
             // sliding-window rate limiting keeps the previous window's count too (weighted into the rate)
-            "ALTER TABLE rate_limits ADD COLUMN prev_count INTEGER NOT NULL DEFAULT 0");
+            "ALTER TABLE rate_limits ADD COLUMN prev_count INTEGER NOT NULL DEFAULT 0",
+            // per-tenant usage ledger: one row per run, attributing tokens + cost to the calling user
+            "CREATE TABLE cost_ledger (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, tenant TEXT NOT NULL, "
+                    + "endpoint TEXT, session TEXT, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, "
+                    + "micro_usd INTEGER NOT NULL)",
+            "CREATE INDEX idx_cost_tenant ON cost_ledger(tenant, ts)",
+            // distributed-trace spans (OpenTelemetry-compatible: trace_id/span_id/parent are W3C hex ids)
+            "CREATE TABLE trace_spans (span_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, parent_id TEXT, "
+                    + "name TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, "
+                    + "attributes TEXT, status TEXT)",
+            "CREATE INDEX idx_span_trace ON trace_spans(trace_id, start_ms)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;
