@@ -68,6 +68,16 @@ public final class PromFormat {
             number(sb, "concurrency_active", "Active runs", "gauge", conc.get("active"));
             number(sb, "concurrency_queued", "Queued runs", "gauge", conc.get("queued"));
         }
+        if (snapshot.get("alerts") instanceof Map<?, ?> alerts) {
+            number(sb, "alerts_queued", "Alerts enqueued for delivery", "counter", alerts.get("queued"));
+            number(sb, "alerts_sent", "Alerts delivered successfully", "counter", alerts.get("sent"));
+            number(sb, "alerts_failed", "Alert delivery attempt failures", "counter", alerts.get("failed"));
+            number(sb, "alerts_retried", "Alert delivery retries scheduled", "counter", alerts.get("retried"));
+            number(sb, "alerts_dead_lettered", "Alerts moved to dead-letter", "counter", alerts.get("dead_lettered"));
+            number(sb, "alerts_dropped", "Alerts dropped (buffer full)", "counter", alerts.get("dropped"));
+            number(sb, "alerts_in_flight", "Alert deliveries in flight", "gauge", alerts.get("in_flight"));
+            number(sb, "alerts_dead_letter_size", "Dead-letter ring size", "gauge", alerts.get("dead_letter_size"));
+        }
         return sb.toString();
     }
 

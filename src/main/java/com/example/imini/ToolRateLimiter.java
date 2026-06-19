@@ -101,6 +101,43 @@ public class ToolRateLimiter {
         return allow(tenant, tool, System.currentTimeMillis());
     }
 
+    /**
+     * Estimated seconds until {@code tool} would next be allowed for {@code tenant}; 0 if it's allowed now or
+     * has no configured limit. A read-only hint (does not mutate state), surfaced to callers so they can back
+     * off instead of blind-retrying. Best-effort: based on the current window's remaining time.
+     */
+    public long retryAfterSeconds(String tenant, String tool) {
+        return retryAfterSeconds(tenant, tool, System.currentTimeMillis());
+    }
+
+    synchronized long retryAfterSeconds(String tenant, String tool, long nowMs) {
+        if (!enabled) return 0;
+        long[] cfg = limits.get(tool);
+        if (cfg == null) return 0;
+        long windowMs = cfg[1];
+        String key = (tenant == null ? "anonymous" : tenant) + ":" + tool;
+        long windowStart;
+        if (persistentActive()) {
+            var rows = db.query("SELECT window_start FROM rate_limits WHERE rl_key=?",
+                    rs -> rs.getLong(1), "tool:" + key);
+            if (rows.isEmpty()) return 0;
+            windowStart = rows.get(0);
+        } else {
+            long[] s = state.get(key);
+            if (s == null) return 0;
+            windowStart = s[0];
+        }
+        return retryAfterMs(windowStart, windowMs, nowMs) / 1000 + 1; // round up to whole seconds
+    }
+
+    /** Pure: ms until the current window rolls over (clamped to [0, windowMs]). */
+    static long retryAfterMs(long windowStart, long windowMs, long nowMs) {
+        long elapsed = nowMs - windowStart;
+        if (elapsed >= windowMs) return 0;
+        if (elapsed < 0) return windowMs;
+        return windowMs - elapsed;
+    }
+
     synchronized boolean allow(String tenant, String tool, long nowMs) {
         if (!enabled) return true;
         long[] cfg = limits.get(tool);

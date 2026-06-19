@@ -80,6 +80,7 @@ public class AgentController {
     private final EvalHarness eval;
     private final CapabilityService capabilities;
     private final ToolRateLimiter toolRateLimiter;
+    private final AlertSink alertSink;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -93,7 +94,7 @@ public class AgentController {
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
                            Database db, SessionReaper reaper,
                            Tracer tracer, CostService cost, EvalHarness eval, CapabilityService capabilities,
-                           ToolRateLimiter toolRateLimiter) {
+                           ToolRateLimiter toolRateLimiter, AlertSink alertSink) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -128,6 +129,7 @@ public class AgentController {
         this.eval = eval;
         this.capabilities = capabilities;
         this.toolRateLimiter = toolRateLimiter;
+        this.alertSink = alertSink;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -477,16 +479,30 @@ public class AgentController {
 
     @GetMapping("/metrics")
     public Map<String, Object> metrics() {
-        return metrics.snapshot();
+        Map<String, Object> snap = metrics.snapshot();
+        snap.put("alerts", alertSink.stats());
+        return snap;
     }
 
     /** Metrics in Prometheus text exposition format, for external scraping (admin only). */
     @GetMapping("/metrics/prom")
     public ResponseEntity<String> metricsProm() {
         requireAdmin();
+        Map<String, Object> snap = metrics.snapshot();
+        snap.put("alerts", alertSink.stats());
         return ResponseEntity.ok()
                 .header("Content-Type", PromFormat.CONTENT_TYPE)
-                .body(PromFormat.render(metrics.snapshot()));
+                .body(PromFormat.render(snap));
+    }
+
+    /** Alert deliveries that exhausted their retries (newest first). Admin only. */
+    @GetMapping("/admin/alerts/failed")
+    public Map<String, Object> adminAlertsFailed() {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("stats", alertSink.stats());
+        out.put("dead_letters", alertSink.deadLetters());
+        return out;
     }
 
     /**

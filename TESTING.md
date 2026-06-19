@@ -3563,3 +3563,42 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `GET /admin/audit.html?action=capability_denied&since=2023-01-01&limit=50&offset=50` returns the
   second page of denials since that date. `since`/`until` accept ISO-8601 instants, `YYYY-MM-DD` dates, or
   epoch millis; blank/invalid is treated as unbounded.
+
+---
+
+# Alert delivery buffer, Prometheus security metrics, rate-limit retry-after
+
+## 425. Alert backoff & buffer stats (AlertSinkBufferTest)
+
+- **Run:** `./mvnw -Dtest=AlertSinkBufferTest test`.
+- **Observe:** `AlertSink.backoffMs` is exponential in the attempt number and capped at 60s (no overflow at
+  large attempt counts); `stats()` exposes `sent`/`failed`/`retried`/`dead_lettered`/`dropped`/
+  `dead_letter_size`; a fresh sink has an empty dead-letter list.
+
+## 426. Alert retry + dead-letter end-to-end (manual)
+
+- **Observe:** set `alerts.enabled=true`, `alerts.webhook-url=http://127.0.0.1:9/none` (an unreachable port),
+  `alerts.max-retries=2`, `alerts.retry-backoff-ms=200`. Trigger a `capability_denied`. The log shows retry
+  attempts with growing backoff; after retries are exhausted `GET /admin/alerts/failed` lists the payload and
+  `dead_lettered` is incremented. Point the webhook at a real receiver and confirm `sent` increments instead.
+
+## 427. Prometheus exposes alert + audit metrics (PromFormatAlertsTest)
+
+- **Run:** `./mvnw -Dtest=PromFormatAlertsTest test`.
+- **Observe:** `PromFormat.render` emits `imini_alerts_*` series with `# TYPE` lines, and audit-action counts
+  surface through the `counters` block as `imini_counter{name="audit_<action>"}`. An empty snapshot is safe.
+- **Live:** `GET /metrics/prom` (admin) shows `imini_alerts_sent`, `imini_alerts_dead_lettered`, and
+  `imini_counter{name="audit_capability_denied"}` once those events have occurred.
+
+## 428. Rate-limit retry-after math (ToolRetryAfterTest)
+
+- **Run:** `./mvnw -Dtest=ToolRetryAfterTest test`.
+- **Observe:** `retryAfterMs` returns the time until the window rolls, clamped to `[0, windowMs]` (including
+  the clock-skew case); `retryAfterSeconds` is 0 for an unconfigured/idle tool and a positive whole number of
+  seconds after the window has been opened.
+
+## 429. Retry-after hint in throttle message (manual)
+
+- **Observe:** with `tool-rate-limit.limits=web_fetch=1/60`, exhaust the limit. The next call's observation
+  reads `RATE_LIMITED: tool 'web_fetch' exceeded its per-tenant rate limit; retry after ~Ns.` with N close to
+  the remaining window seconds.
