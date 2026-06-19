@@ -3483,3 +3483,41 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** with a small `cost.alert-token-threshold`, crossing it logs `[cost] ALERT ...` once and writes
   a `spend_alert` entry to `GET /audit` (durable across restarts), in addition to appearing in `/admin/cost`.
+
+---
+
+# Audit viewer, configurable redaction patterns, per-tool rate limiting
+
+## 414. Audit-log viewer render (AuditDashboardTest)
+
+- **Run:** `./mvnw -Dtest=AuditDashboardTest test`.
+- **Observe:** `AuditDashboard.render` produces a self-contained HTML page; rows for `capability_denied` /
+  `tool_rate_limited` get the `denied` class and `spend_alert` the `alert` class; user content is
+  HTML-escaped; an empty result shows a placeholder and the filter form reflects the supplied values.
+- **Live:** `GET /admin/audit.html?action=capability_denied` (admin) returns the filtered HTML view.
+
+## 415. Per-tool rate-limit parsing & windowing (ToolRateLimiterTest)
+
+- **Run:** `./mvnw -Dtest=ToolRateLimiterTest test`.
+- **Observe:** `parseLimits` reads `tool=limit/windowSeconds` entries and skips malformed ones; `allow`
+  permits up to the limit within the window then throttles; limits are per-tenant; tools with no configured
+  limit are unlimited; with the feature disabled everything is allowed.
+
+## 416. Per-tool rate limit enforced in the loop (manual)
+
+- **Observe:** set `tool-rate-limit.enabled=true` and `tool-rate-limit.limits=web_fetch=2/60`. Drive an agent
+  that calls `web_fetch` repeatedly: the 3rd call within the window returns `RATE_LIMITED: tool 'web_fetch'
+  ...` and a `tool_rate_limited` row appears at `GET /audit`. `GET /admin/tool-rate-limits` shows the config.
+
+## 417. Configurable redaction patterns (RedactRulesTest)
+
+- **Run:** `./mvnw -Dtest=RedactRulesTest test`.
+- **Observe:** `parseRules` reads `;;`-separated regexes with optional `=>replacement`, skips invalid
+  regexes, and `scrubPii` applies custom rules after the built-ins. With no custom rules, built-in behavior
+  is unchanged.
+
+## 418. Custom redaction applied across logs (manual)
+
+- **Observe:** set `redaction.patterns=EMP-\d{6}=>EMP-****`. A log line or trace attribute containing
+  `EMP-123456` is masked to `EMP-****` in both the console and `json` profiles, alongside the built-in
+  bearer/key/email masking.

@@ -48,6 +48,23 @@ public final class Redact {
             java.util.regex.Pattern.compile("\\b[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}\\b");
 
     /**
+     * Operator-supplied extra redaction rules (compiled regex + replacement), applied after the built-in
+     * patterns. Populated once at startup from {@code redaction.patterns} (see {@code RedactionConfig});
+     * empty by default. Held as a volatile immutable list so the static callers ({@link #scrubPii}) stay
+     * lock-free and thread-safe.
+     */
+    public record Rule(java.util.regex.Pattern pattern, String replacement) {}
+
+    private static volatile java.util.List<Rule> extraRules = java.util.List.of();
+
+    /** Replace the operator-configured extra rules. Called once at startup; idempotent and thread-safe. */
+    public static void setExtraRules(java.util.List<Rule> rules) {
+        extraRules = (rules == null) ? java.util.List.of() : java.util.List.copyOf(rules);
+    }
+
+    public static int extraRuleCount() { return extraRules.size(); }
+
+    /**
      * Mask secret- and PII-shaped substrings in {@code text}: bearer tokens, {@code key=value} secrets,
      * {@code sk-} / AWS / JWT tokens, and email addresses. Null-safe and idempotent. This is for keeping
      * such values out of trace attributes and log lines; it is best-effort pattern matching, not a
@@ -62,6 +79,36 @@ public final class Redact {
         out = AWS_KEY.matcher(out).replaceAll("AKIA****");
         out = JWT.matcher(out).replaceAll("eyJ****");
         out = EMAIL.matcher(out).replaceAll("****@****");
+        for (Rule r : extraRules) {
+            out = r.pattern().matcher(out).replaceAll(java.util.regex.Matcher.quoteReplacement(r.replacement()));
+        }
         return out;
+    }
+
+    /**
+     * Pure: parse operator-supplied redaction rules from config. Entries are separated by {@code ;;}; each
+     * entry is a regex, optionally followed by {@code =>replacement} (default replacement is {@code ****}).
+     * Invalid regexes are skipped. Example: {@code EMP-\d{6}=>EMP-****;;(?i)\bpassword\b\s*\S+}.
+     */
+    public static java.util.List<Rule> parseRules(String cfg) {
+        java.util.List<Rule> rules = new java.util.ArrayList<>();
+        if (cfg == null || cfg.isBlank()) return rules;
+        for (String entry : cfg.split(";;")) {
+            String e = entry.trim();
+            if (e.isEmpty()) continue;
+            String regex = e, replacement = "****";
+            int arrow = e.indexOf("=>");
+            if (arrow >= 0) {
+                regex = e.substring(0, arrow).trim();
+                replacement = e.substring(arrow + 2); // keep replacement verbatim (may be empty)
+            }
+            if (regex.isEmpty()) continue;
+            try {
+                rules.add(new Rule(java.util.regex.Pattern.compile(regex), replacement));
+            } catch (java.util.regex.PatternSyntaxException ignore) {
+                // skip invalid regex rather than fail startup
+            }
+        }
+        return rules;
     }
 }
