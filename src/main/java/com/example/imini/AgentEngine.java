@@ -49,6 +49,7 @@ public class AgentEngine {
     private final Metrics metrics;
     private final RunRecorder recorder;
     private final CapabilityService capabilities;
+    private final ToolRateLimiter toolRateLimiter;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
@@ -68,7 +69,8 @@ public class AgentEngine {
 
     public AgentEngine(LlamaClient llama, ContextManager context,
                        PermissionService permissions, InterruptService interrupt, HookService hooks,
-                       Metrics metrics, RunRecorder recorder, CapabilityService capabilities) {
+                       Metrics metrics, RunRecorder recorder, CapabilityService capabilities,
+                       ToolRateLimiter toolRateLimiter) {
         this.llama = llama;
         this.context = context;
         this.permissions = permissions;
@@ -77,6 +79,7 @@ public class AgentEngine {
         this.metrics = metrics;
         this.recorder = recorder;
         this.capabilities = capabilities;
+        this.toolRateLimiter = toolRateLimiter;
     }
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
@@ -100,6 +103,9 @@ public class AgentEngine {
         // The role governing this run, captured on the current thread (request thread, or the effective role
         // propagated from a parent run). Used to scope tool calls, including in delegated sub-agent runs.
         final String callerRole = capabilities.currentRole();
+        // The tenant (caller identity) for this run, captured on the current thread; used for per-tool
+        // rate limiting so one tenant's tool usage can't exhaust another's budget.
+        final String callerTenant = RequestContext.current().user();
         List<Map<String, Object>> messages = new ArrayList<>(startingMessages);
         List<Map<String, Object>> specs = specsFor(tools);
         boolean interactive = "main".equals(label); // only the main loop honors interrupt/steer
@@ -196,7 +202,8 @@ public class AgentEngine {
                 final RunSink s = sink;
                 for (CallInfo ci : infos) {
                     if (ci.tool != null && !ci.tool.mutating && validationErrors.get(ci) == null
-                            && capabilities.permitsCurrent(ci.name)) {
+                            && capabilities.permitsCurrent(ci.name)
+                            && toolRateLimiter.allow(callerTenant, ci.name)) {
                         futures.put(ci, pool.submit(() -> runTool(callerRole, sid, s, ci.name, ci.tool, ci.args)));
                     }
                 }
@@ -215,6 +222,12 @@ public class AgentEngine {
                     result = "DENIED: tool '" + ci.name + "' is outside this caller's capability scope.";
                     sink.log("[" + label + ":capability] denied " + ci.name);
                     capabilities.auditDenial(ci.name);
+                } else if (futures.get(ci) == null && !toolRateLimiter.allow(callerTenant, ci.name)) {
+                    // Per-tool rate limit: this tenant has called this tool too often in the window.
+                    // (Skipped when a future already exists — that tool was allowed at pre-submission.)
+                    result = "RATE_LIMITED: tool '" + ci.name + "' exceeded its per-tenant rate limit; try again shortly.";
+                    sink.log("[" + label + ":ratelimit] throttled " + ci.name);
+                    capabilities.auditToolRateLimited(ci.name);
                 } else if (!ci.tool.mutating) {
                     sink.log("[" + label + ":tool] " + ci.name + " " + ci.args + (parallelNote ? " (parallel)" : ""));
                     Future<String> f = futures.get(ci);

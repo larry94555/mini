@@ -169,6 +169,16 @@ public class CapabilityService {
         }
     }
 
+    /** Record a per-tool rate-limit rejection in the audit log. Best-effort. */
+    public void auditToolRateLimited(String tool) {
+        try {
+            audit.record(RequestContext.current().user(), "tool_rate_limited",
+                    "tool:" + tool, "exceeded per-tenant rate limit");
+        } catch (Exception ignore) {
+            // auditing must never break a run
+        }
+    }
+
     /** The resolved scopes, for the /admin/capabilities view. */
     public Map<String, Object> describe() {
         Map<String, Object> out = new LinkedHashMap<>();

@@ -79,6 +79,7 @@ public class AgentController {
     private final CostService cost;
     private final EvalHarness eval;
     private final CapabilityService capabilities;
+    private final ToolRateLimiter toolRateLimiter;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -91,7 +92,8 @@ public class AgentController {
                            PluginService plugins, SessionSettings sessionSettings,
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
                            Database db, SessionReaper reaper,
-                           Tracer tracer, CostService cost, EvalHarness eval, CapabilityService capabilities) {
+                           Tracer tracer, CostService cost, EvalHarness eval, CapabilityService capabilities,
+                           ToolRateLimiter toolRateLimiter) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -125,6 +127,7 @@ public class AgentController {
         this.cost = cost;
         this.eval = eval;
         this.capabilities = capabilities;
+        this.toolRateLimiter = toolRateLimiter;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -663,6 +666,36 @@ public class AgentController {
     public Map<String, Object> adminCapabilities() {
         requireAdmin();
         return capabilities.describe();
+    }
+
+    /** The configured per-tool rate limits. Admin only. */
+    @GetMapping("/admin/tool-rate-limits")
+    public Map<String, Object> adminToolRateLimits() {
+        requireAdmin();
+        return toolRateLimiter.describe();
+    }
+
+    /**
+     * Human-readable audit-log viewer: a filterable HTML page over the audit table (same data as
+     * {@code GET /audit}), surfacing capability denials, spend alerts, tool rate-limit rejections, and every
+     * other audited action. Admin only.
+     */
+    @GetMapping(value = "/admin/audit.html", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> adminAuditHtml(
+            @RequestParam(name = "user", defaultValue = "") String user,
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "target", defaultValue = "") String target,
+            @RequestParam(name = "limit", defaultValue = "200") int limit) {
+        requireAdmin();
+        int capped = Math.max(1, Math.min(limit, 1000));
+        List<AuditLog.Entry> rows = audit.recent(
+                user.isBlank() ? null : user,
+                action.isBlank() ? null : action,
+                target.isBlank() ? null : target,
+                0, capped);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(AuditDashboard.render(rows, user, action, target, capped));
     }
 
     /**
