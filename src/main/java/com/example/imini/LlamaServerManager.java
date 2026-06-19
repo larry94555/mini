@@ -45,6 +45,7 @@ public class LlamaServerManager {
     @Value("${llama.alias:qwen2.5-3b-instruct}") private String alias;
     @Value("${llama.host:0.0.0.0}") private String host;
     @Value("${llama.port:8081}") private int port;
+    @Value("${llama.client-host:127.0.0.1}") private String clientHost; // address the JVM dials; must match LlamaClient
     @Value("${llama.ctx-size:0}") private int ctxSize;
     @Value("${llama.gpu-layers:-1}") private int gpuLayers;
     @Value("${llama.threads:0}") private int threads;
@@ -142,7 +143,7 @@ public class LlamaServerManager {
     private boolean healthy() {
         try {
             HttpResponse<String> r = http.send(
-                    HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/health")).GET().build(),
+                    HttpRequest.newBuilder(URI.create("http://" + clientHost + ":" + port + "/health")).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             return r.statusCode() == 200;
         } catch (Exception e) {
