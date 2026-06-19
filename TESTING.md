@@ -3408,3 +3408,44 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `parseTiers` and `parseAssignments` read the CSV config (skipping malformed entries);
   `resolveQuota` returns the assigned tier's quota, falling back to the default quota when a tenant is
   unassigned or points at an unknown tier. `GET /admin/cost` reports the configured tiers.
+
+---
+
+# Capability scoping, secret/PII redaction, spend alerts + usage dashboard
+
+## 403. Capability scope resolution (CapabilityServiceTest)
+
+- **Run:** `./mvnw -Dtest=CapabilityServiceTest test`.
+- **Observe:** `parseScopes` splits `role=t1|t2, role2=*` into per-role tool sets; `parseScope("*")` is
+  unrestricted (null); `permits` honours the `*` wildcard and membership; malformed entries are skipped.
+
+## 404. Capability enforcement (manual)
+
+- **Observe:** set `capabilities.enabled=true` and `capabilities.scopes=reader=read_file|grep`, then drive a
+  run as a `reader` principal. A `run_command` (or any tool outside the scope) is denied with
+  `DENIED: tool '...' is outside this caller's capability scope.` before it executes; `read_file`/`grep`
+  still work. `GET /admin/capabilities` shows the resolved scopes. Admins and background runs are unrestricted.
+
+## 405. Secret / PII scrubbing (RedactPiiTest)
+
+- **Run:** `./mvnw -Dtest=RedactPiiTest test`.
+- **Observe:** `Redact.scrubPii` masks bearer tokens, `key=value` secrets, `sk-`/AWS/JWT tokens, and emails,
+  while leaving ordinary prose untouched; null/empty-safe.
+
+## 406. Redaction in traces and logs (manual)
+
+- **Observe:** with `tracing.enabled=true` and `redaction.enabled=true`, a span attribute containing a token
+  shows masked in `GET /admin/traces`. Console log lines with secret-shaped values are masked by the `%rmsg`
+  converter (switch to `%msg` in `logback-spring.xml` to confirm the difference).
+
+## 407. Spend-alert math (SpendAlertTest)
+
+- **Run:** `./mvnw -Dtest=SpendAlertTest test`.
+- **Observe:** `alertThresholdTokens` returns the lower of the absolute and percent-of-quota triggers
+  (ignoring disabled ones); `crossed` is edge-triggered (alerts once when first reaching the threshold).
+
+## 408. Usage dashboard render (UsageDashboardTest)
+
+- **Run:** `./mvnw -Dtest=UsageDashboardTest test`.
+- **Observe:** `UsageDashboard.render` produces a self-contained HTML page with per-tenant rows, HTML-escapes
+  tenant names, and shows disabled/empty states. Live: `GET /admin/usage` renders the same from real data.

@@ -37,6 +37,7 @@ public class Tracer {
     @Value("${tracing.ring-size:512}") private int ringSize;
     @Value("${tracing.otlp-endpoint:}") private String otlpEndpoint; // blank => no network export
     @Value("${tracing.service-name:imini}") private String serviceName;
+    @Value("${redaction.enabled:true}") private boolean redact; // scrub secret/PII-shaped attribute values
 
     private final Database db;
 
@@ -69,9 +70,9 @@ public class Tracer {
             this.name = name; this.startMs = startMs;
         }
 
-        public Span attr(String k, String v) { if (k != null && v != null) attributes.put(k, v); return this; }
+        public Span attr(String k, String v) { if (k != null && v != null) attributes.put(k, redact ? Redact.scrubPii(v) : v); return this; }
         public Span attr(String k, long v) { attributes.put(k, Long.toString(v)); return this; }
-        public Span error(String message) { this.status = "ERROR"; if (message != null) attributes.put("error", message); return this; }
+        public Span error(String message) { this.status = "ERROR"; if (message != null) attributes.put("error", redact ? Redact.scrubPii(message) : message); return this; }
 
         public String traceId() { return traceId; }
         public String spanId() { return spanId; }

@@ -13,10 +13,13 @@
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
-    <!-- plain, human-readable console -->
+    <!-- Mask secret/PII-shaped substrings in every console message (see RedactingMessageConverter). -->
+    <conversionRule conversionWord="rmsg" converterClass="com.example.imini.RedactingMessageConverter"/>
+
+    <!-- plain, human-readable console; %rmsg is the redacting message converter -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] [%X{reqId:-}] %-40.40logger{39} : %rmsg%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>

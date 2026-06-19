@@ -48,6 +48,7 @@ public class AgentEngine {
     private final HookService hooks;
     private final Metrics metrics;
     private final RunRecorder recorder;
+    private final CapabilityService capabilities;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
@@ -67,7 +68,7 @@ public class AgentEngine {
 
     public AgentEngine(LlamaClient llama, ContextManager context,
                        PermissionService permissions, InterruptService interrupt, HookService hooks,
-                       Metrics metrics, RunRecorder recorder) {
+                       Metrics metrics, RunRecorder recorder, CapabilityService capabilities) {
         this.llama = llama;
         this.context = context;
         this.permissions = permissions;
@@ -75,6 +76,7 @@ public class AgentEngine {
         this.hooks = hooks;
         this.metrics = metrics;
         this.recorder = recorder;
+        this.capabilities = capabilities;
     }
 
     public String run(String systemPrompt, String userMessage, Map<String, Tool> tools,
@@ -190,7 +192,8 @@ public class AgentEngine {
             if (parallelTools) {
                 final RunSink s = sink;
                 for (CallInfo ci : infos) {
-                    if (ci.tool != null && !ci.tool.mutating && validationErrors.get(ci) == null) {
+                    if (ci.tool != null && !ci.tool.mutating && validationErrors.get(ci) == null
+                            && capabilities.permitsCurrent(ci.name)) {
                         futures.put(ci, pool.submit(() -> runTool(sid, s, ci.name, ci.tool, ci.args)));
                     }
                 }
@@ -204,6 +207,10 @@ public class AgentEngine {
                 } else if (validationErrors.get(ci) != null) {
                     result = validationErrors.get(ci);
                     sink.log("[" + label + ":invalid] " + ci.name + " " + ci.args);
+                } else if (!capabilities.permitsCurrent(ci.name)) {
+                    // Tool-level capability scoping: this caller's role is not allowed to use this tool.
+                    result = "DENIED: tool '" + ci.name + "' is outside this caller's capability scope.";
+                    sink.log("[" + label + ":capability] denied " + ci.name);
                 } else if (!ci.tool.mutating) {
                     sink.log("[" + label + ":tool] " + ci.name + " " + ci.args + (parallelNote ? " (parallel)" : ""));
                     Future<String> f = futures.get(ci);

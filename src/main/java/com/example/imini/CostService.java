@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,6 +41,12 @@ public class CostService {
     // assignment uses cost.monthly-token-quota (the default tier).
     @Value("${cost.tiers:}") private String tiersCfg;
     @Value("${cost.tier-assignments:}") private String tierAssignmentsCfg;
+    // Spend alerts: warn once per tenant per month when monthly tokens cross a threshold. The threshold is
+    // the LOWER of an absolute token count (cost.alert-token-threshold, 0=off) and a percentage of the
+    // tenant's quota (cost.alert-percent of quotaFor(tenant), 0=off). Edge-triggered, so each crossing
+    // alerts exactly once.
+    @Value("${cost.alert-token-threshold:0}") private long alertTokenThreshold;
+    @Value("${cost.alert-percent:0}") private int alertPercent;
 
     private final Database db;
 
@@ -48,6 +55,12 @@ public class CostService {
 
     // In-memory running totals per tenant for THIS process (fast path; ledger is the durable source).
     private final Map<String, long[]> totals = new ConcurrentHashMap<>(); // tenant -> [inTok, outTok, microUsd]
+
+    // Spend-alert state: which tenant+month thresholds have already fired (so we alert once), and a
+    // bounded list of recent alerts for the dashboard.
+    private final Set<String> firedAlerts = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.Deque<Map<String, Object>> recentAlerts = new java.util.ArrayDeque<>();
+    private final Object alertLock = new Object();
 
     public CostService(Database db) {
         this.db = db;
@@ -177,7 +190,79 @@ public class CostService {
                 log.warn("[cost] ledger write failed: " + e.getMessage());
             }
         }
+        maybeAlert(tenant);
         return micro;
+    }
+
+    /**
+     * Pure: the effective alert threshold in tokens, given the tenant's quota and the two configured
+     * triggers. Returns the lower of the absolute threshold and the percent-of-quota threshold, ignoring
+     * any that are disabled (0). Returns 0 when no trigger applies (alerts off).
+     */
+    static long alertThresholdTokens(long quota, long absoluteThreshold, int percent) {
+        long pctThreshold = (percent > 0 && quota > 0) ? (quota * percent) / 100 : 0;
+        long abs = absoluteThreshold > 0 ? absoluteThreshold : 0;
+        if (pctThreshold == 0) return abs;
+        if (abs == 0) return pctThreshold;
+        return Math.min(abs, pctThreshold);
+    }
+
+    /** Pure: did this run cross the threshold for the first time? (prev below, now at-or-above). */
+    static boolean crossed(long prevTokens, long newTokens, long threshold) {
+        return threshold > 0 && prevTokens < threshold && newTokens >= threshold;
+    }
+
+    /** Check whether the tenant just crossed its spend-alert threshold and, if so, fire a one-time alert. */
+    private void maybeAlert(String tenant) {
+        long threshold = alertThresholdTokens(quotaFor(tenant), alertTokenThreshold, alertPercent);
+        if (threshold <= 0) return;
+        long monthStart = startOfMonthMs(System.currentTimeMillis());
+        String fireKey = tenant + "@" + monthStart + "#" + threshold;
+        if (firedAlerts.contains(fireKey)) return;
+        long now = tokensThisMonth(tenant);
+        long prev = now - lastRunTokens(tenant);
+        if (crossed(prev, now, threshold)) {
+            if (firedAlerts.add(fireKey)) {
+                long quota = quotaFor(tenant);
+                Map<String, Object> alert = new LinkedHashMap<>();
+                alert.put("ts", System.currentTimeMillis());
+                alert.put("tenant", tenant);
+                alert.put("tokens", now);
+                alert.put("threshold", threshold);
+                alert.put("quota", quota);
+                alert.put("percentOfQuota", quota > 0 ? Math.round(now * 100.0 / quota) : null);
+                synchronized (alertLock) {
+                    recentAlerts.addLast(alert);
+                    while (recentAlerts.size() > 100) recentAlerts.removeFirst();
+                }
+                log.warn("[cost] ALERT tenant '" + tenant + "' crossed " + threshold + " tokens this month"
+                        + (quota > 0 ? " (" + Math.round(now * 100.0 / quota) + "% of quota " + quota + ")" : ""));
+            }
+        }
+    }
+
+    /** Tokens charged on the most recent run for a tenant (in-memory), for edge detection. */
+    private long lastRunTokens(String tenant) {
+        // Approximate "this run" as the smallest positive delta we can attribute; in practice maybeAlert
+        // runs right after totals/ledger update, so prev = now - thisRun. We recover thisRun from the
+        // ledger's latest row when available, else fall back to 0 (alert fires when now >= threshold).
+        if (db.available()) {
+            long monthStart = startOfMonthMs(System.currentTimeMillis());
+            List<Long> rows = db.query(
+                    "SELECT input_tokens + output_tokens FROM cost_ledger WHERE tenant=? AND ts >= ? "
+                            + "ORDER BY ts DESC LIMIT 1", rs -> rs.getLong(1), tenant, monthStart);
+            return rows.isEmpty() ? 0 : rows.get(0);
+        }
+        return 0;
+    }
+
+    /** Recent spend alerts (newest first), for GET /admin/cost and the usage dashboard. */
+    public List<Map<String, Object>> alerts() {
+        synchronized (alertLock) {
+            List<Map<String, Object>> out = new ArrayList<>(recentAlerts);
+            java.util.Collections.reverse(out);
+            return out;
+        }
     }
 
     /** Per-tenant usage summary for the current month, for GET /admin/cost. */
@@ -221,6 +306,7 @@ public class CostService {
             tenants = mem;
         }
         out.put("tenants", tenants);
+        out.put("alerts", alerts());
         out.put("month", "current");
         return out;
     }

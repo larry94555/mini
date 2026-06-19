@@ -78,6 +78,7 @@ public class AgentController {
     private final Tracer tracer;
     private final CostService cost;
     private final EvalHarness eval;
+    private final CapabilityService capabilities;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public AgentController(AgentLoop loop, SessionStore sessions, CheckpointStore checkpoints,
@@ -90,7 +91,7 @@ public class AgentController {
                            PluginService plugins, SessionSettings sessionSettings,
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
                            Database db, SessionReaper reaper,
-                           Tracer tracer, CostService cost, EvalHarness eval) {
+                           Tracer tracer, CostService cost, EvalHarness eval, CapabilityService capabilities) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -123,6 +124,7 @@ public class AgentController {
         this.tracer = tracer;
         this.cost = cost;
         this.eval = eval;
+        this.capabilities = capabilities;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -645,6 +647,22 @@ public class AgentController {
     public Map<String, Object> adminCost() {
         requireAdmin();
         return cost.summary();
+    }
+
+    /** Human-readable per-tenant usage dashboard (HTML) rendered from the cost summary. Admin only. */
+    @GetMapping(value = "/admin/usage", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> adminUsage() {
+        requireAdmin();
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(UsageDashboard.render(cost.summary()));
+    }
+
+    /** The resolved tool-capability scopes per role (capability scoping). Admin only. */
+    @GetMapping("/admin/capabilities")
+    public Map<String, Object> adminCapabilities() {
+        requireAdmin();
+        return capabilities.describe();
     }
 
     /**
