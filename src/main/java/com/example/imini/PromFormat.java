@@ -99,6 +99,12 @@ public final class PromFormat {
                     line(sb, PREFIX + "alerts_route_suppressed", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("suppressed"));
                 }
             }
+            if (alerts.get("by_tier") instanceof Map<?, ?> byTier) {
+                help(sb, "alerts_escalated_tier", "Escalations paged by ladder tier", "counter");
+                for (Map.Entry<String, Long> e : sorted((Map<String, Long>) byTier)) {
+                    line(sb, PREFIX + "alerts_escalated_tier", "tier=\"" + esc(e.getKey()) + "\"", e.getValue());
+                }
+            }
         }
         return sb.toString();
     }

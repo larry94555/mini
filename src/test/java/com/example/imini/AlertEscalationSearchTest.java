@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AlertEscalationSearchTest {
 
     private static AlertSink.DeadLetter dl(String action, String status, String payload) {
-        return new AlertSink.DeadLetter("id", 1L, payload, "u", 1, "err", status, 0L, action);
+        return new AlertSink.DeadLetter("id", 1L, payload, "u", 1, "err", status, 0L, action, 0, 0L, 0L);
     }
 
     @Test

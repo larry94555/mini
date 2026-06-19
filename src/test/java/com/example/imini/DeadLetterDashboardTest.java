@@ -10,7 +10,7 @@ class DeadLetterDashboardTest {
 
     private static AlertSink.DeadLetter dl(String id, String action, String status, String payload) {
         return new AlertSink.DeadLetter(id, System.currentTimeMillis() - 5000, payload, "https://u",
-                4, "HTTP 500", status, 0L, action);
+                4, "HTTP 500", status, 0L, action, 0, 0L, 0L);
     }
 
     @Test

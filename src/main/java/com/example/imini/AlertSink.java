@@ -108,6 +108,8 @@ public class AlertSink {
 
     // per-route delivery counters: action -> [sent, failed, dead_lettered]
     private final Map<String, long[]> byRoute = new java.util.concurrent.ConcurrentHashMap<>();
+    // per-tier escalation counters: tier number -> count paged
+    private final Map<Integer, AtomicLong> byTier = new java.util.concurrent.ConcurrentHashMap<>();
 
     // dedup windows: key (action|target) -> mutable window state
     private final Map<String, long[]> dedupState = new java.util.concurrent.ConcurrentHashMap<>(); // [windowStart, suppressed]
@@ -127,7 +129,8 @@ public class AlertSink {
 
     /** A dead-lettered delivery row (durable rows carry an id/status/history; memory rows are payload-only). */
     public record DeadLetter(String id, long ts, String payload, String url, int attempts,
-                             String lastError, String status, long lastAttemptAt, String action) {}
+                             String lastError, String status, long lastAttemptAt, String action,
+                             int escalationTier, long escalatedAt, long ackedAt) {}
 
     public AlertSink(AuditLog audit, Database db) {
         this.audit = audit;
@@ -576,6 +579,7 @@ public class AlertSink {
         m.put("suppressed", suppressed.get());
         m.put("escalated", escalated.get());
         m.put("digested", digested.get());
+        m.put("by_tier", byTierSnapshot());
         m.put("in_flight", (long) inFlight.get());
         m.put("dead_letter_persistent", dlPersistent());
         m.put("routes", routes.keySet());
@@ -585,6 +589,13 @@ public class AlertSink {
     }
 
     /** Per-route counters as action -> {sent, failed, dead_lettered} for the metrics snapshot. */
+    /** Per-tier escalation counts as {tierNumber -> count} for the metrics snapshot. */
+    private Map<String, Long> byTierSnapshot() {
+        Map<String, Long> out = new LinkedHashMap<>();
+        new java.util.TreeMap<>(byTier).forEach((tier, c) -> out.put(Integer.toString(tier), c.get()));
+        return out;
+    }
+
     private Map<String, Map<String, Long>> byRouteSnapshot() {
         Map<String, Map<String, Long>> out = new LinkedHashMap<>();
         for (Map.Entry<String, long[]> e : byRoute.entrySet()) {
@@ -735,6 +746,7 @@ public class AlertSink {
             if (claimed != 1) continue; // lost the race to another instance/tick
             enqueue(d.payload(), tier.url(), null, "escalation_t" + next);
             escalated.incrementAndGet();
+            byTier.computeIfAbsent(next, k -> new AtomicLong()).incrementAndGet();
             n++;
         }
         if (n > 0) log.warn("[alerts] escalated " + n + " un-acked dead-letter(s) up the ladder");
@@ -750,6 +762,79 @@ public class AlertSink {
             log.warn("[alerts] ack failed for " + id + ": " + ex.getMessage());
             return 0;
         }
+    }
+
+    /** Append the standard action/status/q filter clauses to {@code sql}, collecting bind params. */
+    private static void appendFilters(StringBuilder sql, List<Object> params,
+                                      String action, String status, String q) {
+        if (action != null && !action.isBlank()) { sql.append(" AND action=?"); params.add(action); }
+        if (status != null && !status.isBlank()) { sql.append(" AND status=?"); params.add(status); }
+        if (q != null && !q.isBlank()) { sql.append(" AND payload LIKE ?"); params.add("%" + q + "%"); }
+    }
+
+    /**
+     * Bulk-acknowledge every {@code failed}, un-acked dead-letter matching the filters (so a backlog can be
+     * cleared after an outage). Returns the number acked. Durable store only.
+     */
+    public int ackMatching(String action, String status, String q) {
+        if (!dlPersistent()) return 0;
+        StringBuilder sql = new StringBuilder("UPDATE alerts_dead_letter SET acked_at=? "
+                + "WHERE status='failed' AND acked_at IS NULL");
+        List<Object> params = new ArrayList<>();
+        params.add(System.currentTimeMillis());
+        appendFilters(sql, params, action, status, q);
+        try {
+            int n = db.update(sql.toString(), params.toArray());
+            if (n > 0) log.info("[alerts] bulk-acked " + n + " dead-letter(s)");
+            return n;
+        } catch (Exception ex) {
+            log.warn("[alerts] bulk ack failed: " + ex.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Bulk-replay every {@code failed} dead-letter matching the filters, using the same crash-safe per-row
+     * claim as {@link #replay(String)} (mark {@code replaying}, re-enqueue carrying the id). Returns the number
+     * re-enqueued. Durable store only.
+     */
+    public synchronized int replayMatching(String action, String status, String q) {
+        if (!enabled || scheduler == null || !dlPersistent()) return 0;
+        StringBuilder sql = new StringBuilder("SELECT id, ts, payload, url, attempts, last_error, status, "
+                + "last_attempt_at, action, escalation_tier, escalated_at, acked_at FROM alerts_dead_letter "
+                + "WHERE status='failed'");
+        List<Object> params = new ArrayList<>();
+        appendFilters(sql, params, action, status, q);
+        sql.append(" ORDER BY ts ASC LIMIT 500");
+        List<DeadLetter> rows;
+        try {
+            rows = db.query(sql.toString(),
+                    rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
+                            rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9),
+                            rs.getInt(10), rs.getLong(11), rs.getLong(12)),
+                    params.toArray());
+        } catch (Exception ex) {
+            log.warn("[alerts] bulk replay query failed: " + ex.getMessage());
+            return 0;
+        }
+        int n = 0;
+        for (DeadLetter d : rows) {
+            String url = (d.url() != null && !d.url().isBlank()) ? d.url() : webhookUrl;
+            if (url == null || url.isBlank()) continue;
+            int claimed;
+            try {
+                claimed = db.update("UPDATE alerts_dead_letter SET status='replaying', last_attempt_at=? "
+                        + "WHERE id=? AND status='failed'", System.currentTimeMillis(), d.id());
+            } catch (Exception ex) {
+                log.warn("[alerts] could not mark replaying " + d.id() + ": " + ex.getMessage());
+                continue;
+            }
+            if (claimed != 1) continue; // lost the race
+            enqueue(d.payload(), url, d.id(), d.action());
+            n++;
+        }
+        if (n > 0) { replayed.addAndGet(n); log.info("[alerts] bulk-replaying " + n + " dead-letter(s)"); }
+        return n;
     }
 
     /** Delete all dead-letters (or one by {@code id}). Clears the in-memory ring when not persistent. */
@@ -800,7 +885,7 @@ public class AlertSink {
         int lim = limit <= 0 ? 50 : Math.min(limit, 500);
         if (dlPersistent()) {
             StringBuilder sql = new StringBuilder("SELECT id, ts, payload, url, attempts, last_error, status, "
-                    + "last_attempt_at, action FROM alerts_dead_letter WHERE 1=1");
+                    + "last_attempt_at, action, escalation_tier, escalated_at, acked_at FROM alerts_dead_letter WHERE 1=1");
             List<Object> params = new ArrayList<>();
             if (action != null && !action.isBlank()) { sql.append(" AND action=?"); params.add(action); }
             if (status != null && !status.isBlank()) { sql.append(" AND status=?"); params.add(status); }
@@ -810,7 +895,8 @@ public class AlertSink {
             try {
                 return db.query(sql.toString(),
                         rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
-                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9)),
+                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9),
+                                rs.getInt(10), rs.getLong(11), rs.getLong(12)),
                         params.toArray());
             } catch (Exception ex) {
                 log.warn("[alerts] dead-letter page query failed: " + ex.getMessage());
@@ -849,10 +935,12 @@ public class AlertSink {
     public List<DeadLetter> deadLetterEntries() {
         if (dlPersistent()) {
             try {
-                return db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at, action "
+                return db.query("SELECT id, ts, payload, url, attempts, last_error, status, last_attempt_at, action, "
+                                + "escalation_tier, escalated_at, acked_at "
                                 + "FROM alerts_dead_letter ORDER BY ts DESC LIMIT 500",
                         rs -> new DeadLetter(rs.getString(1), rs.getLong(2), rs.getString(3), rs.getString(4),
-                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9)));
+                                rs.getInt(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getString(9),
+                                rs.getInt(10), rs.getLong(11), rs.getLong(12)));
             } catch (Exception ex) {
                 log.warn("[alerts] could not read dead-letter table: " + ex.getMessage());
                 return List.of();
@@ -861,7 +949,7 @@ public class AlertSink {
         List<DeadLetter> out = new ArrayList<>();
         synchronized (dlLock) {
             for (String p : deadLetter) out.add(new DeadLetter(null, 0L, p, null, maxRetries + 1,
-                    "exhausted retries", "failed", 0L, null));
+                    "exhausted retries", "failed", 0L, null, 0, 0L, 0L));
         }
         return out;
     }

@@ -3763,3 +3763,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   a suppressed storm for one key, then wait a window. The reaper emits a single digest (routed to that
   action's webhook) summarizing the suppressed count and clears the window; `imini_alerts_digested`
   increments.
+
+---
+
+# Escalation tier/ack visibility, per-tier metrics, bulk dead-letter actions
+
+## 450. Tier/ack surfaced in record + dashboard (AlertTierAckBulkTest)
+
+- **Run:** `./mvnw -Dtest=AlertTierAckBulkTest test`.
+- **Observe:** `DeadLetter` carries `escalationTier`/`escalatedAt`/`ackedAt`; `DeadLetterDashboard` renders a
+  **tier** column (`T2`, or `—` when not escalated), an **acked** badge when `ackedAt>0`, and hides the
+  per-row Ack button on already-acked rows.
+
+## 451. Per-tier escalation metric (PromFormatTierTest)
+
+- **Run:** `./mvnw -Dtest=PromFormatTierTest test`.
+- **Observe:** `PromFormat.render` emits `imini_alerts_escalated_tier{tier="N"}` from `alerts.by_tier`.
+- **Live:** `GET /metrics/prom` shows per-tier series once the ladder has paged (TESTING 447).
+
+## 452. Bulk ack/replay (AlertTierAckBulkTest + manual)
+
+- **Observe (unit):** the viewer renders Ack-all / Replay-all buttons carrying the current filter; bulk
+  methods are no-ops without a DB.
+- **Observe (manual, needs DB):** with several failed dead-letters, `POST /admin/alerts/ack-all?status=failed`
+  acks them all (they stop escalating); `POST /admin/alerts/replay-all?action=spend_alert` re-enqueues every
+  matching failed row using the same crash-safe per-row claim. Both accept `action`/`status`/`q` filters.
+
+## 453. JSON exposes escalation/ack fields (manual)
+
+- **Observe:** `GET /admin/alerts/failed` rows now include `escalationTier`, `escalatedAt`, and `ackedAt`
+  alongside the existing fields.
