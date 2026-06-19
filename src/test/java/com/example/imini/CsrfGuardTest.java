@@ -2,12 +2,16 @@ package com.example.imini;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CsrfGuardTest {
+
+    private static final byte[] KEY = "shared-secret-xyz".getBytes(StandardCharsets.UTF_8);
 
     @Test
     void constantTimeEqualsMatchesAndRejects() {
@@ -19,31 +23,60 @@ class CsrfGuardTest {
     }
 
     @Test
-    void tokenIsStableAndNonEmpty() {
-        CsrfGuard g = new CsrfGuard();
-        assertNotNull(g.token());
-        assertTrue(g.token().length() >= 16);
-        assertTrue(g.token().equals(g.token())); // stable per instance
+    void mintedTokenVerifiesWithSameKey() {
+        long now = 1_000_000L;
+        String tok = CsrfGuard.mint(now, KEY, 3600);
+        assertNotNull(tok);
+        assertTrue(tok.contains("."));
+        assertTrue(CsrfGuard.verify(tok, KEY, now + 1000));      // within TTL
     }
 
     @Test
-    void validAndRequireWhenEnabled() {
-        CsrfGuard g = new CsrfGuard();
-        // enabled defaults to false here (no Spring @Value injection), so simulate enabled via reflection-free path:
-        // valid() returns true when disabled; we test the matching logic through constantTimeEquals above and
-        // the require() throw path below by toggling the field.
-        assertTrue(g.valid("anything")); // disabled (no injection) -> always valid
+    void expiredTokenRejected() {
+        long now = 1_000_000L;
+        String tok = CsrfGuard.mint(now, KEY, 10);                // expires at now+10s
+        assertFalse(CsrfGuard.verify(tok, KEY, now + 11_000));   // 11s later -> expired
     }
 
     @Test
-    void requireThrowsOnBadTokenWhenEnabled() throws Exception {
+    void tamperedOrWrongKeyRejected() {
+        long now = 1_000_000L;
+        String tok = CsrfGuard.mint(now, KEY, 3600);
+        assertFalse(CsrfGuard.verify(tok, "different-key".getBytes(StandardCharsets.UTF_8), now));
+        assertFalse(CsrfGuard.verify(tok + "x", KEY, now));      // tampered signature
+        assertFalse(CsrfGuard.verify("garbage", KEY, now));
+        assertFalse(CsrfGuard.verify(null, KEY, now));
+    }
+
+    @Test
+    void crossInstanceTokensVerifyWithSharedSecret() {
+        // two guards with the same configured secret accept each other's tokens (multi-instance)
+        long now = 2_000_000L;
+        String a = CsrfGuard.mint(now, KEY, 3600);
+        assertTrue(CsrfGuard.verify(a, KEY, now + 5000)); // instance B (same KEY) accepts instance A's token
+    }
+
+    @Test
+    void disabledGuardAlwaysValid() {
+        CsrfGuard g = new CsrfGuard(); // enabled defaults false without Spring injection
+        assertTrue(g.valid("anything"));
+    }
+
+    @Test
+    void enabledGuardRequiresValidToken() throws Exception {
         CsrfGuard g = new CsrfGuard();
-        var f = CsrfGuard.class.getDeclaredField("enabled");
-        f.setAccessible(true);
-        f.setBoolean(g, true);
-        assertTrue(g.valid(g.token()));
+        set(g, "enabled", true);
+        set(g, "ttlSeconds", 3600L);
+        String tok = g.token();
+        assertTrue(g.valid(tok));
         assertFalse(g.valid("wrong"));
         assertThrows(RuntimeException.class, () -> g.require("wrong"));
-        g.require(g.token()); // correct token: no throw
+        g.require(tok); // valid token: no throw
+    }
+
+    private static void set(Object o, String field, Object val) throws Exception {
+        var f = CsrfGuard.class.getDeclaredField(field);
+        f.setAccessible(true);
+        f.set(o, val);
     }
 }
