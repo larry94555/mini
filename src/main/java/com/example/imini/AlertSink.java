@@ -614,6 +614,78 @@ public class AlertSink {
     }
 
     /** Snapshot of delivery counters (for {@code /metrics} and Prometheus). */
+    /**
+     * Pure: mask a webhook URL for display — keep {@code scheme://host} and the path depth, but redact the
+     * path/query (Slack/PagerDuty URLs carry secrets in the path). Blank in, blank out.
+     */
+    static String maskUrl(String url) {
+        if (url == null || url.isBlank()) return "";
+        try {
+            java.net.URI u = java.net.URI.create(url.trim());
+            String scheme = u.getScheme();
+            String host = u.getHost();
+            if (scheme == null || host == null) return Redact.mask(url); // not a normal URL
+            String base = scheme + "://" + host + (u.getPort() > 0 ? ":" + u.getPort() : "");
+            String path = u.getRawPath();
+            boolean hasMore = (path != null && path.length() > 1) || u.getRawQuery() != null;
+            return base + (hasMore ? "/***" : "");
+        } catch (Exception ex) {
+            return Redact.mask(url);
+        }
+    }
+
+    /**
+     * The effective, resolved alerting configuration for operator introspection (for {@code GET
+     * /admin/alerts/config}). Webhook URLs are masked; no raw secrets are included. Shows parsed/derived state
+     * (resolved tiers with SLAs, parsed routes, effective persistence) so a misconfiguration that silently
+     * parses to nothing is visible.
+     */
+    public Map<String, Object> configSnapshot() {
+        Map<String, Object> c = new LinkedHashMap<>();
+        c.put("enabled", enabled);
+        c.put("webhook_url", maskUrl(webhookUrl));
+        c.put("actions", new ArrayList<>(actions));
+        c.put("max_retries", maxRetries);
+        c.put("retry_backoff_ms", retryBackoffMs);
+        c.put("queue_capacity", queueCapacity);
+        c.put("dead_letter_capacity", deadLetterCapacity);
+        c.put("template_set", template != null && !template.isBlank());
+        c.put("dead_letter_persistent_config", deadLetterPersistent);
+        c.put("dead_letter_persistent_effective", dlPersistent());
+        c.put("retention_hours", retentionHours);
+        c.put("dedup_window_seconds", dedupWindowSeconds);
+        c.put("dedup_shared_config", dedupShared);
+        c.put("dedup_shared_effective", dedupPersistent());
+        c.put("dedup_digest", digestEnabled());
+        // parsed routes (masked)
+        List<Map<String, Object>> routeList = new ArrayList<>();
+        for (Map.Entry<String, Route> e : routes.entrySet()) {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("action", e.getKey());
+            r.put("url", maskUrl(e.getValue().url()));
+            r.put("template_set", e.getValue().template() != null && !e.getValue().template().isBlank());
+            routeList.add(r);
+        }
+        c.put("routes", routeList);
+        // resolved escalation ladder
+        c.put("escalation_enabled", escalationEnabled());
+        List<Map<String, Object>> tierList = new ArrayList<>();
+        int i = 0;
+        for (Tier t : escalationTiers) {
+            Map<String, Object> tm = new LinkedHashMap<>();
+            tm.put("tier", ++i);
+            tm.put("after_ms", t.afterMs());
+            tm.put("url", maskUrl(t.url()));
+            tm.put("template_set", t.template() != null);
+            tm.put("sla_ms", t.slaMs());
+            tierList.add(tm);
+        }
+        c.put("escalation_tiers", tierList);
+        c.put("legacy_escalate_after_minutes", escalateAfterMinutes);
+        c.put("legacy_escalate_url", maskUrl(escalateUrl));
+        return c;
+    }
+
     public Map<String, Object> stats() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("enabled", enabled);

@@ -5,17 +5,36 @@ import java.util.Map;
 
 /**
  * Renders a single operator overview of the alerting pipeline from the {@link AlertSink#stats()} map (plus the
- * dedup summary): top-line delivery counters, per-route breakdown, per-tier escalation counts with ack-SLA
- * latency, and the most-suppressed dedup keys. Pure and dependency-free so it can be unit-tested; the endpoint
- * just serves the string. Numbers are read defensively (missing keys render as 0/empty).
+ * dedup summary): top-line delivery counter cards, a per-route table, a per-tier table combining escalation
+ * counts with ack-SLA latency, and the most-suppressed dedup keys. When {@code autoRefreshSeconds > 0} the page
+ * polls {@code /admin/alerts/overview.json} and live-updates the cards and tables in place (for a wall display).
+ * Pure and dependency-free so it can be unit-tested; the endpoint just serves the string. Numbers are read
+ * defensively (missing keys render as 0/empty).
  */
 public final class AlertsOverview {
 
     private AlertsOverview() {}
 
-    @SuppressWarnings("unchecked")
+    /** Counter cards, in display order: {statsKey, label}. */
+    private static final String[][] CARDS = {
+            {"queued", "queued"}, {"sent", "sent"}, {"failed", "failed"}, {"retried", "retried"},
+            {"dead_lettered", "dead-lettered"}, {"dropped", "dropped"}, {"replayed", "replayed"},
+            {"suppressed", "suppressed"}, {"escalated", "escalated"}, {"sla_breaches", "sla breaches"},
+            {"digested", "digested"}, {"in_flight", "in flight"}, {"dead_letter_size", "backlog"}};
+
+    /** Stats keys whose non-zero value should render in the warning colour. */
+    private static final java.util.Set<String> WARN_KEYS = java.util.Set.of(
+            "failed", "dead_lettered", "dropped", "escalated", "sla_breaches", "dead_letter_size");
+
     public static String render(Map<String, Object> stats, List<AlertSink.DedupSummary> digests) {
+        return render(stats, digests, 0);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static String render(Map<String, Object> stats, List<AlertSink.DedupSummary> digests,
+                                int autoRefreshSeconds) {
         if (stats == null) stats = Map.of();
+        boolean live = autoRefreshSeconds > 0;
         StringBuilder sb = new StringBuilder();
         sb.append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
         sb.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
@@ -34,32 +53,32 @@ public final class AlertsOverview {
         sb.append("</style></head><body>");
         sb.append("<h1>imini alerting overview</h1>");
         sb.append("<p class=\"muted\"><a class=\"nav\" href=\"/admin/alerts.html\">Dead-letter viewer \u2192</a>");
-        sb.append("<a class=\"nav\" href=\"/metrics/prom\">Prometheus \u2192</a></p>");
+        sb.append("<a class=\"nav\" href=\"/admin/alerts/config\">Effective config \u2192</a>");
+        sb.append("<a class=\"nav\" href=\"/metrics/prom\">Prometheus \u2192</a>");
+        if (live) {
+            sb.append("<span id=\"refreshnote\">Auto-refresh every ").append(autoRefreshSeconds)
+              .append("s \u00b7 <span id=\"updated\">loading\u2026</span> \u00b7 ");
+            sb.append("<a href=\"#\" id=\"toggle\" onclick=\"return toggleRefresh()\">pause</a></span>");
+        }
+        sb.append("</p>");
 
         // top-line counters
         sb.append("<div class=\"cards\">");
-        card(sb, "queued", num(stats, "queued"), false);
-        card(sb, "sent", num(stats, "sent"), false);
-        card(sb, "failed", num(stats, "failed"), num(stats, "failed") > 0);
-        card(sb, "retried", num(stats, "retried"), false);
-        card(sb, "dead-lettered", num(stats, "dead_lettered"), num(stats, "dead_lettered") > 0);
-        card(sb, "dropped", num(stats, "dropped"), num(stats, "dropped") > 0);
-        card(sb, "replayed", num(stats, "replayed"), false);
-        card(sb, "suppressed", num(stats, "suppressed"), false);
-        card(sb, "escalated", num(stats, "escalated"), num(stats, "escalated") > 0);
-        card(sb, "sla breaches", num(stats, "sla_breaches"), num(stats, "sla_breaches") > 0);
-        card(sb, "digested", num(stats, "digested"), false);
-        card(sb, "in flight", num(stats, "in_flight"), false);
-        card(sb, "backlog", num(stats, "dead_letter_size"), num(stats, "dead_letter_size") > 0);
+        for (String[] c : CARDS) {
+            long n = num(stats, c[0]);
+            card(sb, c[0], c[1], n, WARN_KEYS.contains(c[0]) && n > 0);
+        }
         sb.append("</div>");
 
         // per-route
         Object byRoute = stats.get("by_route");
-        if (byRoute instanceof Map<?, ?> br && !br.isEmpty()) {
+        Map<String, Map<String, Long>> routes = (byRoute instanceof Map) ? (Map<String, Map<String, Long>>) byRoute : Map.of();
+        if (live || !routes.isEmpty()) {
             sb.append("<h2>By route</h2><table><thead><tr><th>route</th>"
                     + "<th class=\"num\">sent</th><th class=\"num\">failed</th>"
-                    + "<th class=\"num\">dead-lettered</th><th class=\"num\">suppressed</th></tr></thead><tbody>");
-            for (Map.Entry<String, Map<String, Long>> e : ((Map<String, Map<String, Long>>) br).entrySet()) {
+                    + "<th class=\"num\">dead-lettered</th><th class=\"num\">suppressed</th></tr></thead>");
+            sb.append("<tbody id=\"rt_body\">");
+            for (Map.Entry<String, Map<String, Long>> e : routes.entrySet()) {
                 Map<String, Long> r = e.getValue();
                 sb.append("<tr><td>").append(esc(e.getKey())).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "sent")).append("</td>");
@@ -75,10 +94,11 @@ public final class AlertsOverview {
         Object sla = stats.get("ack_sla_by_tier");
         Map<String, Long> tiers = (byTier instanceof Map) ? (Map<String, Long>) byTier : Map.of();
         Map<String, Map<String, Long>> slaMap = (sla instanceof Map) ? (Map<String, Map<String, Long>>) sla : Map.of();
-        if (!tiers.isEmpty() || !slaMap.isEmpty()) {
+        if (live || !tiers.isEmpty() || !slaMap.isEmpty()) {
             sb.append("<h2>Escalation tiers</h2><table><thead><tr><th>tier</th>"
                     + "<th class=\"num\">paged</th><th class=\"num\">acked</th>"
-                    + "<th class=\"num\">avg ack</th><th class=\"num\">max ack</th></tr></thead><tbody>");
+                    + "<th class=\"num\">avg ack</th><th class=\"num\">max ack</th></tr></thead>");
+            sb.append("<tbody id=\"tier_body\">");
             java.util.TreeSet<String> keys = new java.util.TreeSet<>();
             keys.addAll(tiers.keySet());
             keys.addAll(slaMap.keySet());
@@ -94,24 +114,63 @@ public final class AlertsOverview {
         }
 
         // top suppressed keys
-        if (digests != null && !digests.isEmpty()) {
+        if (live || (digests != null && !digests.isEmpty())) {
             sb.append("<h2>Top suppressed keys</h2><table><thead><tr><th>action</th><th>target</th>"
-                    + "<th class=\"num\">suppressed</th></tr></thead><tbody>");
-            for (AlertSink.DedupSummary d : digests) {
-                sb.append("<tr><td>").append(esc(d.action())).append("</td>");
-                sb.append("<td>").append(esc(snippet(d.target(), 80))).append("</td>");
-                sb.append("<td class=\"num\">").append(d.suppressed()).append("</td></tr>");
+                    + "<th class=\"num\">suppressed</th></tr></thead>");
+            sb.append("<tbody id=\"sup_body\">");
+            if (digests != null) {
+                for (AlertSink.DedupSummary d : digests) {
+                    sb.append("<tr><td>").append(esc(d.action())).append("</td>");
+                    sb.append("<td>").append(esc(snippet(d.target(), 80))).append("</td>");
+                    sb.append("<td class=\"num\">").append(d.suppressed()).append("</td></tr>");
+                }
             }
             sb.append("</tbody></table>");
         }
 
+        if (live) sb.append(liveScript(autoRefreshSeconds));
         sb.append("</body></html>");
         return sb.toString();
     }
 
-    private static void card(StringBuilder sb, String label, long n, boolean warn) {
+    /** The polling/auto-refresh script (re-renders cards and table bodies from the JSON endpoint). */
+    private static String liveScript(int seconds) {
+        return "<script>"
+            + "var REFRESH=" + seconds + ",ON=true;"
+            + "function esc(s){return String(s==null?'':s).replace(/[&<>\"']/g,function(c){"
+            + "return{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c];});}"
+            + "function fmtMs(ms){ms=+ms||0;if(ms<=0)return '\\u2014';if(ms<1000)return ms+'ms';"
+            + "var s=Math.floor(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60);"
+            + "if(m<60)return m+'m';return Math.floor(m/60)+'h';}"
+            + "function setCard(k,v){var e=document.getElementById('c_'+k);if(e)e.textContent=v;}"
+            + "function rows(id,h){var b=document.getElementById(id);if(b)b.innerHTML=h;}"
+            + "function rebuild(d){var s=d.stats||{};"
+            + "['queued','sent','failed','retried','dead_lettered','dropped','replayed','suppressed',"
+            + "'escalated','sla_breaches','digested','in_flight','dead_letter_size'].forEach(function(k){"
+            + "setCard(k,(s[k]||0));});"
+            + "var br=s.by_route||{},h='';Object.keys(br).forEach(function(k){var r=br[k]||{};"
+            + "h+='<tr><td>'+esc(k)+'</td><td class=\"num\">'+(r.sent||0)+'</td><td class=\"num\">'+(r.failed||0)"
+            + "+'</td><td class=\"num\">'+(r.dead_lettered||0)+'</td><td class=\"num\">'+(r.suppressed||0)+'</td></tr>';});"
+            + "rows('rt_body',h);"
+            + "var bt=s.by_tier||{},sl=s.ack_sla_by_tier||{},ks={};Object.keys(bt).forEach(function(k){ks[k]=1;});"
+            + "Object.keys(sl).forEach(function(k){ks[k]=1;});h='';Object.keys(ks).sort().forEach(function(t){"
+            + "var m=sl[t]||{};h+='<tr><td>T'+esc(t)+'</td><td class=\"num\">'+(bt[t]||0)+'</td><td class=\"num\">'"
+            + "+(m.count||0)+'</td><td class=\"num\">'+fmtMs(m.avg_ms)+'</td><td class=\"num\">'+fmtMs(m.max_ms)+'</td></tr>';});"
+            + "rows('tier_body',h);"
+            + "var dg=d.digests||[];h='';dg.forEach(function(x){h+='<tr><td>'+esc(x.action)+'</td><td>'+esc(x.target)"
+            + "+'</td><td class=\"num\">'+(x.suppressed||0)+'</td></tr>';});rows('sup_body',h);"
+            + "var u=document.getElementById('updated');if(u)u.textContent='updated '+new Date().toLocaleTimeString();}"
+            + "function poll(){if(!ON)return;fetch('/admin/alerts/overview.json',{headers:{}}).then(function(r){"
+            + "return r.json();}).then(rebuild).catch(function(){});}"
+            + "function toggleRefresh(){ON=!ON;var t=document.getElementById('toggle');if(t)t.textContent=ON?'pause':'resume';"
+            + "if(ON)poll();return false;}"
+            + "poll();if(REFRESH>0)setInterval(poll,REFRESH*1000);"
+            + "</script>";
+    }
+
+    private static void card(StringBuilder sb, String key, String label, long n, boolean warn) {
         sb.append("<div class=\"card").append(warn ? " warn" : "").append("\">");
-        sb.append("<div class=\"n\">").append(n).append("</div>");
+        sb.append("<div class=\"n\" id=\"c_").append(esc(key)).append("\">").append(n).append("</div>");
         sb.append("<div class=\"l\">").append(esc(label)).append("</div></div>");
     }
 
