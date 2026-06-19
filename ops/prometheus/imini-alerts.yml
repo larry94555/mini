@@ -87,6 +87,15 @@ groups:
           summary: "imini escalation ack latency is high"
           description: "Escalated alerts are taking >30m to acknowledge. Check on-call responsiveness per tier on the overview page."
 
+      - alert: IminiAlertDeliveryLatencyHigh
+        expr: histogram_quantile(0.95, rate(imini_alerts_delivery_latency_ms_bucket[5m])) > 2000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini webhook delivery is slow"
+          description: "p95 webhook POST latency has exceeded 2s for 5m; the receiver may be degrading before it starts failing. Try POST /admin/alerts/selftest?send=true."
+
       - alert: IminiAlertSuppressionStorm
         expr: increase(imini_alerts_suppressed[15m]) > 100
         for: 0m

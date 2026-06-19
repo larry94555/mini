@@ -105,6 +105,47 @@ public class AlertSink {
     private final AtomicLong digested = new AtomicLong();    // dedup-digest notifications emitted
     private final AtomicLong slaBreaches = new AtomicLong();  // re-escalations triggered by an ack-SLA breach
 
+    // delivery-latency histogram (webhook POST round-trip, ms): non-cumulative per-bucket counts + sum + count
+    static final long[] LATENCY_BUCKETS_MS = {50, 100, 250, 500, 1000, 2500, 5000, 10000};
+    private final AtomicLong[] latencyBuckets = newBuckets(); // length = buckets + 1 (last = +Inf)
+    private final AtomicLong latencySumMs = new AtomicLong();
+    private final AtomicLong latencyCount = new AtomicLong();
+
+    private static AtomicLong[] newBuckets() {
+        AtomicLong[] a = new AtomicLong[LATENCY_BUCKETS_MS.length + 1];
+        for (int i = 0; i < a.length; i++) a[i] = new AtomicLong();
+        return a;
+    }
+
+    /** Pure: index of the (non-cumulative) latency bucket a sample falls into; last index = +Inf overflow. */
+    static int bucketIndex(long ms) {
+        for (int i = 0; i < LATENCY_BUCKETS_MS.length; i++) {
+            if (ms <= LATENCY_BUCKETS_MS[i]) return i;
+        }
+        return LATENCY_BUCKETS_MS.length; // +Inf
+    }
+
+    private void recordLatency(long ms) {
+        if (ms < 0) ms = 0;
+        latencyBuckets[bucketIndex(ms)].incrementAndGet();
+        latencySumMs.addAndGet(ms);
+        latencyCount.incrementAndGet();
+    }
+
+    /** Histogram snapshot: ordered upper-bound -> non-cumulative count, plus sum_ms and count. */
+    private Map<String, Object> latencySnapshot() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        Map<String, Long> buckets = new LinkedHashMap<>();
+        for (int i = 0; i < LATENCY_BUCKETS_MS.length; i++) {
+            buckets.put(Long.toString(LATENCY_BUCKETS_MS[i]), latencyBuckets[i].get());
+        }
+        buckets.put("+Inf", latencyBuckets[LATENCY_BUCKETS_MS.length].get());
+        out.put("buckets", buckets);
+        out.put("sum_ms", latencySumMs.get());
+        out.put("count", latencyCount.get());
+        return out;
+    }
+
     private List<Tier> escalationTiers = List.of();
 
     // per-route delivery counters: action -> [sent, failed, dead_lettered]
@@ -172,6 +213,7 @@ public class AlertSink {
                     + (webhookUrl != null && !webhookUrl.isBlank() || !routes.isEmpty()
                         ? " -> webhook (retries=" + maxRetries + ")" : " (log only)"));
         }
+        for (String warning : warnings()) log.warn("[alerts][config] " + warning);
     }
 
     @jakarta.annotation.PreDestroy
@@ -310,6 +352,70 @@ public class AlertSink {
      * sample event, returning the rendered payload + validation issues. When {@code send} is true and a
      * webhook is configured, also enqueues one real delivery of the rendered sample.
      */
+    /**
+     * Push a synthetic alert through the resolution path (routing → template → dedup check) and report where it
+     * would land, so an operator can verify wiring without a real incident. With {@code send=true} it performs a
+     * single <b>synchronous</b> probe POST to the resolved URL (no retry/dead-letter — this is a connectivity
+     * check) and reports the result. Read-only otherwise: it does not consume a dedup slot or enqueue anything.
+     */
+    public Map<String, Object> selfTest(String action, boolean send) {
+        String act = (action == null || action.isBlank()) ? sampleEntry().action() : action;
+        AuditLog.Entry sample = new AuditLog.Entry("selftest", System.currentTimeMillis(),
+                java.time.Instant.now().toString(), "selftest", act, "selftest-target", "ok");
+        String url = urlFor(act);
+        String tmpl = templateFor(act);
+        String payload = (tmpl == null || tmpl.isBlank()) ? toJson(sample) : applyTemplate(tmpl, sample);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("action", act);
+        out.put("forwarded_action", shouldForward(act));      // is this action in alerts.actions?
+        out.put("resolved_url", maskUrl(url));
+        out.put("routed", routes.containsKey(act));            // matched a per-action route vs default
+        out.put("template_used", tmpl != null && !tmpl.isBlank());
+        out.put("dedup_enabled", dedupWindowSeconds > 0);
+        out.put("would_deliver", enabled && url != null && !url.isBlank());
+
+        if (send) {
+            if (!enabled) {
+                out.put("probe", Map.of("attempted", false, "reason", "alerts.enabled=false"));
+            } else if (url == null || url.isBlank()) {
+                out.put("probe", Map.of("attempted", false, "reason", "no webhook/route URL resolved for this action"));
+            } else {
+                out.put("probe", probe(url, payload));
+            }
+        }
+        return out;
+    }
+
+    /** One synchronous POST for the self-test connectivity probe (no retry, no dead-letter). */
+    private Map<String, Object> probe(String url, String payload) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("attempted", true);
+        HttpClient client = http != null ? http
+                : HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        long startNs = System.nanoTime();
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(payload))
+                    .build();
+            HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
+            long ms = (System.nanoTime() - startNs) / 1_000_000L;
+            recordLatency(ms);
+            r.put("ok", resp.statusCode() / 100 == 2);
+            r.put("status", resp.statusCode());
+            r.put("latency_ms", ms);
+        } catch (Exception ex) {
+            long ms = (System.nanoTime() - startNs) / 1_000_000L;
+            recordLatency(ms);
+            r.put("ok", false);
+            r.put("error", ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            r.put("latency_ms", ms);
+        }
+        return r;
+    }
+
     public Map<String, Object> preview(String templateOverride, boolean send) {
         String tmpl = (templateOverride != null) ? templateOverride : template;
         AuditLog.Entry sample = sampleEntry();
@@ -531,6 +637,7 @@ public class AlertSink {
     private void attempt(Delivery d) {
         boolean ok = false;
         String err = null;
+        long startNs = System.nanoTime();
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(d.url()))
                     .timeout(Duration.ofSeconds(5))
@@ -543,6 +650,8 @@ public class AlertSink {
         } catch (Exception ex) {
             err = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             log.warn("[alerts] webhook post failed (attempt " + d.attemptNo() + "): " + ex.getMessage());
+        } finally {
+            recordLatency((System.nanoTime() - startNs) / 1_000_000L); // round-trip incl. failures/timeouts
         }
         if (ok) {
             sent.incrementAndGet();
@@ -683,7 +792,62 @@ public class AlertSink {
         c.put("escalation_tiers", tierList);
         c.put("legacy_escalate_after_minutes", escalateAfterMinutes);
         c.put("legacy_escalate_url", maskUrl(escalateUrl));
+        c.put("warnings", warnings());
         return c;
+    }
+
+    /** Current config warnings (logged at startup and surfaced in {@code GET /admin/alerts/config}). */
+    public List<String> warnings() {
+        boolean haveDefaultWebhook = webhookUrl != null && !webhookUrl.isBlank();
+        return validateConfig(enabled, haveDefaultWebhook, routes.size(), actions.size(),
+                escalateTiersCfg, escalationTiers.size(), escalateAfterMinutes,
+                escalateUrl != null && !escalateUrl.isBlank(),
+                dedupWindowSeconds, dedupShared, dedupDigest,
+                retentionHours, deadLetterPersistent, db != null && db.available());
+    }
+
+    /**
+     * Pure: derive operator-facing config warnings from the resolved alerting settings, so a contradictory or
+     * silently-ineffective configuration is visible instead of just misbehaving. Returns an empty list when all
+     * is coherent.
+     */
+    static List<String> validateConfig(boolean enabled, boolean haveDefaultWebhook, int routeCount,
+                                       int actionCount, String escalateTiersCfg, int parsedTierCount,
+                                       long escalateAfterMinutes, boolean haveEscalateUrl,
+                                       long dedupWindowSeconds, boolean dedupShared, boolean dedupDigest,
+                                       long retentionHours, boolean deadLetterPersistentCfg, boolean dbAvailable) {
+        List<String> w = new ArrayList<>();
+        boolean tiersConfigured = escalateTiersCfg != null && !escalateTiersCfg.isBlank();
+        if (!enabled) {
+            if (haveDefaultWebhook || routeCount > 0 || tiersConfigured)
+                w.add("alerts.enabled=false but a webhook/route/escalation ladder is configured — no alerts will be sent");
+            return w; // nothing else matters while disabled
+        }
+        if (!haveDefaultWebhook && routeCount == 0)
+            w.add("alerts.enabled=true but no webhook-url and no routes — alerts will only be logged, not delivered");
+        if (actionCount == 0)
+            w.add("alerts.actions is empty — no audit actions will be forwarded");
+        if (tiersConfigured && parsedTierCount == 0)
+            w.add("alerts.escalate-tiers is set but parsed to 0 tiers — check the delay|url|template|sla syntax");
+        if (!tiersConfigured && escalateAfterMinutes > 0 && !haveEscalateUrl)
+            w.add("alerts.escalate-after-minutes is set but alerts.escalate-url is blank — escalation is disabled");
+        if (dedupShared && dedupWindowSeconds > 0 && !dbAvailable)
+            w.add("alerts.dedup-shared=true but no database is available — dedup falls back to per-process state");
+        if (deadLetterPersistentCfg && !dbAvailable)
+            w.add("alerts.dead-letter-persistent=true but no database is available — using the in-memory ring (lost on restart)");
+        if (dedupDigest && dedupWindowSeconds <= 0)
+            w.add("alerts.dedup-digest=true has no effect because alerts.dedup-window-seconds=0 (dedup is off)");
+        if (parsedTierCount > 0 && retentionHours > 0
+                && retentionHours * 3_600_000L < highestTierAfterMsHint(escalateTiersCfg))
+            w.add("alerts.dead-letter-retention-hours may purge dead-letters before the last escalation tier fires");
+        return w;
+    }
+
+    /** Best-effort hint: the largest tier delay in the raw config (ms), for the retention sanity check. */
+    private static long highestTierAfterMsHint(String cfg) {
+        long max = 0;
+        for (Tier t : parseTiers(cfg)) max = Math.max(max, t.afterMs());
+        return max;
     }
 
     public Map<String, Object> stats() {
@@ -700,6 +864,7 @@ public class AlertSink {
         m.put("escalated", escalated.get());
         m.put("digested", digested.get());
         m.put("sla_breaches", slaBreaches.get());
+        m.put("delivery_latency", latencySnapshot());
         m.put("by_tier", byTierSnapshot());
         m.put("ack_sla_by_tier", ackSlaByTier());
         m.put("in_flight", (long) inFlight.get());

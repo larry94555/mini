@@ -583,6 +583,21 @@ public class AgentController {
         return out;
     }
 
+    /**
+     * Push a synthetic alert through the pipeline and report where it lands. With {@code ?send=true} it performs
+     * a live probe POST (CSRF-guarded, since it has a side effect). Admin only.
+     */
+    @PostMapping("/admin/alerts/selftest")
+    public Map<String, Object> adminAlertsSelfTest(
+            @RequestParam(name = "action", defaultValue = "") String action,
+            @RequestParam(name = "send", defaultValue = "false") boolean send,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
+        requireAdmin();
+        if (send) csrf.require(csrfToken(csrfHeader, csrfParam)); // only the probe path has a side effect
+        return alertSink.selfTest(action.isBlank() ? null : action, send);
+    }
+
     /** A short-lived per-process CSRF token for the viewer's state-changing actions. Admin only. */
     @GetMapping("/admin/alerts/csrf")
     public Map<String, Object> adminAlertsCsrf() {

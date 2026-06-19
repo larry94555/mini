@@ -117,6 +117,23 @@ public final class PromFormat {
                     line(sb, PREFIX + "alerts_ack_latency_max_ms", "tier=\"" + esc(e.getKey()) + "\"", e.getValue().get("max_ms"));
                 }
             }
+            if (alerts.get("delivery_latency") instanceof Map<?, ?> dl) {
+                Map<String, Object> h = (Map<String, Object>) dl;
+                Object bk = h.get("buckets");
+                if (bk instanceof Map<?, ?> buckets) {
+                    help(sb, "alerts_delivery_latency_ms", "Webhook delivery round-trip latency (ms)", "histogram");
+                    long cumulative = 0;
+                    for (Map.Entry<String, Long> e : ((Map<String, Long>) buckets).entrySet()) {
+                        cumulative += e.getValue() == null ? 0 : e.getValue();
+                        String le = "+Inf".equals(e.getKey()) ? "+Inf" : e.getKey();
+                        line(sb, PREFIX + "alerts_delivery_latency_ms_bucket", "le=\"" + esc(le) + "\"", cumulative);
+                    }
+                    Object sum = h.get("sum_ms");
+                    Object cnt = h.get("count");
+                    line(sb, PREFIX + "alerts_delivery_latency_ms_sum", null, sum instanceof Number ? ((Number) sum).longValue() : 0);
+                    line(sb, PREFIX + "alerts_delivery_latency_ms_count", null, cnt instanceof Number ? ((Number) cnt).longValue() : 0);
+                }
+            }
         }
         return sb.toString();
     }
