@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Scheduled SLO digest + report date-range + report target columns: AlertSloDigestScheduler (alerts.slo-digest-interval-minutes) periodically POSTs a posture summary (window budget remaining, delivery-success ratio, worst route) to alerts.slo-digest-url or the default webhook; GET /admin/alerts/slo-report gains ?from/?to/?days date-range filtering; and each report row now carries the effective slo_target/success_target and a pass flag for decision-ready monthly exports.
+
 - Durable per-route windows + worst-trend route sort + downloadable SLO report: per-route rolling-window buckets are persisted to alert_slo_route_buckets (flushed/pruned/restored alongside the global window) so per-route trends survive restarts; the overview By-route table is sorted worst-trend-first (most-recent daily ratio ascending) so a degrading receiver surfaces at the top; and GET /admin/alerts/slo-report downloads the rolling-window daily good/total history (global + per route) as CSV (or ?format=json) for offline reporting.
 
 - Richer SLO sparklines: the overview window sparkline is now window-length-aware (labeled with the configured days), draws a dashed target reference line, and carries per-day hover tooltips (today / Nd ago : ratio); per-route daily series (slo_window_series_by_route, in-memory) drive a mini-sparkline trend column in the By-route table; all live-update with the page via a shared JS sparkline builder.

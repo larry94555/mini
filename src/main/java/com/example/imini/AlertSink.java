@@ -65,6 +65,7 @@ public class AlertSink {
 
     @Value("${alerts.enabled:false}") private boolean enabled;
     @Value("${alerts.webhook-url:}") private String webhookUrl;
+    @Value("${alerts.slo-digest-url:}") private String sloDigestUrl;
     @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private volatile String actionsCfg;
     @Value("${alerts.max-retries:3}") private int maxRetries;
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
@@ -249,11 +250,28 @@ public class AlertSink {
      * window (scope "global") and one per route/day (scope "route"), sorted by scope, route, then day.
      */
     public List<Map<String, Object>> sloReportRows() {
+        return sloReportRows(Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    /**
+     * Daily good/total rows for the rolling-window SLO within an inclusive {@code [fromDay, toDay]} epoch-day
+     * range, one row per day for the global window (scope "global") and per route/day (scope "route"), each
+     * carrying the effective latency/success targets and a pass flag. Sorted by scope, route, then day.
+     */
+    public List<Map<String, Object>> sloReportRows(long fromDay, long toDay) {
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (long[] b : latencyWindow.dump()) rows.add(reportRow("global", "", b));
+        for (long[] b : latencyWindow.dump()) {
+            if (b[0] < fromDay || b[0] > toDay) continue;
+            rows.add(reportRow("global", "", b, sloTarget, successTarget));
+        }
         List<String> routeNames = new ArrayList<>(routeWindows.keySet());
         java.util.Collections.sort(routeNames);
-        for (String r : routeNames) for (long[] b : routeWindows.get(r).dump()) rows.add(reportRow("route", r, b));
+        for (String r : routeNames) {
+            for (long[] b : routeWindows.get(r).dump()) {
+                if (b[0] < fromDay || b[0] > toDay) continue;
+                rows.add(reportRow("route", r, b, sloTargetFor(r), successTargetFor(r)));
+            }
+        }
         rows.sort(java.util.Comparator
                 .comparing((Map<String, Object> m) -> (String) m.get("scope"))
                 .thenComparing(m -> (String) m.get("route"))
@@ -261,8 +279,10 @@ public class AlertSink {
         return rows;
     }
 
-    private static Map<String, Object> reportRow(String scope, String route, long[] dayGoodTotal) {
+    private static Map<String, Object> reportRow(String scope, String route, long[] dayGoodTotal,
+                                                 double sloTarget, double successTarget) {
         long day = dayGoodTotal[0], good = dayGoodTotal[1], total = dayGoodTotal[2];
+        double ratio = total > 0 ? Math.round((double) good / total * 10000.0) / 10000.0 : 0.0;
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("scope", scope);
         m.put("route", route);
@@ -270,13 +290,16 @@ public class AlertSink {
         m.put("date", java.time.LocalDate.ofEpochDay(day).toString());
         m.put("good", good);
         m.put("total", total);
-        m.put("ratio", total > 0 ? Math.round((double) good / total * 10000.0) / 10000.0 : 0.0);
+        m.put("ratio", ratio);
+        m.put("slo_target", sloTarget > 0 ? sloTarget : 0.0);
+        m.put("success_target", successTarget > 0 ? successTarget : 0.0);
+        m.put("pass", sloTarget > 0 ? (ratio >= sloTarget) : true); // no objective set -> not a failure
         return m;
     }
 
     /** Pure: render SLO report rows as CSV (header + rows; fields are simple numerics/identifiers). */
     static String sloReportCsv(List<Map<String, Object>> rows) {
-        StringBuilder sb = new StringBuilder("scope,route,day,date,good,total,ratio\n");
+        StringBuilder sb = new StringBuilder("scope,route,day,date,good,total,ratio,slo_target,success_target,pass\n");
         if (rows != null) {
             for (Map<String, Object> r : rows) {
                 sb.append(r.get("scope")).append(',')
@@ -285,7 +308,10 @@ public class AlertSink {
                   .append(r.get("date")).append(',')
                   .append(r.get("good")).append(',')
                   .append(r.get("total")).append(',')
-                  .append(r.get("ratio")).append('\n');
+                  .append(r.get("ratio")).append(',')
+                  .append(r.get("slo_target")).append(',')
+                  .append(r.get("success_target")).append(',')
+                  .append(r.get("pass")).append('\n');
             }
         }
         return sb.toString();
@@ -1424,6 +1450,93 @@ public class AlertSink {
         long delivered = sent.get();
         long dropped = deadLettered.get();
         return sloSnapshot(delivered, delivered + dropped, successTarget, 0);
+    }
+
+    /**
+     * A compact SLO posture summary for the scheduled digest: rolling-window latency budget/ratio, cumulative
+     * delivery-success ratio, the worst route by per-route latency success ratio, and the targets. Pure read of
+     * the live snapshots.
+     */
+    public Map<String, Object> sloDigest() {
+        Map<String, Object> win = sloWindowSnapshot();
+        Map<String, Object> succ = deliverySuccessSlo();
+        Map<String, Object> d = new LinkedHashMap<>();
+        d.put("window_days", win.get("window_days"));
+        d.put("window_success_ratio", win.get("success_ratio"));
+        d.put("window_budget_remaining", win.get("budget_remaining"));
+        d.put("slo_target", sloTarget);
+        d.put("delivery_success_ratio", succ.get("success_ratio"));
+        d.put("success_target", successTarget);
+        // worst route by per-route latency SLO success ratio
+        String worst = null;
+        double worstRatio = Double.MAX_VALUE;
+        for (Map.Entry<String, Map<String, Object>> e : sloByRoute().entrySet()) {
+            Object sr = e.getValue().get("success_ratio");
+            if (sr instanceof Number n && n.doubleValue() < worstRatio) { worstRatio = n.doubleValue(); worst = e.getKey(); }
+        }
+        d.put("worst_route", worst == null ? "" : worst);
+        d.put("worst_route_ratio", worst == null ? 1.0 : Math.round(worstRatio * 10000.0) / 10000.0);
+        return d;
+    }
+
+    /** Pure: a short human-readable digest line from {@link #sloDigest()} output. */
+    static String formatSloDigest(Map<String, Object> d) {
+        StringBuilder sb = new StringBuilder("imini SLO digest: ");
+        sb.append("window ").append(pctOf(d.get("window_success_ratio")))
+          .append(" (budget ").append(pctOf(d.get("window_budget_remaining"))).append(" left)");
+        sb.append(", delivery-success ").append(pctOf(d.get("delivery_success_ratio")));
+        Object worst = d.get("worst_route");
+        if (worst != null && !String.valueOf(worst).isEmpty()) {
+            sb.append(", worst route ").append(worst).append(" @ ").append(pctOf(d.get("worst_route_ratio")));
+        }
+        return sb.toString();
+    }
+
+    private static String pctOf(Object ratio) {
+        if (!(ratio instanceof Number n)) return "n/a";
+        double p = Math.round(n.doubleValue() * 1000.0) / 10.0;
+        return ((p == Math.rint(p)) ? Long.toString((long) p) : Double.toString(p)) + "%";
+    }
+
+    /** Minimal JSON string escaping for the digest payload. */
+    private static String jsonEscape(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> b.append("\\\"");
+                case '\\' -> b.append("\\\\");
+                case '\n' -> b.append("\\n");
+                case '\r' -> b.append("\\r");
+                case '\t' -> b.append("\\t");
+                default -> b.append(c);
+            }
+        }
+        return b.toString();
+    }
+
+    /** Where the SLO digest is posted: {@code alerts.slo-digest-url} if set, else the default webhook. */
+    public String digestUrl() {
+        return (sloDigestUrl != null && !sloDigestUrl.isBlank()) ? sloDigestUrl : webhookUrl;
+    }
+
+    /**
+     * POST a JSON SLO digest to {@link #digestUrl()} (synchronous, no retry — it's a periodic summary, not a
+     * critical alert). Returns a small result map; no-op result when no URL is configured.
+     */
+    public Map<String, Object> postSloDigest() {
+        Map<String, Object> digest = sloDigest();
+        String url = digestUrl();
+        if (url == null || url.isBlank()) return Map.of("posted", false, "reason", "no digest/webhook URL");
+        String summary = formatSloDigest(digest);
+        String payload = "{\"text\":\"" + jsonEscape(summary) + "\"}";
+        Map<String, Object> probe = probe(url, payload); // reuses the synchronous POST path
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("posted", Boolean.TRUE.equals(probe.get("ok")));
+        out.put("summary", formatSloDigest(digest));
+        out.put("probe", probe);
+        return out;
     }
 
     /** Per-route delivery-success SLO ({route -> snapshot}); success = sent, failure = dead-lettered. */

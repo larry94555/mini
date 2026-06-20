@@ -4163,3 +4163,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** `Database` adds the `alert_slo_route_buckets` migration (composite PK route+day); the schema
   version bumps and the table exists. No backfill (per-route windows repopulate from live deliveries).
+
+---
+
+# Scheduled SLO digest, report date-range, report target columns
+
+## 500. SLO digest summary + formatting (AlertSloDigestReportRangeTest)
+
+- **Run:** `./mvnw -Dtest=AlertSloDigestReportRangeTest test`.
+- **Observe:** `sloDigest()` carries window ratio/budget, delivery-success ratio, worst route + ratio, and the
+  targets; `formatSloDigest` renders a one-line summary with percentages (no trailing `.0`) and omits the worst
+  route when none; `postSloDigest()` is a no-op (`posted=false`) with no webhook/digest URL configured.
+
+## 501. Scheduled digest delivery (manual, needs a receiver)
+
+- **Observe:** with `alerts.enabled=true` and `alerts.slo-digest-interval-minutes>0`, `AlertSloDigestScheduler`
+  POSTs `{"text": "..."}` to `alerts.slo-digest-url` (or `alerts.webhook-url`) each interval; the log shows
+  "SLO digest posted". Synchronous, no retry.
+
+## 502. Report date-range filtering (AlertSloDigestReportRangeTest + manual)
+
+- **Observe (unit):** `sloReportRows(fromDay, toDay)` filters by epoch-day; the no-arg form equals the full
+  range. **Manual:** `GET /admin/alerts/slo-report?days=7` or `?from=YYYY-MM-DD&to=YYYY-MM-DD`.
+
+## 503. Report target columns (AlertSloDigestReportRangeTest)
+
+- **Observe:** `sloReportCsv` header is `scope,route,day,date,good,total,ratio,slo_target,success_target,pass`;
+  each route row carries its effective targets (`sloTargetFor`/`successTargetFor`) and a `pass` flag
+  (`ratio >= slo_target`). Header-only for an empty report.

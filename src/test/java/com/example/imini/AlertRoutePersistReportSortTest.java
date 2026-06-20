@@ -35,7 +35,7 @@ class AlertRoutePersistReportSortTest {
         row.put("scope", "global"); row.put("route", ""); row.put("day", 20000L);
         row.put("date", "2024-10-04"); row.put("good", 95L); row.put("total", 100L); row.put("ratio", 0.95);
         String csv = AlertSink.sloReportCsv(List.of(row));
-        assertTrue(csv.startsWith("scope,route,day,date,good,total,ratio\n"));
+        assertTrue(csv.startsWith("scope,route,day,date,good,total,ratio,slo_target,success_target,pass\n"));
         assertTrue(csv.contains("global,,20000,2024-10-04,95,100,0.95"));
     }
 
@@ -50,7 +50,7 @@ class AlertRoutePersistReportSortTest {
 
     @Test
     void reportCsvEmptyIsHeaderOnly() {
-        assertEquals("scope,route,day,date,good,total,ratio\n", AlertSink.sloReportCsv(List.of()));
+        assertEquals("scope,route,day,date,good,total,ratio,slo_target,success_target,pass\n", AlertSink.sloReportCsv(List.of()));
     }
 
     // ---- Feature 2: worst-trend sort (pure) ----
