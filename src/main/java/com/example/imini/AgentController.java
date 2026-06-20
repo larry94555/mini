@@ -638,15 +638,27 @@ public class AgentController {
 
     /** Mute scheduled SLO digests for {@code hours} (so a known-degraded period doesn't keep paging). CSRF. */
     @PostMapping("/admin/alerts/slo-digest/mute")
-    public Map<String, Object> adminAlertsSloDigestMute(
+    public ResponseEntity<Map<String, Object>> adminAlertsSloDigestMute(
             @RequestParam(name = "hours", defaultValue = "4") double hours,
             @RequestParam(name = "reason", defaultValue = "") String reason,
             @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
             @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
         csrf.require(csrfToken(csrfHeader, csrfParam));
-        long until = alertSink.muteDigest(hours, reason, currentUser());
-        return Map.of("muted", true, "muted_until", until, "reason", alertSink.digestMuteReason());
+        try {
+            long until = alertSink.muteDigest(hours, reason, currentUser());
+            return ResponseEntity.ok(Map.of("muted", true, "muted_until", until, "reason", alertSink.digestMuteReason()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("muted", false, "error", e.getMessage()));
+        }
+    }
+
+    /** Recent digest mute/unmute/auto-expire audit events (newest-first). Admin only. */
+    @GetMapping("/admin/alerts/digest-audit")
+    public List<Map<String, Object>> adminAlertsDigestAudit(
+            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        requireAdmin();
+        return alertSink.digestAuditTrail(Math.max(1, Math.min(200, limit)));
     }
 
     /** Clear any SLO digest mute. CSRF-guarded. Admin only. */

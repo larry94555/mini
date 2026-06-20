@@ -127,6 +127,17 @@ public final class AlertsOverview {
             sb.append("</tbody></table>");
         }
 
+        // digest mute/unmute/auto-expire audit trail (filtered from the audit log)
+        List<Map<String, Object>> digestAudit = digestAuditRows(stats);
+        if (live || !digestAudit.isEmpty()) {
+            sb.append("<h2>Digest mute audit</h2>");
+            sb.append("<p class=\"muted\">Who muted/unmuted digests and when — auto-expiry shows as <code>system</code>.</p>");
+            sb.append("<table><thead><tr><th>time</th><th>user</th><th>action</th><th>outcome</th></tr></thead>");
+            sb.append("<tbody id=\"digest_audit_body\">");
+            for (Map<String, Object> r : digestAudit) sb.append(auditRow(r));
+            sb.append("</tbody></table>");
+        }
+
         // per-route
         Object byRoute = stats.get("by_route");
         Map<String, Map<String, Long>> routes = (byRoute instanceof Map) ? (Map<String, Map<String, Long>>) byRoute : Map.of();
@@ -245,6 +256,8 @@ public final class AlertsOverview {
             + "+'</td><td class=\"num\">'+(x.suppressed||0)+'</td></tr>';});rows('sup_body',h);"
             + "var rd=s.recent_digests||[];h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
             + "+'</td><td>'+esc(x.mode||'')+'</td><td>'+esc((x.summary||'').slice(0,120))+'</td></tr>';});rows('digest_body',h);"
+            + "var da=s.digest_audit||[];h='';da.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+esc(x.user||'')"
+            + "+'</td><td>'+esc(x.action||'')+'</td><td>'+esc((x.outcome||'').slice(0,80))+'</td></tr>';});rows('digest_audit_body',h);"
             + "var mn=document.getElementById('digest_mute_note');if(mn){var mu=s.digest_muted_until||0,now=Date.now();"
             + "var rs2=s.digest_mute_reason||'';"
             + "mn.textContent=(mu>now)?('Digest muted for ~'+Math.max(1,Math.floor((mu-now)/60000))+' more minutes'+(rs2?(' ('+rs2+')'):'')+'.'):'Digest not muted.';}"
@@ -401,6 +414,21 @@ public final class AlertsOverview {
                 + "</td><td>" + (Boolean.TRUE.equals(r.get("posted")) ? "yes" : "no")
                 + "</td><td>" + esc(String.valueOf(r.getOrDefault("mode", "")))
                 + "</td><td>" + esc(snippet(String.valueOf(r.getOrDefault("summary", "")), 120)) + "</td></tr>";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> digestAuditRows(Map<String, Object> stats) {
+        Object a = stats.get("digest_audit");
+        return (a instanceof List) ? (List<Map<String, Object>>) a : List.of();
+    }
+
+    /** A digest mute-audit table row (time, user, action, outcome). */
+    private static String auditRow(Map<String, Object> r) {
+        if (r == null) return "";
+        return "<tr><td>" + esc(String.valueOf(r.getOrDefault("time", "")))
+                + "</td><td>" + esc(String.valueOf(r.getOrDefault("user", "")))
+                + "</td><td>" + esc(String.valueOf(r.getOrDefault("action", "")))
+                + "</td><td>" + esc(snippet(String.valueOf(r.getOrDefault("outcome", "")), 80)) + "</td></tr>";
     }
 
     static String muteNote(long muteUntil, long nowMs) { return muteNote(muteUntil, nowMs, ""); }

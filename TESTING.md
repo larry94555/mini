@@ -4321,3 +4321,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe (via an audit listener):** `muteDigest` records `alert_digest_mute` (acting user + reason in the
   outcome); `unmuteDigest` records `alert_digest_unmute` only when something was muted; `expireMuteIfDue`
   records `alert_digest_mute_expired` (system) when the window elapses. The controller passes `currentUser()`.
+
+---
+
+# Digest mute audit trail, reason-required-for-long-mutes, mute-expiry catch-up
+
+## 521. Reason required for long mutes (AlertDigestAuditTrailReasonCatchupTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestAuditTrailReasonCatchupTest test`.
+- **Observe:** pure `reasonRequired(hours, threshold)` is true only above a positive threshold (threshold&le;0
+  disables). `muteDigest` throws `IllegalArgumentException` when a long mute has no reason; the mute endpoint
+  maps that to HTTP 400. Config `alerts.slo-digest-reason-required-hours` (default 8). (In a plain unit the
+  `@Value` field is 0, so the helper is asserted directly with an explicit threshold.)
+
+## 522. Filtered digest audit trail (AlertDigestAuditTrailReasonCatchupTest + manual)
+
+- **Observe (unit):** `digestAuditTrail` returns empty without a database (audit.recent needs a DB); the overview
+  renders a "Digest mute audit" section from `stats().digest_audit`. **Manual (SQLite):** mute/unmute/expiry
+  events appear at `GET /admin/alerts/digest-audit?limit=N` and on the overview, filtered to `alert_digest*`.
+
+## 523. Mute-expiry catch-up digest (AlertDigestAuditTrailReasonCatchupTest)
+
+- **Observe:** after a mute elapses, `expireMuteIfDue` sets a pending-catch-up flag; the next `sloDigest()`
+  carries `catchup=true`, `formatSloDigest` appends "(catch-up after mute)", and `renderDigest` exposes
+  `{catchup}`. The flag is cleared once a digest is actually sent (probe/pipeline). The catch-up rides the next
+  scheduled tick or manual post after expiry.
