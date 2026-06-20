@@ -72,6 +72,8 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertDeliverySuccessBurnFast` | Alerts are dead-lettering faster than the success budget allows | Receiver is rejecting/erroring; check the dead-letter backlog and receiver health |
 | `IminiAlertRouteSuccessLow` | One route's 2xx delivery ratio is below target | That receiver is up-but-erroring; check its endpoint/auth |
 
+The overview page `GET /admin/alerts/overview.html` now also shows an **SLO summary** (latency success ratio, error budget remaining, rolling-window budget, delivery-success ratio) that live-updates with the page. When a database is available the rolling-window SLO buckets are persisted (table `alert_slo_buckets`) so the window survives a restart.
+
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a
 mistyped tier or route that silently parsed to nothing is easy to spot. The config endpoint also returns a

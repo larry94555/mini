@@ -124,7 +124,9 @@ public class Database {
             "CREATE TABLE alert_dedup (dk_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, "
                     + "suppressed INTEGER NOT NULL DEFAULT 0)",
             // multi-tier escalation ladder: how many tiers a dead-letter has already been paged to
-            "ALTER TABLE alerts_dead_letter ADD COLUMN escalation_tier INTEGER NOT NULL DEFAULT 0");
+            "ALTER TABLE alerts_dead_letter ADD COLUMN escalation_tier INTEGER NOT NULL DEFAULT 0",
+            // durable rolling-window SLO buckets (one row per UTC day) so the window survives restarts
+            "CREATE TABLE alert_slo_buckets (day INTEGER PRIMARY KEY, good INTEGER NOT NULL, total INTEGER NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

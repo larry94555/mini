@@ -70,6 +70,15 @@ public final class AlertsOverview {
         }
         sb.append("</div>");
 
+        // SLO summary (latency cumulative + rolling window, delivery-success), with live-updatable ids
+        sb.append("<h2>SLO</h2><div class=\"cards\">");
+        sloCard(sb, "slo_ratio", "latency success", pct(slo(stats, "delivery_slo", "success_ratio")));
+        sloCard(sb, "slo_budget", "budget left", pct(slo(stats, "delivery_slo", "budget_remaining")));
+        sloCard(sb, "slo_win_budget", "30d budget left", pct(slo(stats, "delivery_slo_window", "budget_remaining")));
+        sloCard(sb, "succ_ratio", "delivery success", pct(slo(stats, "delivery_success_slo", "success_ratio")));
+        sloCard(sb, "succ_budget", "success budget", pct(slo(stats, "delivery_success_slo", "budget_remaining")));
+        sb.append("</div>");
+
         // per-route
         Object byRoute = stats.get("by_route");
         Map<String, Map<String, Long>> routes = (byRoute instanceof Map) ? (Map<String, Map<String, Long>>) byRoute : Map.of();
@@ -148,6 +157,12 @@ public final class AlertsOverview {
             + "['queued','sent','failed','retried','dead_lettered','dropped','replayed','suppressed',"
             + "'escalated','sla_breaches','digested','in_flight','dead_letter_size'].forEach(function(k){"
             + "setCard(k,(s[k]||0));});"
+            + "function pct(v){return (v==null||isNaN(v))?'\\u2014':(Math.round(v*1000)/10)+'%';}"
+            + "function setS(id,v){var e=document.getElementById('s_'+id);if(e)e.textContent=pct(v);}"
+            + "var dl=s.delivery_slo||{},dw=s.delivery_slo_window||{},ds=s.delivery_success_slo||{};"
+            + "setS('slo_ratio',dl.success_ratio);setS('slo_budget',dl.budget_remaining);"
+            + "setS('slo_win_budget',dw.budget_remaining);setS('succ_ratio',ds.success_ratio);"
+            + "setS('succ_budget',ds.budget_remaining);"
             + "var br=s.by_route||{},h='';Object.keys(br).forEach(function(k){var r=br[k]||{};"
             + "h+='<tr><td>'+esc(k)+'</td><td class=\"num\">'+(r.sent||0)+'</td><td class=\"num\">'+(r.failed||0)"
             + "+'</td><td class=\"num\">'+(r.dead_lettered||0)+'</td><td class=\"num\">'+(r.suppressed||0)+'</td></tr>';});"
@@ -166,6 +181,27 @@ public final class AlertsOverview {
             + "if(ON)poll();return false;}"
             + "poll();if(REFRESH>0)setInterval(poll,REFRESH*1000);"
             + "</script>";
+    }
+
+    /** An SLO summary card; the value span carries id {@code s_<key>} so the poller can live-update it. */
+    private static void sloCard(StringBuilder sb, String key, String label, String value) {
+        sb.append("<div class=\"card\"><div class=\"n\" id=\"s_").append(esc(key)).append("\">")
+          .append(esc(value)).append("</div><div class=\"l\">").append(esc(label)).append("</div></div>");
+    }
+
+    /** A nested SLO field from stats (e.g. delivery_slo.success_ratio); NaN if absent. */
+    private static double slo(Map<String, Object> stats, String block, String field) {
+        Object b = stats.get(block);
+        if (b instanceof Map<?, ?> m && m.get(field) instanceof Number n) return n.doubleValue();
+        return Double.NaN;
+    }
+
+    /** Format a ratio as a percentage string (no trailing .0 for whole numbers); "—" for NaN. */
+    static String pct(double r) {
+        if (Double.isNaN(r)) return "\u2014";
+        double p = Math.round(r * 1000.0) / 10.0;
+        String num = (p == Math.rint(p)) ? Long.toString((long) p) : Double.toString(p);
+        return num + "%";
     }
 
     private static void card(StringBuilder sb, String key, String label, long n, boolean warn) {
