@@ -670,6 +670,28 @@
      "refId": "A"
     }
    ]
+  },
+  {
+   "id": 28,
+   "title": "SLO digest muted",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 60,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_digest_muted",
+     "legendFormat": "muted (1=yes)",
+     "refId": "A"
+    }
+   ]
   }
  ],
  "schemaVersion": 39,

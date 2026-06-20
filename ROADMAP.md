@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- SLO digest mute observability + auto-expiry: the digest carries a muted flag (formatted as a [muted] prefix and a {muted} template placeholder), Prometheus exports imini_alerts_digest_muted / imini_alerts_digest_mute_until_seconds with an IminiAlertSloDigestMuted rule + Grafana panel, and a mute window now auto-expires (cleared + logged resumption on the next scheduler tick or post via expireMuteIfDue).
+
 - SLO digest history + mute + bounded alert_meta: every posted/suppressed digest is recorded in a capped history (alert_meta, alerts.slo-digest-history-max, pruned each post) viewable at GET /admin/alerts/slo-digest/history and a Recent-digests section on the overview; scheduled digests can be muted for N hours (POST /admin/alerts/slo-digest/mute, persisted + restored) with a manual ?force override; overview gains Mute/Unmute controls.
 
 - Persisted digest baseline + overview Send-digest button + digest via the delivery pipeline: the since-last-digest deltas baseline is persisted to a new alert_meta table (restored at startup) so deltas survive restarts; the overview page gets a CSRF-guarded "Send SLO digest now" button wired to POST /admin/alerts/slo-digest; and alerts.slo-digest-via-pipeline routes the digest through the normal retry/dead-letter pipeline instead of a one-shot probe.

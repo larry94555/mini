@@ -4275,3 +4275,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `AlertsOverview` renders a "Recent SLO digests" table from `stats().recent_digests` and a mute
   note from `digest_muted_until` (`muteNote`), with Send/Mute/Unmute controls when a CSRF token is present;
   both live-update. Live: `GET /admin/alerts/overview.html`.
+
+---
+
+# SLO digest mute observability + auto-expiry
+
+## 515. Mute state in the digest (AlertDigestMuteObservabilityTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestMuteObservabilityTest test`.
+- **Observe:** `sloDigest()` carries `muted`/`muted_until` (false/0 normally, true/future after `muteDigest`);
+  `formatSloDigest` prefixes `[muted] ` when muted; `renderDigest` exposes a `{muted}` placeholder.
+
+## 516. Mute state in Prometheus (AlertDigestMuteObservabilityTest)
+
+- **Observe:** `PromFormat` emits `imini_alerts_digest_muted` (1/0) and `imini_alerts_digest_mute_until_seconds`
+  from `digest_muted_until` (0/0 when not muted). `ops/prometheus/imini-alerts.yml` adds `IminiAlertSloDigestMuted`
+  and the dashboard a "SLO digest muted" panel. Validate with `promtool check rules`.
+
+## 517. Auto-expiring mute with resumption (AlertDigestMuteObservabilityTest + manual)
+
+- **Observe (unit):** `muteExpired(now, until)` is a pure boundary check (elapsed = expired); `expireMuteIfDue`
+  clears + persists + returns true only once the window elapses; a forced post past a mute resumes (mode
+  != muted). **Manual:** mute for a short window; on the next scheduler tick after expiry the log shows
+  "mute window elapsed; digests resumed" and digests resume.
