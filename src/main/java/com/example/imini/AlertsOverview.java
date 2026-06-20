@@ -64,12 +64,19 @@ public final class AlertsOverview {
         sb.append("<a class=\"nav\" href=\"/metrics/prom\">Prometheus \u2192</a>");
         if (csrfToken != null && !csrfToken.isEmpty()) {
             sb.append("<a class=\"nav\" href=\"#\" id=\"send_digest\" onclick=\"return sendDigest()\">Send SLO digest now</a>");
+            sb.append("<a class=\"nav\" href=\"#\" onclick=\"return muteDigest()\">Mute 4h</a>");
+            sb.append("<a class=\"nav\" href=\"#\" onclick=\"return unmuteDigest()\">Unmute</a>");
             sb.append("<span id=\"digest_result\" class=\"muted\"></span>");
             sb.append("<script>var CSRF=\"").append(esc(csrfToken)).append("\";")
-              .append("function sendDigest(){var r=document.getElementById('digest_result');if(r)r.textContent=' sending\\u2026';")
-              .append("fetch('/admin/alerts/slo-digest',{method:'POST',headers:{'X-CSRF-Token':CSRF}})")
-              .append(".then(function(x){return x.json();}).then(function(j){if(r)r.textContent=' '+(j.posted?('sent ('+(j.mode||'')+'): '):'not sent: ')+(j.summary||j.reason||'');})")
-              .append(".catch(function(e){if(r)r.textContent=' error sending digest';});return false;}</script>");
+              .append("function digestPost(u){var r=document.getElementById('digest_result');if(r)r.textContent=' working\\u2026';")
+              .append("return fetch(u,{method:'POST',headers:{'X-CSRF-Token':CSRF}}).then(function(x){return x.json();});}")
+              .append("function sendDigest(){digestPost('/admin/alerts/slo-digest').then(function(j){var r=document.getElementById('digest_result');")
+              .append("if(r)r.textContent=' '+(j.posted?('sent ('+(j.mode||'')+'): '):('not sent'+(j.mode==='muted'?' (muted)':'')+': '))+(j.summary||j.reason||'');})")
+              .append(".catch(function(){var r=document.getElementById('digest_result');if(r)r.textContent=' error sending digest';});return false;}")
+              .append("function muteDigest(){digestPost('/admin/alerts/slo-digest/mute?hours=4').then(function(j){var r=document.getElementById('digest_result');")
+              .append("if(r)r.textContent=' muted for 4h';}).catch(function(){});return false;}")
+              .append("function unmuteDigest(){digestPost('/admin/alerts/slo-digest/unmute').then(function(j){var r=document.getElementById('digest_result');")
+              .append("if(r)r.textContent=' unmuted';}).catch(function(){});return false;}</script>");
         }
         if (live) {
             sb.append("<span id=\"refreshnote\">Auto-refresh every ").append(autoRefreshSeconds)
@@ -106,6 +113,18 @@ public final class AlertsOverview {
           .append(Double.isNaN(sloTarget) ? "" : ", target " + pct(sloTarget))
           .append("): </span>");
         sb.append("<span id=\"sparkbox\">").append(sparklineSvg(series, sloTarget, windowDays, 160, 28)).append("</span></div>");
+
+        // recent SLO digests (from persisted history) + mute status
+        List<Map<String, Object>> recent = recentDigests(stats);
+        if (live || !recent.isEmpty()) {
+            sb.append("<h2>Recent SLO digests</h2>");
+            long mu = num(stats, "digest_muted_until");
+            sb.append("<p class=\"muted\" id=\"digest_mute_note\">").append(muteNote(mu, System.currentTimeMillis())).append("</p>");
+            sb.append("<table><thead><tr><th>time</th><th>posted</th><th>mode</th><th>summary</th></tr></thead>");
+            sb.append("<tbody id=\"digest_body\">");
+            for (Map<String, Object> r : recent) sb.append(digestRow(r));
+            sb.append("</tbody></table>");
+        }
 
         // per-route
         Object byRoute = stats.get("by_route");
@@ -223,6 +242,10 @@ public final class AlertsOverview {
             + "rows('tier_body',h);"
             + "var dg=d.digests||[];h='';dg.forEach(function(x){h+='<tr><td>'+esc(x.action)+'</td><td>'+esc(x.target)"
             + "+'</td><td class=\"num\">'+(x.suppressed||0)+'</td></tr>';});rows('sup_body',h);"
+            + "var rd=s.recent_digests||[];h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
+            + "+'</td><td>'+esc(x.mode||'')+'</td><td>'+esc((x.summary||'').slice(0,120))+'</td></tr>';});rows('digest_body',h);"
+            + "var mn=document.getElementById('digest_mute_note');if(mn){var mu=s.digest_muted_until||0,now=Date.now();"
+            + "mn.textContent=(mu>now)?('Digest muted for ~'+Math.max(1,Math.floor((mu-now)/60000))+' more minutes.'):'Digest not muted.';}"
             + "var u=document.getElementById('updated');if(u)u.textContent='updated '+new Date().toLocaleTimeString();}"
             + "function poll(){if(!ON)return;fetch('/admin/alerts/overview.json',{headers:{}}).then(function(r){"
             + "return r.json();}).then(rebuild).catch(function(){});}"
@@ -361,6 +384,28 @@ public final class AlertsOverview {
     private static long num(Map<String, Object> m, String k) {
         Object v = m.get(k);
         return (v instanceof Number) ? ((Number) v).longValue() : 0L;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> recentDigests(Map<String, Object> stats) {
+        Object r = stats.get("recent_digests");
+        return (r instanceof List) ? (List<Map<String, Object>>) r : List.of();
+    }
+
+    /** A digest history table row. */
+    private static String digestRow(Map<String, Object> r) {
+        if (r == null) return "";
+        return "<tr><td>" + esc(String.valueOf(r.getOrDefault("time", "")))
+                + "</td><td>" + (Boolean.TRUE.equals(r.get("posted")) ? "yes" : "no")
+                + "</td><td>" + esc(String.valueOf(r.getOrDefault("mode", "")))
+                + "</td><td>" + esc(snippet(String.valueOf(r.getOrDefault("summary", "")), 120)) + "</td></tr>";
+    }
+
+    /** Pure: a human note about the current mute state ("" when not muted). */
+    static String muteNote(long muteUntil, long nowMs) {
+        if (muteUntil <= nowMs) return "Digest not muted.";
+        long mins = Math.max(1, (muteUntil - nowMs) / 60000L);
+        return "Digest muted for ~" + mins + " more minute" + (mins == 1 ? "" : "s") + ".";
     }
 
     private static long val(Map<String, Long> m, String k) {

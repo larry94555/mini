@@ -68,6 +68,7 @@ public class AlertSink {
     @Value("${alerts.slo-digest-url:}") private String sloDigestUrl;
     @Value("${alerts.slo-digest-template:}") private String sloDigestTemplate;
     @Value("${alerts.slo-digest-via-pipeline:false}") private boolean sloDigestViaPipeline;
+    @Value("${alerts.slo-digest-history-max:50}") private int sloDigestHistoryMax;
     @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private volatile String actionsCfg;
     @Value("${alerts.max-retries:3}") private int maxRetries;
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
@@ -123,6 +124,7 @@ public class AlertSink {
     private volatile RollingWindow latencyWindow = new RollingWindow(30); // re-sized in init() from config
     private final Map<String, RollingWindow> routeWindows = new java.util.concurrent.ConcurrentHashMap<>(); // per-route daily latency-good
     private volatile Map<String, Object> lastDigestBaseline; // snapshot from the previous posted digest (for deltas)
+    private volatile long digestMuteUntil; // epoch ms; while now < this, scheduled digests are suppressed
 
     /**
      * A fixed-size ring of daily good/total buckets for a rolling-window SLO. Each bucket covers one UTC day;
@@ -1341,6 +1343,8 @@ public class AlertSink {
         m.put("slo_window_series", sloWindowSeries());
         m.put("slo_window_series_by_route", sloWindowSeriesByRoute());
         m.put("delivery_success_slo", deliverySuccessSlo());
+        m.put("recent_digests", sloDigestHistory(5));
+        m.put("digest_muted_until", digestMuteUntil);
         m.put("slo_by_route", sloByRoute());
         m.put("success_by_route", successSloByRoute());
         Map<String, Object> stReport = selfTestReport();
@@ -1512,15 +1516,7 @@ public class AlertSink {
         base.put("delivery_success_ratio", d.get("delivery_success_ratio"));
         base.put("dead_lettered", deadLettered.get());
         lastDigestBaseline = base;
-        if (db != null && db.available()) {
-            try {
-                db.update("INSERT INTO alert_meta(meta_key, meta_value) VALUES('digest_baseline', ?) "
-                        + "ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value",
-                        serializeBaseline(base));
-            } catch (Exception ex) {
-                log.warn("[alerts] could not persist digest baseline: " + ex.getMessage());
-            }
-        }
+        persistMeta("digest_baseline", serializeBaseline(base));
     }
 
     /** Pure: serialize a digest baseline to a compact pipe-joined string (ts|budget|success|dead_lettered). */
@@ -1553,9 +1549,88 @@ public class AlertSink {
                 Map<String, Object> base = parseBaseline(v);
                 if (base != null) { lastDigestBaseline = base; log.info("[alerts] restored digest baseline"); }
             }
+            for (String v : db.query("SELECT meta_value FROM alert_meta WHERE meta_key='digest_mute_until'",
+                    rs -> rs.getString("meta_value"))) {
+                try { digestMuteUntil = Long.parseLong(v.trim()); } catch (NumberFormatException ignore) {}
+            }
         } catch (Exception ex) {
-            log.warn("[alerts] could not load digest baseline: " + ex.getMessage());
+            log.warn("[alerts] could not load digest baseline/mute: " + ex.getMessage());
         }
+    }
+
+    /** Upsert a single alert_meta key/value (no-op without a database). */
+    private void persistMeta(String key, String value) {
+        if (db == null || !db.available()) return;
+        try {
+            db.update("INSERT INTO alert_meta(meta_key, meta_value) VALUES(?, ?) "
+                    + "ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value", key, value);
+        } catch (Exception ex) {
+            log.warn("[alerts] could not persist " + key + ": " + ex.getMessage());
+        }
+    }
+
+    /** Pure: a lexically-sortable history key for an epoch-ms timestamp (zero-padded so DESC = newest-first). */
+    static String digestHistoryKey(long ts) { return "digest_history:" + String.format("%020d", ts); }
+
+    /** Pure: serialize a history row (summary kept as the tail so its '|' chars are preserved on parse). */
+    static String serializeDigestHistory(long ts, boolean posted, String mode, String summary) {
+        return ts + "|" + posted + "|" + (mode == null ? "" : mode) + "|" + (summary == null ? "" : summary);
+    }
+
+    /** Pure: parse a serialized history row into {ts,time,posted,mode,summary}; null if malformed. */
+    static Map<String, Object> parseDigestHistory(String s) {
+        if (s == null || s.isBlank()) return null;
+        String[] p = s.split("\\|", 4);
+        if (p.length < 4) return null;
+        try {
+            long ts = Long.parseLong(p[0].trim());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("ts", ts);
+            m.put("time", java.time.Instant.ofEpochMilli(ts).toString());
+            m.put("posted", Boolean.parseBoolean(p[1].trim()));
+            m.put("mode", p[2]);
+            m.put("summary", p[3]);
+            return m;
+        } catch (NumberFormatException ex) { return null; }
+    }
+
+    /** Pure: of history keys sorted newest-first, the ones beyond {@code max} that should be pruned. */
+    static List<String> historyKeysToPrune(List<String> keysNewestFirst, int max) {
+        if (keysNewestFirst == null || max < 0 || keysNewestFirst.size() <= max) return List.of();
+        return new ArrayList<>(keysNewestFirst.subList(max, keysNewestFirst.size()));
+    }
+
+    /** Record a posted/suppressed digest in the bounded history (no-op without a database). */
+    private void recordDigestHistory(boolean posted, String mode, String summary) {
+        if (db == null || !db.available()) return;
+        try {
+            long ts = System.currentTimeMillis();
+            db.update("INSERT INTO alert_meta(meta_key, meta_value) VALUES(?, ?) "
+                    + "ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value",
+                    digestHistoryKey(ts), serializeDigestHistory(ts, posted, mode, summary));
+            int max = Math.max(0, sloDigestHistoryMax);
+            db.update("DELETE FROM alert_meta WHERE meta_key LIKE 'digest_history:%' AND meta_key NOT IN "
+                    + "(SELECT meta_key FROM alert_meta WHERE meta_key LIKE 'digest_history:%' "
+                    + "ORDER BY meta_key DESC LIMIT ?)", max);
+        } catch (Exception ex) {
+            log.warn("[alerts] could not record digest history: " + ex.getMessage());
+        }
+    }
+
+    /** Recent digests (newest-first), each {ts,time,posted,mode,summary}. Empty without a database. */
+    public List<Map<String, Object>> sloDigestHistory(int limit) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (db == null || !db.available()) return out;
+        try {
+            for (String v : db.query("SELECT meta_value FROM alert_meta WHERE meta_key LIKE 'digest_history:%' "
+                    + "ORDER BY meta_key DESC LIMIT ?", rs -> rs.getString("meta_value"), Math.max(1, limit))) {
+                Map<String, Object> row = parseDigestHistory(v);
+                if (row != null) out.add(row);
+            }
+        } catch (Exception ex) {
+            log.warn("[alerts] could not read digest history: " + ex.getMessage());
+        }
+        return out;
     }
 
     /** Pure: a short human-readable digest line from {@link #sloDigest()} output (default format). */
@@ -1642,19 +1717,36 @@ public class AlertSink {
      * POST a JSON SLO digest to {@link #digestUrl()} (synchronous, no retry — it's a periodic summary, not a
      * critical alert). Returns a small result map; no-op result when no URL is configured.
      */
-    public Map<String, Object> postSloDigest() {
+    public Map<String, Object> postSloDigest() { return postSloDigest(false); }
+
+    /**
+     * Build and send the SLO digest. When muted (and not {@code force}d) the send is suppressed and the baseline
+     * is left untouched so the next real digest's deltas span the muted period. Every attempt (sent, suppressed,
+     * or no-URL) is recorded in the digest history. {@code force=true} (manual override) ignores the mute.
+     */
+    public Map<String, Object> postSloDigest(boolean force) {
         Map<String, Object> digest = sloDigest();
-        String url = digestUrl();
         String summary = renderDigest(digest, sloDigestTemplate);
+        if (!force && digestMuted(System.currentTimeMillis(), digestMuteUntil)) {
+            recordDigestHistory(false, "muted", summary);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("posted", false);
+            out.put("mode", "muted");
+            out.put("muted_until", digestMuteUntil);
+            out.put("summary", summary);
+            return out; // do NOT advance the baseline while muted
+        }
+        String url = digestUrl();
         if (url == null || url.isBlank()) {
-            markDigestBaseline(digest); // still advance the baseline so deltas track wall-clock periods
+            markDigestBaseline(digest); // still advance so deltas track wall-clock periods
+            recordDigestHistory(false, "no-url", summary);
             return Map.of("posted", false, "reason", "no digest/webhook URL", "summary", summary);
         }
         String payload = "{\"text\":\"" + jsonEscape(summary) + "\"}";
         if (sloDigestViaPipeline) {
-            // route through the normal delivery pipeline (retry + dead-letter) instead of a one-shot probe
-            enqueue(payload, url, null, "slo_digest");
+            enqueue(payload, url, null, "slo_digest"); // retry + dead-letter via the normal pipeline
             markDigestBaseline(digest);
+            recordDigestHistory(true, "pipeline", summary);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("posted", true);
             out.put("mode", "pipeline");
@@ -1663,13 +1755,37 @@ public class AlertSink {
         }
         Map<String, Object> probe = probe(url, payload); // synchronous one-shot POST (no retry)
         markDigestBaseline(digest);
+        boolean ok = Boolean.TRUE.equals(probe.get("ok"));
+        recordDigestHistory(ok, "probe", summary);
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("posted", Boolean.TRUE.equals(probe.get("ok")));
+        out.put("posted", ok);
         out.put("mode", "probe");
         out.put("summary", summary);
         out.put("probe", probe);
         return out;
     }
+
+    /** Pure: is the digest muted at {@code nowMs} given a mute-until epoch-ms (0 = not muted)? */
+    static boolean digestMuted(long nowMs, long muteUntil) { return muteUntil > nowMs; }
+
+    /** Mute scheduled digests for {@code hours} (persisted). Returns the mute-until epoch ms. */
+    public long muteDigest(double hours) {
+        long until = System.currentTimeMillis() + Math.round(Math.max(0, hours) * 3_600_000.0);
+        digestMuteUntil = until;
+        persistMeta("digest_mute_until", Long.toString(until));
+        log.info("[alerts] SLO digest muted until " + until);
+        return until;
+    }
+
+    /** Clear any digest mute (persisted). */
+    public void unmuteDigest() {
+        digestMuteUntil = 0;
+        persistMeta("digest_mute_until", "0");
+        log.info("[alerts] SLO digest unmuted");
+    }
+
+    /** Current mute-until epoch ms (0 = not muted). */
+    public long digestMuteUntil() { return digestMuteUntil; }
 
     /** Per-route delivery-success SLO ({route -> snapshot}); success = sent, failure = dead-lettered. */
     Map<String, Map<String, Object>> successSloByRoute() {

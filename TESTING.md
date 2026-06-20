@@ -4245,3 +4245,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `AlertsOverview.render(..., csrfToken)` shows a "Send SLO digest now" control that POSTs to
   `/admin/alerts/slo-digest` with the `X-CSRF-Token` header when a token is present, hides it otherwise (and in
   the back-compat overloads), and HTML-escapes the token. Live: `GET /admin/alerts/overview.html`.
+
+---
+
+# SLO digest history, mute/acknowledge, bounded alert_meta
+
+## 511. Digest history serialize/parse + keys (AlertDigestHistoryMuteCapTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestHistoryMuteCapTest test`.
+- **Observe:** `serializeDigestHistory`/`parseDigestHistory` round-trip with `|` chars preserved in the summary
+  tail; malformed rows reject; `digestHistoryKey` is zero-padded so lexical DESC = newest-first.
+  `sloDigestHistory` is empty without a database. Endpoint: `GET /admin/alerts/slo-digest/history?limit=N`.
+
+## 512. Digest history cap (AlertDigestHistoryMuteCapTest + manual)
+
+- **Observe (unit):** `historyKeysToPrune(keysNewestFirst, max)` returns exactly the keys beyond `max`.
+  **Manual (SQLite):** after each post, `alert_meta` retains at most `alerts.slo-digest-history-max`
+  `digest_history:*` rows.
+
+## 513. Digest mute / acknowledge (AlertDigestHistoryMuteCapTest)
+
+- **Observe:** `digestMuted(now, until)` is a strict future check; `muteDigest(hours)`/`unmuteDigest` toggle and
+  persist (`alert_meta` `digest_mute_until`, restored at startup); a muted `postSloDigest()` is suppressed
+  (mode `muted`, baseline untouched) while `postSloDigest(true)` forces past the mute. Endpoints:
+  `POST /admin/alerts/slo-digest/mute?hours=N`, `/unmute`, and `/slo-digest?force=true`.
+
+## 514. Overview recent-digests + mute controls (AlertDigestHistoryMuteCapTest)
+
+- **Observe:** `AlertsOverview` renders a "Recent SLO digests" table from `stats().recent_digests` and a mute
+  note from `digest_muted_until` (`muteNote`), with Send/Mute/Unmute controls when a CSRF token is present;
+  both live-update. Live: `GET /admin/alerts/overview.html`.

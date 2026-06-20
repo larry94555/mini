@@ -620,11 +620,43 @@ public class AgentController {
      */
     @PostMapping("/admin/alerts/slo-digest")
     public Map<String, Object> adminAlertsSloDigest(
+            @RequestParam(name = "force", defaultValue = "false") boolean force,
             @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
             @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
         csrf.require(csrfToken(csrfHeader, csrfParam));
-        return alertSink.postSloDigest();
+        return alertSink.postSloDigest(force);
+    }
+
+    /** Recent SLO digests (newest-first), from the persisted history. Admin only. */
+    @GetMapping("/admin/alerts/slo-digest/history")
+    public List<Map<String, Object>> adminAlertsSloDigestHistory(
+            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        requireAdmin();
+        return alertSink.sloDigestHistory(Math.max(1, Math.min(200, limit)));
+    }
+
+    /** Mute scheduled SLO digests for {@code hours} (so a known-degraded period doesn't keep paging). CSRF. */
+    @PostMapping("/admin/alerts/slo-digest/mute")
+    public Map<String, Object> adminAlertsSloDigestMute(
+            @RequestParam(name = "hours", defaultValue = "4") double hours,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
+        requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
+        long until = alertSink.muteDigest(hours);
+        return Map.of("muted", true, "muted_until", until);
+    }
+
+    /** Clear any SLO digest mute. CSRF-guarded. Admin only. */
+    @PostMapping("/admin/alerts/slo-digest/unmute")
+    public Map<String, Object> adminAlertsSloDigestUnmute(
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
+        requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
+        alertSink.unmuteDigest();
+        return Map.of("muted", false);
     }
 
     /**
