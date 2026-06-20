@@ -66,6 +66,7 @@ public class AlertSink {
     @Value("${alerts.enabled:false}") private boolean enabled;
     @Value("${alerts.webhook-url:}") private String webhookUrl;
     @Value("${alerts.slo-digest-url:}") private String sloDigestUrl;
+    @Value("${alerts.slo-digest-template:}") private String sloDigestTemplate;
     @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private volatile String actionsCfg;
     @Value("${alerts.max-retries:3}") private int maxRetries;
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
@@ -120,6 +121,7 @@ public class AlertSink {
     private final AtomicLong latencyGood = new AtomicLong(); // deliveries within the SLO latency objective
     private volatile RollingWindow latencyWindow = new RollingWindow(30); // re-sized in init() from config
     private final Map<String, RollingWindow> routeWindows = new java.util.concurrent.ConcurrentHashMap<>(); // per-route daily latency-good
+    private volatile Map<String, Object> lastDigestBaseline; // snapshot from the previous posted digest (for deltas)
 
     /**
      * A fixed-size ring of daily good/total buckets for a rolling-window SLO. Each bucket covers one UTC day;
@@ -1468,28 +1470,97 @@ public class AlertSink {
         d.put("delivery_success_ratio", succ.get("success_ratio"));
         d.put("success_target", successTarget);
         // worst route by per-route latency SLO success ratio
-        String worst = null;
-        double worstRatio = Double.MAX_VALUE;
-        for (Map.Entry<String, Map<String, Object>> e : sloByRoute().entrySet()) {
-            Object sr = e.getValue().get("success_ratio");
-            if (sr instanceof Number n && n.doubleValue() < worstRatio) { worstRatio = n.doubleValue(); worst = e.getKey(); }
+        String[] worstLatency = worstRoute(sloByRoute());
+        d.put("worst_route", worstLatency[0]);
+        d.put("worst_route_ratio", worstLatency[0].isEmpty() ? 1.0 : Double.parseDouble(worstLatency[1]));
+        // worst route by per-route delivery-success ratio (a route can be fast but failing delivery)
+        String[] worstSuccess = worstRoute(successSloByRoute());
+        d.put("worst_success_route", worstSuccess[0]);
+        d.put("worst_success_route_ratio", worstSuccess[0].isEmpty() ? 1.0 : Double.parseDouble(worstSuccess[1]));
+        // deltas since the previous posted digest (omitted on the first digest)
+        Map<String, Object> base = lastDigestBaseline;
+        if (base != null) {
+            d.put("since_last_minutes", Math.max(0, (System.currentTimeMillis() - (Long) base.get("ts")) / 60000L));
+            d.put("budget_delta", round4(num(d.get("window_budget_remaining")) - num(base.get("window_budget_remaining"))));
+            d.put("delivery_success_delta", round4(num(d.get("delivery_success_ratio")) - num(base.get("delivery_success_ratio"))));
+            d.put("dead_lettered_delta", deadLettered.get() - (Long) base.get("dead_lettered"));
         }
-        d.put("worst_route", worst == null ? "" : worst);
-        d.put("worst_route_ratio", worst == null ? 1.0 : Math.round(worstRatio * 10000.0) / 10000.0);
         return d;
     }
 
-    /** Pure: a short human-readable digest line from {@link #sloDigest()} output. */
+    /** Pure: the worst (lowest success_ratio) route in a per-route SLO map → {name, ratioStr}; {"",""} if none. */
+    private static String[] worstRoute(Map<String, Map<String, Object>> byRoute) {
+        String worst = "";
+        double worstRatio = Double.MAX_VALUE;
+        for (Map.Entry<String, Map<String, Object>> e : byRoute.entrySet()) {
+            Object sr = e.getValue().get("success_ratio");
+            if (sr instanceof Number n && n.doubleValue() < worstRatio) { worstRatio = n.doubleValue(); worst = e.getKey(); }
+        }
+        return worst.isEmpty() ? new String[]{"", ""}
+                : new String[]{worst, Double.toString(Math.round(worstRatio * 10000.0) / 10000.0)};
+    }
+
+    private static double num(Object o) { return o instanceof Number n ? n.doubleValue() : 0.0; }
+
+    /** Snapshot the current digest posture as the baseline for the next digest's deltas. */
+    private void markDigestBaseline(Map<String, Object> d) {
+        Map<String, Object> base = new LinkedHashMap<>();
+        base.put("ts", System.currentTimeMillis());
+        base.put("window_budget_remaining", d.get("window_budget_remaining"));
+        base.put("delivery_success_ratio", d.get("delivery_success_ratio"));
+        base.put("dead_lettered", deadLettered.get());
+        lastDigestBaseline = base;
+    }
+
+    /** Pure: a short human-readable digest line from {@link #sloDigest()} output (default format). */
     static String formatSloDigest(Map<String, Object> d) {
         StringBuilder sb = new StringBuilder("imini SLO digest: ");
         sb.append("window ").append(pctOf(d.get("window_success_ratio")))
-          .append(" (budget ").append(pctOf(d.get("window_budget_remaining"))).append(" left)");
+          .append(" (budget ").append(pctOf(d.get("window_budget_remaining"))).append(" left");
+        if (d.get("budget_delta") != null) sb.append(", ").append(deltaPts(d.get("budget_delta"))).append(" since last");
+        sb.append(")");
         sb.append(", delivery-success ").append(pctOf(d.get("delivery_success_ratio")));
         Object worst = d.get("worst_route");
         if (worst != null && !String.valueOf(worst).isEmpty()) {
-            sb.append(", worst route ").append(worst).append(" @ ").append(pctOf(d.get("worst_route_ratio")));
+            sb.append(", worst latency ").append(worst).append(" @ ").append(pctOf(d.get("worst_route_ratio")));
+        }
+        Object worstS = d.get("worst_success_route");
+        if (worstS != null && !String.valueOf(worstS).isEmpty()) {
+            sb.append(", worst delivery ").append(worstS).append(" @ ").append(pctOf(d.get("worst_success_route_ratio")));
         }
         return sb.toString();
+    }
+
+    /**
+     * Pure: render a digest using a template if non-blank, else the default {@link #formatSloDigest(Map)}.
+     * Placeholders: {window_ratio} {window_budget} {window_days} {delivery_success} {slo_target}
+     * {success_target} {worst_route} {worst_route_ratio} {worst_success_route} {worst_success_route_ratio}
+     * {budget_delta} {delivery_success_delta} {dead_lettered_delta} {since_last_minutes}.
+     */
+    static String renderDigest(Map<String, Object> d, String template) {
+        if (template == null || template.isBlank()) return formatSloDigest(d);
+        return template
+                .replace("{window_ratio}", pctOf(d.get("window_success_ratio")))
+                .replace("{window_budget}", pctOf(d.get("window_budget_remaining")))
+                .replace("{window_days}", String.valueOf(d.getOrDefault("window_days", "")))
+                .replace("{delivery_success}", pctOf(d.get("delivery_success_ratio")))
+                .replace("{slo_target}", pctOf(d.get("slo_target")))
+                .replace("{success_target}", pctOf(d.get("success_target")))
+                .replace("{worst_route}", String.valueOf(d.getOrDefault("worst_route", "")))
+                .replace("{worst_route_ratio}", pctOf(d.get("worst_route_ratio")))
+                .replace("{worst_success_route}", String.valueOf(d.getOrDefault("worst_success_route", "")))
+                .replace("{worst_success_route_ratio}", pctOf(d.get("worst_success_route_ratio")))
+                .replace("{budget_delta}", d.get("budget_delta") == null ? "n/a" : deltaPts(d.get("budget_delta")))
+                .replace("{delivery_success_delta}", d.get("delivery_success_delta") == null ? "n/a" : deltaPts(d.get("delivery_success_delta")))
+                .replace("{dead_lettered_delta}", String.valueOf(d.getOrDefault("dead_lettered_delta", "n/a")))
+                .replace("{since_last_minutes}", String.valueOf(d.getOrDefault("since_last_minutes", "n/a")));
+    }
+
+    /** Format a ratio delta as signed percentage points, e.g. +1.2pp / -0.4pp. */
+    private static String deltaPts(Object delta) {
+        if (!(delta instanceof Number n)) return "n/a";
+        double pp = Math.round(n.doubleValue() * 1000.0) / 10.0;
+        return (pp >= 0 ? "+" : "") + ((pp == Math.rint(pp)) ? Long.toString((long) pp) : Double.toString(pp)) + "pp";
     }
 
     private static String pctOf(Object ratio) {
@@ -1528,13 +1599,17 @@ public class AlertSink {
     public Map<String, Object> postSloDigest() {
         Map<String, Object> digest = sloDigest();
         String url = digestUrl();
-        if (url == null || url.isBlank()) return Map.of("posted", false, "reason", "no digest/webhook URL");
-        String summary = formatSloDigest(digest);
+        String summary = renderDigest(digest, sloDigestTemplate);
+        if (url == null || url.isBlank()) {
+            markDigestBaseline(digest); // still advance the baseline so deltas track wall-clock periods
+            return Map.of("posted", false, "reason", "no digest/webhook URL", "summary", summary);
+        }
         String payload = "{\"text\":\"" + jsonEscape(summary) + "\"}";
         Map<String, Object> probe = probe(url, payload); // reuses the synchronous POST path
+        markDigestBaseline(digest);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("posted", Boolean.TRUE.equals(probe.get("ok")));
-        out.put("summary", formatSloDigest(digest));
+        out.put("summary", summary);
         out.put("probe", probe);
         return out;
     }

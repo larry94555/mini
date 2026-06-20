@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Configurable SLO digest + manual trigger + since-last deltas + worst-by-delivery-success: the digest message is templated via alerts.slo-digest-template (placeholders for every digest field incl. deltas); POST /admin/alerts/slo-digest (CSRF) sends one on demand; each digest carries deltas vs the previously posted digest (budget burned, delivery-success change, new dead-letters); and it now names the worst route by both latency SLO and delivery-success ratio.
+
 - Scheduled SLO digest + report date-range + report target columns: AlertSloDigestScheduler (alerts.slo-digest-interval-minutes) periodically POSTs a posture summary (window budget remaining, delivery-success ratio, worst route) to alerts.slo-digest-url or the default webhook; GET /admin/alerts/slo-report gains ?from/?to/?days date-range filtering; and each report row now carries the effective slo_target/success_target and a pass flag for decision-ready monthly exports.
 
 - Durable per-route windows + worst-trend route sort + downloadable SLO report: per-route rolling-window buckets are persisted to alert_slo_route_buckets (flushed/pruned/restored alongside the global window) so per-route trends survive restarts; the overview By-route table is sorted worst-trend-first (most-recent daily ratio ascending) so a degrading receiver surfaces at the top; and GET /admin/alerts/slo-report downloads the rolling-window daily good/total history (global + per route) as CSV (or ?format=json) for offline reporting.

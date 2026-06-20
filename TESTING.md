@@ -4191,3 +4191,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `sloReportCsv` header is `scope,route,day,date,good,total,ratio,slo_target,success_target,pass`;
   each route row carries its effective targets (`sloTargetFor`/`successTargetFor`) and a `pass` flag
   (`ratio >= slo_target`). Header-only for an empty report.
+
+---
+
+# Configurable digest, manual trigger, since-last deltas, worst-by-delivery-success
+
+## 504. Configurable digest template (AlertDigestTemplateDeltaTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestTemplateDeltaTest test`.
+- **Observe:** `renderDigest(d, template)` substitutes placeholders (`{window_ratio}`, `{window_budget}`,
+  `{worst_route}`, `{worst_success_route}`, `{budget_delta}`, `{since_last_minutes}`, …) and falls back to the
+  built-in one-liner when the template is blank; missing delta placeholders render `n/a`. Config:
+  `alerts.slo-digest-template`.
+
+## 505. Manual digest trigger (manual)
+
+- **Observe:** `POST /admin/alerts/slo-digest` (CSRF-guarded, admin) sends a digest immediately via the
+  configured webhook/template and returns the post result — for testing the wiring without waiting for the
+  scheduler.
+
+## 506. Since-last-digest deltas (AlertDigestTemplateDeltaTest)
+
+- **Observe:** the first digest (no baseline) omits delta fields; after `postSloDigest()` advances the baseline,
+  the next `sloDigest()` carries `budget_delta`, `delivery_success_delta`, `dead_lettered_delta`, and
+  `since_last_minutes`. `deltaPts` renders signed percentage points (e.g. `-1.2pp`).
+
+## 507. Worst route by delivery-success (AlertDigestTemplateDeltaTest)
+
+- **Observe:** `sloDigest()` includes both `worst_route`/`worst_route_ratio` (latency SLO) and
+  `worst_success_route`/`worst_success_route_ratio` (delivery-success); the default format prints "worst
+  latency … @ …" and "worst delivery … @ …".
