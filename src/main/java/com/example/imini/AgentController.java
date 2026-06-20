@@ -561,7 +561,7 @@ public class AgentController {
         requireAdmin();
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
-                .body(AlertsOverview.render(alertSink.stats(), alertSink.dedupSummary(10), Math.max(0, refresh)));
+                .body(AlertsOverview.render(alertSink.stats(), alertSink.dedupSummary(10), Math.max(0, refresh), csrf.token()));
     }
 
     /** JSON backing the overview page's live auto-refresh. Admin only. */

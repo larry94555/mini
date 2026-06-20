@@ -129,7 +129,9 @@ public class Database {
             "CREATE TABLE alert_slo_buckets (day INTEGER PRIMARY KEY, good INTEGER NOT NULL, total INTEGER NOT NULL)",
             // per-route rolling-window SLO buckets (route + day) so per-route trends survive restarts
             "CREATE TABLE alert_slo_route_buckets (route TEXT NOT NULL, day INTEGER NOT NULL, "
-                    + "good INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY(route, day))");
+                    + "good INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY(route, day))",
+            // small key/value store for alerting state that should survive restarts (e.g. the digest baseline)
+            "CREATE TABLE alert_meta (meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL)");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

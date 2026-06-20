@@ -4221,3 +4221,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `sloDigest()` includes both `worst_route`/`worst_route_ratio` (latency SLO) and
   `worst_success_route`/`worst_success_route_ratio` (delivery-success); the default format prints "worst
   latency … @ …" and "worst delivery … @ …".
+
+---
+
+# Persisted digest baseline, overview Send-digest button, digest via pipeline
+
+## 508. Digest baseline persistence (AlertDigestPersistPipelineCsrfTest + manual)
+
+- **Run:** `./mvnw -Dtest=AlertDigestPersistPipelineCsrfTest test`.
+- **Observe (unit):** `serializeBaseline`/`parseBaseline` round-trip (ts|budget|success|dead_lettered) and
+  `parseBaseline` rejects null/blank/too-few/non-numeric.
+- **Observe (manual, needs SQLite):** the baseline is upserted to `alert_meta` (`digest_baseline`) on each post
+  and restored at startup, so "since last digest" deltas survive a restart.
+
+## 509. Digest via the delivery pipeline (AlertDigestPersistPipelineCsrfTest + manual)
+
+- **Observe (unit):** `postSloDigest()` with no URL is a no-op with a summary and no `mode`. **Manual:** with
+  `alerts.slo-digest-via-pipeline=true` and a webhook, the digest is `enqueue`d (mode `pipeline`) so it gets
+  retry/dead-letter; default (false) uses the synchronous probe (mode `probe`).
+
+## 510. Overview Send-digest button (AlertDigestPersistPipelineCsrfTest)
+
+- **Observe:** `AlertsOverview.render(..., csrfToken)` shows a "Send SLO digest now" control that POSTs to
+  `/admin/alerts/slo-digest` with the `X-CSRF-Token` header when a token is present, hides it otherwise (and in
+  the back-compat overloads), and HTML-escapes the token. Live: `GET /admin/alerts/overview.html`.

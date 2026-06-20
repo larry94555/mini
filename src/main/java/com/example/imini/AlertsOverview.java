@@ -27,12 +27,17 @@ public final class AlertsOverview {
             "failed", "dead_lettered", "dropped", "escalated", "sla_breaches", "dead_letter_size");
 
     public static String render(Map<String, Object> stats, List<AlertSink.DedupSummary> digests) {
-        return render(stats, digests, 0);
+        return render(stats, digests, 0, null);
+    }
+
+    public static String render(Map<String, Object> stats, List<AlertSink.DedupSummary> digests,
+                                int autoRefreshSeconds) {
+        return render(stats, digests, autoRefreshSeconds, null);
     }
 
     @SuppressWarnings("unchecked")
     public static String render(Map<String, Object> stats, List<AlertSink.DedupSummary> digests,
-                                int autoRefreshSeconds) {
+                                int autoRefreshSeconds, String csrfToken) {
         if (stats == null) stats = Map.of();
         boolean live = autoRefreshSeconds > 0;
         StringBuilder sb = new StringBuilder();
@@ -57,6 +62,15 @@ public final class AlertsOverview {
         sb.append("<p class=\"muted\"><a class=\"nav\" href=\"/admin/alerts.html\">Dead-letter viewer \u2192</a>");
         sb.append("<a class=\"nav\" href=\"/admin/alerts/config\">Effective config \u2192</a>");
         sb.append("<a class=\"nav\" href=\"/metrics/prom\">Prometheus \u2192</a>");
+        if (csrfToken != null && !csrfToken.isEmpty()) {
+            sb.append("<a class=\"nav\" href=\"#\" id=\"send_digest\" onclick=\"return sendDigest()\">Send SLO digest now</a>");
+            sb.append("<span id=\"digest_result\" class=\"muted\"></span>");
+            sb.append("<script>var CSRF=\"").append(esc(csrfToken)).append("\";")
+              .append("function sendDigest(){var r=document.getElementById('digest_result');if(r)r.textContent=' sending\\u2026';")
+              .append("fetch('/admin/alerts/slo-digest',{method:'POST',headers:{'X-CSRF-Token':CSRF}})")
+              .append(".then(function(x){return x.json();}).then(function(j){if(r)r.textContent=' '+(j.posted?('sent ('+(j.mode||'')+'): '):'not sent: ')+(j.summary||j.reason||'');})")
+              .append(".catch(function(e){if(r)r.textContent=' error sending digest';});return false;}</script>");
+        }
         if (live) {
             sb.append("<span id=\"refreshnote\">Auto-refresh every ").append(autoRefreshSeconds)
               .append("s \u00b7 <span id=\"updated\">loading\u2026</span> \u00b7 ");
