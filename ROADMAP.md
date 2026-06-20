@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- SLO digest history + mute + bounded alert_meta: every posted/suppressed digest is recorded in a capped history (alert_meta, alerts.slo-digest-history-max, pruned each post) viewable at GET /admin/alerts/slo-digest/history and a Recent-digests section on the overview; scheduled digests can be muted for N hours (POST /admin/alerts/slo-digest/mute, persisted + restored) with a manual ?force override; overview gains Mute/Unmute controls.
+
 - Persisted digest baseline + overview Send-digest button + digest via the delivery pipeline: the since-last-digest deltas baseline is persisted to a new alert_meta table (restored at startup) so deltas survive restarts; the overview page gets a CSRF-guarded "Send SLO digest now" button wired to POST /admin/alerts/slo-digest; and alerts.slo-digest-via-pipeline routes the digest through the normal retry/dead-letter pipeline instead of a one-shot probe.
 
 - Configurable SLO digest + manual trigger + since-last deltas + worst-by-delivery-success: the digest message is templated via alerts.slo-digest-template (placeholders for every digest field incl. deltas); POST /admin/alerts/slo-digest (CSRF) sends one on demand; each digest carries deltas vs the previously posted digest (budget burned, delivery-success change, new dead-letters); and it now names the worst route by both latency SLO and delivery-success ratio.
