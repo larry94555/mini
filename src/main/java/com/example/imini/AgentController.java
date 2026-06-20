@@ -640,12 +640,13 @@ public class AgentController {
     @PostMapping("/admin/alerts/slo-digest/mute")
     public Map<String, Object> adminAlertsSloDigestMute(
             @RequestParam(name = "hours", defaultValue = "4") double hours,
+            @RequestParam(name = "reason", defaultValue = "") String reason,
             @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
             @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
         csrf.require(csrfToken(csrfHeader, csrfParam));
-        long until = alertSink.muteDigest(hours);
-        return Map.of("muted", true, "muted_until", until);
+        long until = alertSink.muteDigest(hours, reason, currentUser());
+        return Map.of("muted", true, "muted_until", until, "reason", alertSink.digestMuteReason());
     }
 
     /** Clear any SLO digest mute. CSRF-guarded. Admin only. */
@@ -655,7 +656,7 @@ public class AgentController {
             @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
         requireAdmin();
         csrf.require(csrfToken(csrfHeader, csrfParam));
-        alertSink.unmuteDigest();
+        alertSink.unmuteDigest(currentUser());
         return Map.of("muted", false);
     }
 

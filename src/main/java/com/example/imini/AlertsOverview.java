@@ -73,8 +73,8 @@ public final class AlertsOverview {
               .append("function sendDigest(){digestPost('/admin/alerts/slo-digest').then(function(j){var r=document.getElementById('digest_result');")
               .append("if(r)r.textContent=' '+(j.posted?('sent ('+(j.mode||'')+'): '):('not sent'+(j.mode==='muted'?' (muted)':'')+': '))+(j.summary||j.reason||'');})")
               .append(".catch(function(){var r=document.getElementById('digest_result');if(r)r.textContent=' error sending digest';});return false;}")
-              .append("function muteDigest(){digestPost('/admin/alerts/slo-digest/mute?hours=4').then(function(j){var r=document.getElementById('digest_result');")
-              .append("if(r)r.textContent=' muted for 4h';}).catch(function(){});return false;}")
+              .append("function muteDigest(){var rsn=prompt('Mute reason (optional):','')||'';digestPost('/admin/alerts/slo-digest/mute?hours=4&reason='+encodeURIComponent(rsn)).then(function(j){var r=document.getElementById('digest_result');")
+              .append("if(r)r.textContent=' muted for 4h'+(j.reason?(' ('+j.reason+')'):'');}).catch(function(){});return false;}")
               .append("function unmuteDigest(){digestPost('/admin/alerts/slo-digest/unmute').then(function(j){var r=document.getElementById('digest_result');")
               .append("if(r)r.textContent=' unmuted';}).catch(function(){});return false;}</script>");
         }
@@ -119,7 +119,8 @@ public final class AlertsOverview {
         if (live || !recent.isEmpty()) {
             sb.append("<h2>Recent SLO digests</h2>");
             long mu = num(stats, "digest_muted_until");
-            sb.append("<p class=\"muted\" id=\"digest_mute_note\">").append(muteNote(mu, System.currentTimeMillis())).append("</p>");
+            String reason = String.valueOf(stats.getOrDefault("digest_mute_reason", ""));
+            sb.append("<p class=\"muted\" id=\"digest_mute_note\">").append(muteNote(mu, System.currentTimeMillis(), reason)).append("</p>");
             sb.append("<table><thead><tr><th>time</th><th>posted</th><th>mode</th><th>summary</th></tr></thead>");
             sb.append("<tbody id=\"digest_body\">");
             for (Map<String, Object> r : recent) sb.append(digestRow(r));
@@ -245,7 +246,8 @@ public final class AlertsOverview {
             + "var rd=s.recent_digests||[];h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
             + "+'</td><td>'+esc(x.mode||'')+'</td><td>'+esc((x.summary||'').slice(0,120))+'</td></tr>';});rows('digest_body',h);"
             + "var mn=document.getElementById('digest_mute_note');if(mn){var mu=s.digest_muted_until||0,now=Date.now();"
-            + "mn.textContent=(mu>now)?('Digest muted for ~'+Math.max(1,Math.floor((mu-now)/60000))+' more minutes.'):'Digest not muted.';}"
+            + "var rs2=s.digest_mute_reason||'';"
+            + "mn.textContent=(mu>now)?('Digest muted for ~'+Math.max(1,Math.floor((mu-now)/60000))+' more minutes'+(rs2?(' ('+rs2+')'):'')+'.'):'Digest not muted.';}"
             + "var u=document.getElementById('updated');if(u)u.textContent='updated '+new Date().toLocaleTimeString();}"
             + "function poll(){if(!ON)return;fetch('/admin/alerts/overview.json',{headers:{}}).then(function(r){"
             + "return r.json();}).then(rebuild).catch(function(){});}"
@@ -401,11 +403,14 @@ public final class AlertsOverview {
                 + "</td><td>" + esc(snippet(String.valueOf(r.getOrDefault("summary", "")), 120)) + "</td></tr>";
     }
 
-    /** Pure: a human note about the current mute state ("" when not muted). */
-    static String muteNote(long muteUntil, long nowMs) {
+    static String muteNote(long muteUntil, long nowMs) { return muteNote(muteUntil, nowMs, ""); }
+
+    /** Pure: a human note about the current mute state ("" when not muted), with an optional reason. */
+    static String muteNote(long muteUntil, long nowMs, String reason) {
         if (muteUntil <= nowMs) return "Digest not muted.";
         long mins = Math.max(1, (muteUntil - nowMs) / 60000L);
-        return "Digest muted for ~" + mins + " more minute" + (mins == 1 ? "" : "s") + ".";
+        String base = "Digest muted for ~" + mins + " more minute" + (mins == 1 ? "" : "s");
+        return (reason == null || reason.isEmpty()) ? base + "." : base + " (" + esc(reason) + ").";
     }
 
     private static long val(Map<String, Long> m, String k) {
