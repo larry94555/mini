@@ -4298,3 +4298,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   clears + persists + returns true only once the window elapses; a forced post past a mute resumes (mode
   != muted). **Manual:** mute for a short window; on the next scheduler tick after expiry the log shows
   "mute window elapsed; digests resumed" and digests resume.
+
+---
+
+# SLO digest mute: audit events, reason note, max-mute cap
+
+## 518. Max-mute cap (AlertDigestMuteAuditReasonCapTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestMuteAuditReasonCapTest test`.
+- **Observe:** `clampMuteHours(requested, max)` caps to `[0, max]` (max&le;0 = no cap); `muteDigest` applies
+  the cap (config `alerts.slo-digest-mute-max-hours`, default 72).
+
+## 519. Mute reason / note (AlertDigestMuteAuditReasonCapTest)
+
+- **Observe:** `muteDigest(hours, reason, user)` stores the reason (`digestMuteReason`); `sloDigest()` carries
+  `muted_reason`; `formatSloDigest` prints `[muted: reason]`; `renderDigest` exposes `{muted_reason}`; the
+  overview mute note appends "(reason)"; `unmuteDigest` clears it. Endpoint: `POST
+  /admin/alerts/slo-digest/mute?hours=N&reason=...`.
+
+## 520. Mute audit events (AlertDigestMuteAuditReasonCapTest)
+
+- **Observe (via an audit listener):** `muteDigest` records `alert_digest_mute` (acting user + reason in the
+  outcome); `unmuteDigest` records `alert_digest_unmute` only when something was muted; `expireMuteIfDue`
+  records `alert_digest_mute_expired` (system) when the window elapses. The controller passes `currentUser()`.
