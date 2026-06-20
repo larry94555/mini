@@ -4133,3 +4133,33 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   auto-refresh JS redraws the global and per-route sparklines from `slo_window_series`/
   `slo_window_series_by_route` via a shared `sparkSVG` builder (with the target line). Live:
   `GET /admin/alerts/overview.html?refresh=5`.
+
+---
+
+# Durable per-route windows, worst-trend sort, downloadable SLO report
+
+## 496. Per-route window persistence (AlertRoutePersistReportSortTest + manual)
+
+- **Run:** `./mvnw -Dtest=AlertRoutePersistReportSortTest test`.
+- **Observe (unit):** `flushWindow`/`pruneWindow` are safe no-ops without a database (`pruneWindow` returns 0).
+- **Observe (manual, needs SQLite):** per-route daily buckets persist to `alert_slo_route_buckets` (flushed on
+  the reaper tick and at shutdown, pruned to the horizon, restored at startup), so per-route sparklines survive
+  a restart like the global window.
+
+## 497. Downloadable SLO report (AlertRoutePersistReportSortTest)
+
+- **Observe:** `sloReportRows()` is empty without traffic; `sloReportCsv` emits the
+  `scope,route,day,date,good,total,ratio` header, one row per day (global + per route), quotes a route name
+  containing a comma, and is header-only for an empty report. Endpoint: `GET /admin/alerts/slo-report`
+  (CSV attachment; `?format=json` for rows).
+
+## 498. Worst-trend route sort (AlertRoutePersistReportSortTest)
+
+- **Observe:** `routeTrendScore` returns the most-recent day-with-data ratio (no data → 2.0, sorts last); the
+  overview By-route table renders worst-first (a route at 0.5 appears before one at 1.0) and is labeled
+  "worst trend first". The auto-refresh JS applies the same ordering.
+
+## 499. Schema migration (manual)
+
+- **Observe:** `Database` adds the `alert_slo_route_buckets` migration (composite PK route+day); the schema
+  version bumps and the table exists. No backfill (per-route windows repopulate from live deliveries).

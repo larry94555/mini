@@ -584,6 +584,24 @@ public class AgentController {
     }
 
     /**
+     * Downloadable SLO report: daily good/total per day for the rolling window (global + per route). CSV by
+     * default ({@code Content-Disposition: attachment}); {@code ?format=json} returns the raw rows. Admin only.
+     */
+    @GetMapping("/admin/alerts/slo-report")
+    public ResponseEntity<?> adminAlertsSloReport(
+            @RequestParam(name = "format", defaultValue = "csv") String format) {
+        requireAdmin();
+        List<Map<String, Object>> rows = alertSink.sloReportRows();
+        if ("json".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(rows);
+        }
+        return ResponseEntity.ok()
+                .header("Content-Type", "text/csv")
+                .header("Content-Disposition", "attachment; filename=\"imini-slo-report.csv\"")
+                .body(AlertSink.sloReportCsv(rows));
+    }
+
+    /**
      * Hot-reload the alerting config without a restart. Pass any of {@code actions}, {@code routes},
      * {@code escalate-tiers}, {@code slo-latency-ms}, {@code slo-target}; omitted pieces are left unchanged.
      * Re-parses into the live sink and returns the resulting config (with fresh warnings). CSRF-guarded.

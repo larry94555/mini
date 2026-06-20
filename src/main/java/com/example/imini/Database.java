@@ -126,7 +126,10 @@ public class Database {
             // multi-tier escalation ladder: how many tiers a dead-letter has already been paged to
             "ALTER TABLE alerts_dead_letter ADD COLUMN escalation_tier INTEGER NOT NULL DEFAULT 0",
             // durable rolling-window SLO buckets (one row per UTC day) so the window survives restarts
-            "CREATE TABLE alert_slo_buckets (day INTEGER PRIMARY KEY, good INTEGER NOT NULL, total INTEGER NOT NULL)");
+            "CREATE TABLE alert_slo_buckets (day INTEGER PRIMARY KEY, good INTEGER NOT NULL, total INTEGER NOT NULL)",
+            // per-route rolling-window SLO buckets (route + day) so per-route trends survive restarts
+            "CREATE TABLE alert_slo_route_buckets (route TEXT NOT NULL, day INTEGER NOT NULL, "
+                    + "good INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY(route, day))");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

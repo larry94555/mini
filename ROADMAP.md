@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Durable per-route windows + worst-trend route sort + downloadable SLO report: per-route rolling-window buckets are persisted to alert_slo_route_buckets (flushed/pruned/restored alongside the global window) so per-route trends survive restarts; the overview By-route table is sorted worst-trend-first (most-recent daily ratio ascending) so a degrading receiver surfaces at the top; and GET /admin/alerts/slo-report downloads the rolling-window daily good/total history (global + per route) as CSV (or ?format=json) for offline reporting.
+
 - Richer SLO sparklines: the overview window sparkline is now window-length-aware (labeled with the configured days), draws a dashed target reference line, and carries per-day hover tooltips (today / Nd ago : ratio); per-route daily series (slo_window_series_by_route, in-memory) drive a mini-sparkline trend column in the By-route table; all live-update with the page via a shared JS sparkline builder.
 
 - Bounded SLO bucket table + per-route success burn alerting + overview SLO sparkline: out-of-window alert_slo_buckets rows are pruned on each flush (windowFloorDay horizon) so the table stays bounded; a new IminiAlertRouteSuccessBurning multi-window rule pages when a single route burns its delivery-success budget; and the overview SLO summary now shows a daily success-ratio sparkline (slo_window_series) that live-updates with the page.
