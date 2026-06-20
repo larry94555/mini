@@ -3956,3 +3956,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe (manual):** set `alerts.selftest-interval-minutes=1` (and optionally `alerts.selftest-send=true`
   with `alerts.selftest-action` pointed at a health route); `imini_alerts_selftest_ok` reflects the last run
   and `IminiAlertSelfTestFailing` fires if it stays 0.
+
+---
+
+# Objective-driven SLO counters, self-test history/flap, per-route SLO
+
+## 474. SLO good/total counters (AlertSloCountersFlapRouteTest)
+
+- **Run:** `./mvnw -Dtest=AlertSloCountersFlapRouteTest test`.
+- **Observe:** `PromFormat` emits monotonic `imini_alerts_slo_good_total`/`imini_alerts_slo_total_total`
+  counters. The `ops/` burn-rate rules rate() these and scale by `(1 - imini_alerts_slo_target)`, so changing
+  `alerts.slo-latency-ms`/`alerts.slo-target` updates alerting with no rule edit (no `le=` bucket to drift).
+
+## 475. Self-test flap detection (AlertSloCountersFlapRouteTest)
+
+- **Run:** same class.
+- **Observe:** `flapTransitions` counts pass<->fail transitions (0 for steady/empty/singleton); `isFlapping`
+  honours the threshold (0 disables). `selfTestReport` tracks a bounded history (20), `transitions`, and
+  `flapping`; `imini_alerts_selftest_flapping` + `IminiAlertSelfTestFlapping` surface it. History at
+  `GET /admin/alerts/selftest`.
+
+## 476. Per-route SLO (AlertSloCountersFlapRouteTest)
+
+- **Run:** same class.
+- **Observe:** `sloByRoute` is empty until a route has timed deliveries; `PromFormat` emits
+  `imini_alerts_route_slo_success_ratio`/`_burn_rate`/`_good_total`/`_total_total{route="..."}`. The
+  `IminiAlertRouteSLOBurning` rule pages on a single degraded route.
+
+## 477. ops objective-driven rules + per-route panels (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` burn rules reference the slo counters + target gauge (not a
+  bucket); `IminiAlertRouteSLOBurning` and `IminiAlertSelfTestFlapping` are present. `ops/grafana/
+  imini-dashboard.json` has per-route SLO success/burn and self-test flapping panels. Validate with `promtool
+  check rules` and a Grafana import.

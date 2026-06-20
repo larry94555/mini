@@ -146,6 +146,28 @@ public final class PromFormat {
                 gaugeNum(sb, "alerts_slo_burn_rate", "Error-budget burn rate (>1 = over budget)", m.get("burn_rate"));
                 gaugeNum(sb, "alerts_slo_total", "Timed deliveries counted toward the SLO", m.get("total"));
                 gaugeNum(sb, "alerts_slo_good", "Deliveries within the SLO latency objective", m.get("good"));
+                // monotonic counters so burn-rate rules can rate() them without hard-coding a latency bucket
+                help(sb, "alerts_slo_good_total", "Cumulative within-SLO deliveries (for burn-rate rules)", "counter");
+                line(sb, PREFIX + "alerts_slo_good_total", null, m.get("good") instanceof Number n ? n.longValue() : 0);
+                help(sb, "alerts_slo_total_total", "Cumulative timed deliveries (for burn-rate rules)", "counter");
+                line(sb, PREFIX + "alerts_slo_total_total", null, m.get("total") instanceof Number n ? n.longValue() : 0);
+            }
+            if (alerts.get("slo_by_route") instanceof Map<?, ?> sbr) {
+                Map<String, Map<String, Object>> m = (Map<String, Map<String, Object>>) sbr;
+                if (!m.isEmpty()) {
+                    help(sb, "alerts_route_slo_success_ratio", "Per-route within-SLO delivery ratio", "gauge");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_slo_success_ratio", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("success_ratio"));
+                    help(sb, "alerts_route_slo_burn_rate", "Per-route error-budget burn rate", "gauge");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_slo_burn_rate", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("burn_rate"));
+                    help(sb, "alerts_route_slo_good_total", "Per-route cumulative within-SLO deliveries", "counter");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_slo_good_total", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("good"));
+                    help(sb, "alerts_route_slo_total_total", "Per-route cumulative timed deliveries", "counter");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_slo_total_total", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("total"));
+                }
             }
             if (alerts.get("selftest") instanceof Map<?, ?> st) {
                 Map<String, Object> m = (Map<String, Object>) st;
@@ -157,6 +179,8 @@ public final class PromFormat {
                         help(sb, "alerts_selftest_latency_ms", "Last scheduled self-test probe latency (ms)", "gauge");
                         line(sb, PREFIX + "alerts_selftest_latency_ms", null, n.longValue());
                     }
+                    help(sb, "alerts_selftest_flapping", "Self-test is flapping (1=yes, 0=no)", "gauge");
+                    line(sb, PREFIX + "alerts_selftest_flapping", null, Boolean.TRUE.equals(m.get("flapping")) ? 1 : 0);
                 }
             }
         }

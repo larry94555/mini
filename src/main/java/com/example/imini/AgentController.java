@@ -598,6 +598,13 @@ public class AgentController {
         return alertSink.selfTest(action.isBlank() ? null : action, send);
     }
 
+    /** Recent scheduled self-test history + flap assessment. Admin only. */
+    @GetMapping("/admin/alerts/selftest")
+    public Map<String, Object> adminAlertsSelfTestHistory() {
+        requireAdmin();
+        return alertSink.selfTestReport();
+    }
+
     /** A short-lived per-process CSRF token for the viewer's state-changing actions. Admin only. */
     @GetMapping("/admin/alerts/csrf")
     public Map<String, Object> adminAlertsCsrf() {

@@ -82,6 +82,7 @@ public class AlertSink {
     @Value("${alerts.dedup-digest:true}") private boolean dedupDigest;
     @Value("${alerts.slo-latency-ms:1000}") private long sloLatencyMs;
     @Value("${alerts.slo-target:0.99}") private double sloTarget;
+    @Value("${alerts.selftest-flap-threshold:3}") private int selftestFlapThreshold;
 
     private final AuditLog audit;
     private final Database db;
@@ -117,6 +118,8 @@ public class AlertSink {
     // last scheduled self-test result (set by AlertSelfTestScheduler)
     private final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> selfTestStatus =
             new java.util.concurrent.atomic.AtomicReference<>(Map.of("ran", false));
+    private static final int SELFTEST_HISTORY = 20;
+    private final java.util.ArrayDeque<Map<String, Object>> selfTestHistory = new java.util.ArrayDeque<>();
 
     private static AtomicLong[] newBuckets() {
         AtomicLong[] a = new AtomicLong[LATENCY_BUCKETS_MS.length + 1];
@@ -179,6 +182,45 @@ public class AlertSink {
         m.put("detail", detail == null ? "" : detail);
         m.put("last_run_ms", System.currentTimeMillis());
         selfTestStatus.set(m);
+        synchronized (selfTestHistory) {
+            selfTestHistory.addLast(m);
+            while (selfTestHistory.size() > SELFTEST_HISTORY) selfTestHistory.removeFirst();
+        }
+    }
+
+    /** Pure: number of pass<->fail transitions across a chronological list of outcomes. */
+    static int flapTransitions(List<Boolean> outcomes) {
+        if (outcomes == null || outcomes.size() < 2) return 0;
+        int t = 0;
+        for (int i = 1; i < outcomes.size(); i++) {
+            if (!java.util.Objects.equals(outcomes.get(i), outcomes.get(i - 1))) t++;
+        }
+        return t;
+    }
+
+    /** Pure: is the self-test flapping? (at least {@code threshold} transitions in the window). */
+    static boolean isFlapping(int transitions, int threshold) {
+        return threshold > 0 && transitions >= threshold;
+    }
+
+    /**
+     * The last self-test result plus recent history and a flap assessment, for {@code GET
+     * /admin/alerts/selftest}. {@code flapping} is true when the outcome has oscillated at least
+     * {@code alerts.selftest-flap-threshold} times across the retained history.
+     */
+    public Map<String, Object> selfTestReport() {
+        List<Map<String, Object>> hist;
+        synchronized (selfTestHistory) { hist = new ArrayList<>(selfTestHistory); }
+        List<Boolean> outcomes = new ArrayList<>();
+        for (Map<String, Object> h : hist) outcomes.add(Boolean.TRUE.equals(h.get("ok")));
+        int transitions = flapTransitions(outcomes);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("last", selfTestStatus.get());
+        out.put("history", hist);
+        out.put("runs", hist.size());
+        out.put("transitions", transitions);
+        out.put("flapping", isFlapping(transitions, selftestFlapThreshold));
+        return out;
     }
 
     /** The last scheduled self-test result (or {ran:false} before the first run). */
@@ -681,16 +723,16 @@ public class AlertSink {
 
     private void routeInc(String action, int idx) {
         if (action == null || action.isBlank()) action = "default";
-        long[] c = byRoute.computeIfAbsent(action, k -> new long[6]); // sent, failed, dead_lettered, suppressed, lat_sum, lat_count
+        long[] c = byRoute.computeIfAbsent(action, k -> new long[7]); // sent, failed, dead_lettered, suppressed, lat_sum, lat_count, lat_good
         synchronized (c) { c[idx]++; }
     }
 
-    /** Accumulate a delivery's round-trip latency against its route (for the per-route latency breakdown). */
+    /** Accumulate a delivery's round-trip latency against its route (for the per-route latency + SLO breakdown). */
     private void routeLatency(String action, long ms) {
         if (action == null || action.isBlank()) action = "default";
         if (ms < 0) ms = 0;
-        long[] c = byRoute.computeIfAbsent(action, k -> new long[6]);
-        synchronized (c) { c[4] += ms; c[5]++; }
+        long[] c = byRoute.computeIfAbsent(action, k -> new long[7]);
+        synchronized (c) { c[4] += ms; c[5]++; if (ms <= sloLatencyMs) c[6]++; }
     }
 
     /** One delivery attempt; on failure reschedule with backoff or dead-letter. Runs on the scheduler. */
@@ -928,7 +970,12 @@ public class AlertSink {
         m.put("sla_breaches", slaBreaches.get());
         m.put("delivery_latency", latencySnapshot());
         m.put("delivery_slo", sloSnapshot());
-        m.put("selftest", selfTestStatus());
+        m.put("slo_by_route", sloByRoute());
+        Map<String, Object> stReport = selfTestReport();
+        Map<String, Object> stStat = new LinkedHashMap<>(selfTestStatus());
+        stStat.put("flapping", stReport.get("flapping"));
+        stStat.put("transitions", stReport.get("transitions"));
+        m.put("selftest", stStat);
         m.put("by_tier", byTierSnapshot());
         m.put("ack_sla_by_tier", ackSlaByTier());
         m.put("in_flight", (long) inFlight.get());
@@ -1006,8 +1053,22 @@ public class AlertSink {
                 m.put("suppressed", c[3]);
                 m.put("avg_latency_ms", c[5] > 0 ? c[4] / c[5] : 0L);
                 m.put("latency_count", c[5]);
+                m.put("slo_good", c[6]);
             }
             out.put(e.getKey(), m);
+        }
+        return out;
+    }
+
+    /** Per-route delivery-latency SLO ({route -> {target, total, good, success_ratio, burn_rate, ...}}). */
+    Map<String, Map<String, Object>> sloByRoute() {
+        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, long[]> e : byRoute.entrySet()) {
+            long[] c = e.getValue();
+            long total, good;
+            synchronized (c) { total = c[5]; good = c[6]; }
+            if (total <= 0) continue; // no timed deliveries on this route yet
+            out.put(e.getKey(), sloSnapshot(good, total, sloTarget, sloLatencyMs));
         }
         return out;
     }
