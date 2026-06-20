@@ -71,8 +71,9 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertSLOWindowBudgetExhausted` | The rolling-window (e.g. 30-day) latency budget is spent | The SLO will be missed for the period; this is the monthly-report signal, not a blip |
 | `IminiAlertDeliverySuccessBurnFast` | Alerts are dead-lettering faster than the success budget allows | Receiver is rejecting/erroring; check the dead-letter backlog and receiver health |
 | `IminiAlertRouteSuccessLow` | One route's 2xx delivery ratio is below target | That receiver is up-but-erroring; check its endpoint/auth |
+| `IminiAlertRouteSuccessBurning` | A route is burning its delivery-success budget (multi-window) | Failing deliveries are concentrated on that receiver; check it before the global success SLO degrades |
 
-The overview page `GET /admin/alerts/overview.html` now also shows an **SLO summary** (latency success ratio, error budget remaining, rolling-window budget, delivery-success ratio) that live-updates with the page. When a database is available the rolling-window SLO buckets are persisted (table `alert_slo_buckets`) so the window survives a restart.
+The overview page `GET /admin/alerts/overview.html` now also shows an **SLO summary** (latency success ratio, error budget remaining, rolling-window budget, delivery-success ratio) that live-updates with the page. When a database is available the rolling-window SLO buckets are persisted (table `alert_slo_buckets`) so the window survives a restart; rows that age out of the horizon are pruned on the reaper tick so the table stays bounded.
 
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a

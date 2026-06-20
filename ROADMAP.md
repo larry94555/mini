@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Bounded SLO bucket table + per-route success burn alerting + overview SLO sparkline: out-of-window alert_slo_buckets rows are pruned on each flush (windowFloorDay horizon) so the table stays bounded; a new IminiAlertRouteSuccessBurning multi-window rule pages when a single route burns its delivery-success budget; and the overview SLO summary now shows a daily success-ratio sparkline (slo_window_series) that live-updates with the page.
+
 - Durable rolling-window buckets + per-route success-target overrides + overview SLO summary: the rolling-window SLO buckets are now persisted to SQLite (alert_slo_buckets, flushed on the reaper tick and at shutdown, restored at startup) so the 30-day window survives restarts; a route in alerts.routes can set a 6th field for its own delivery-success target (action|url|template|latency|target|success-target); and the overview page shows a live SLO summary (latency success ratio, budget remaining, rolling-window budget, delivery-success ratio).
 
 - Rolling-window error-budget tracking + persisted hot-reload + per-route delivery-success SLO: a RollingWindow of daily good/total buckets backs imini_alerts_slo_window_* (budget_remaining over the last alerts.slo-window-days, default 30, rather than since-boot); POST /admin/alerts/reload now persists to alerts.config-override-file and re-applies it at startup so a live fix survives restart; and a delivery success-rate SLO (delivered vs dead-lettered, alerts.success-target) is computed globally and per route (imini_alerts_success_slo_*, imini_alerts_route_success_ratio) so a fast-but-erroring receiver pages.
