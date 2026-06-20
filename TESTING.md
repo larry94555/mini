@@ -4022,3 +4022,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertSLOBudgetExhausted` and
   `IminiAlertRouteSLOBudgetExhausted`; `ops/grafana/imini-dashboard.json` has an "Error budget remaining"
   panel. Validate with `promtool check rules` and a Grafana import.
+
+---
+
+# Rolling-window error budget, persisted hot-reload, per-route delivery-success SLO
+
+## 482. Rolling-window SLO (AlertWindowedSloPersistSuccessTest)
+
+- **Run:** `./mvnw -Dtest=AlertWindowedSloPersistSuccessTest test`.
+- **Observe:** `RollingWindow` (daily buckets, time-injected) sums only buckets within the window: 8/10 today,
+  0/0 once the day falls outside a 30-day horizon, and a slot reused after a full cycle resets rather than
+  accumulates. `stats().delivery_slo_window` carries `window_days`; `imini_alerts_slo_window_*` is exported.
+
+## 483. Persisted hot-reload (AlertWindowedSloPersistSuccessTest + manual)
+
+- **Observe (unit):** `serializeOverrides` round-trips through `.properties` with route strings containing
+  `| ; { } " = :` intact, and omits blank keys.
+- **Observe (manual):** set `alerts.config-override-file=.imini/alerts-overrides.properties`; `POST
+  /admin/alerts/reload?routes=...` writes the file; restart and confirm the reloaded config is applied at
+  startup (logged `applied persisted config overrides`).
+
+## 484. Delivery-success SLO (AlertWindowedSloPersistSuccessTest)
+
+- **Observe:** `deliverySuccessSlo` (good = delivered/2xx, total = delivered + dead-lettered, target =
+  `alerts.success-target`) is healthy when empty; `successSloByRoute` is empty without finalized traffic.
+  `PromFormat` emits `imini_alerts_success_slo_ratio` and per-route `imini_alerts_route_success_ratio`/
+  `_burn_rate`/`_good_total`/`_total_total{route="..."}`.
+
+## 485. ops window/success rules + panels (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertSLOWindowBudgetExhausted`,
+  `IminiAlertDeliverySuccessBurnFast`, `IminiAlertRouteSuccessLow`; `ops/grafana/imini-dashboard.json` has
+  rolling-window budget, delivery-success SLO, and per-route success panels. Validate with `promtool check
+  rules` and a Grafana import.

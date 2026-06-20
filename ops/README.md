@@ -39,7 +39,7 @@ Included alerts (tune thresholds to your traffic):
   healthy again).
 - **Escalation & noise** — `IminiAlertSlaBreaches` (an alert went un-acked past its tier SLA and was
   re-escalated), `IminiAlertEscalating` (alerts climbing the ladder), `IminiAlertAckLatencyHigh` (acks taking
-  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`, `IminiAlertSelfTestFlapping`, `IminiAlertRouteSLOBurning`, `IminiAlertSLOBudgetExhausted`. See the runbook below.
+  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`, `IminiAlertSelfTestFlapping`, `IminiAlertRouteSLOBurning`, `IminiAlertSLOBudgetExhausted`, `IminiAlertSLOWindowBudgetExhausted`, `IminiAlertDeliverySuccessBurnFast`, `IminiAlertRouteSuccessLow`. See the runbook below.
 - **SLO** — `IminiRunSuccessRateLow`, `IminiRunLatencyP95High`.
 
 ## Grafana dashboard — `grafana/imini-dashboard.json`
@@ -68,6 +68,9 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertSelfTestFlapping` | The self-test is oscillating pass/fail | Intermittent delivery problem; inspect the run history at `GET /admin/alerts/selftest` |
 | `IminiAlertRouteSLOBurning` | One route is burning its budget while the global SLO may look fine | Find the degraded receiver via the per-route SLO panel; check that route's webhook |
 | `IminiAlertSLOBudgetExhausted` / `IminiAlertRouteSLOBudgetExhausted` | The error budget (global or per-route) is fully spent (`budget_remaining < 0`) | The SLO is being missed over the window; the budget panel shows runway — treat as a sustained-degradation signal, not a transient blip |
+| `IminiAlertSLOWindowBudgetExhausted` | The rolling-window (e.g. 30-day) latency budget is spent | The SLO will be missed for the period; this is the monthly-report signal, not a blip |
+| `IminiAlertDeliverySuccessBurnFast` | Alerts are dead-lettering faster than the success budget allows | Receiver is rejecting/erroring; check the dead-letter backlog and receiver health |
+| `IminiAlertRouteSuccessLow` | One route's 2xx delivery ratio is below target | That receiver is up-but-erroring; check its endpoint/auth |
 
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a
