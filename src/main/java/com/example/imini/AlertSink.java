@@ -1475,6 +1475,9 @@ public class AlertSink {
         d.put("slo_target", sloTarget);
         d.put("delivery_success_ratio", succ.get("success_ratio"));
         d.put("success_target", successTarget);
+        boolean muted = digestMuted(System.currentTimeMillis(), digestMuteUntil);
+        d.put("muted", muted);
+        d.put("muted_until", muted ? digestMuteUntil : 0L);
         // worst route by per-route latency SLO success ratio
         String[] worstLatency = worstRoute(sloByRoute());
         d.put("worst_route", worstLatency[0]);
@@ -1636,6 +1639,7 @@ public class AlertSink {
     /** Pure: a short human-readable digest line from {@link #sloDigest()} output (default format). */
     static String formatSloDigest(Map<String, Object> d) {
         StringBuilder sb = new StringBuilder("imini SLO digest: ");
+        if (Boolean.TRUE.equals(d.get("muted"))) sb.append("[muted] ");
         sb.append("window ").append(pctOf(d.get("window_success_ratio")))
           .append(" (budget ").append(pctOf(d.get("window_budget_remaining"))).append(" left");
         if (d.get("budget_delta") != null) sb.append(", ").append(deltaPts(d.get("budget_delta"))).append(" since last");
@@ -1674,7 +1678,9 @@ public class AlertSink {
                 .replace("{budget_delta}", d.get("budget_delta") == null ? "n/a" : deltaPts(d.get("budget_delta")))
                 .replace("{delivery_success_delta}", d.get("delivery_success_delta") == null ? "n/a" : deltaPts(d.get("delivery_success_delta")))
                 .replace("{dead_lettered_delta}", String.valueOf(d.getOrDefault("dead_lettered_delta", "n/a")))
-                .replace("{since_last_minutes}", String.valueOf(d.getOrDefault("since_last_minutes", "n/a")));
+                .replace("{since_last_minutes}", String.valueOf(d.getOrDefault("since_last_minutes", "n/a")))
+                .replace("{muted}", Boolean.TRUE.equals(d.get("muted")) ? "muted" : "")
+                .replace("{muted_until}", String.valueOf(d.getOrDefault("muted_until", 0L)));
     }
 
     /** Format a ratio delta as signed percentage points, e.g. +1.2pp / -0.4pp. */
@@ -1725,6 +1731,7 @@ public class AlertSink {
      * or no-URL) is recorded in the digest history. {@code force=true} (manual override) ignores the mute.
      */
     public Map<String, Object> postSloDigest(boolean force) {
+        expireMuteIfDue(); // resume (and log) if a mute window has just elapsed
         Map<String, Object> digest = sloDigest();
         String summary = renderDigest(digest, sloDigestTemplate);
         if (!force && digestMuted(System.currentTimeMillis(), digestMuteUntil)) {
@@ -1767,6 +1774,24 @@ public class AlertSink {
 
     /** Pure: is the digest muted at {@code nowMs} given a mute-until epoch-ms (0 = not muted)? */
     static boolean digestMuted(long nowMs, long muteUntil) { return muteUntil > nowMs; }
+
+    /** Pure: has a set mute window elapsed (a non-zero mute-until now in the past)? */
+    static boolean muteExpired(long nowMs, long muteUntil) { return muteUntil != 0 && nowMs >= muteUntil; }
+
+    /**
+     * If a mute window has elapsed, clear it (persisted) and log a resumption so the transition is visible.
+     * Returns true when it just expired. Safe to call frequently (scheduler tick, each post).
+     */
+    public boolean expireMuteIfDue() {
+        long until = digestMuteUntil;
+        if (muteExpired(System.currentTimeMillis(), until)) {
+            digestMuteUntil = 0;
+            persistMeta("digest_mute_until", "0");
+            log.info("[alerts] SLO digest mute window elapsed; digests resumed");
+            return true;
+        }
+        return false;
+    }
 
     /** Mute scheduled digests for {@code hours} (persisted). Returns the mute-until epoch ms. */
     public long muteDigest(double hours) {

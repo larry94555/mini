@@ -144,6 +144,15 @@ groups:
           summary: "imini delivery-success error budget burning fast"
           description: "Alerts are dead-lettering (not landing) faster than the success budget allows. Check receiver health and the dead-letter backlog."
 
+      - alert: IminiAlertSloDigestMuted
+        expr: imini_alerts_digest_muted == 1
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "imini SLO digest is muted"
+          description: "Scheduled SLO digests are suppressed (mute until {{ $value }}). This is expected during a known-degraded window; it auto-expires and digests resume. Surfaced so a silent digest isn't mistaken for a healthy one."
+
       - alert: IminiAlertRouteSuccessLow
         expr: imini_alerts_route_success_ratio < avg(imini_alerts_success_slo_target)
         for: 15m

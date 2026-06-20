@@ -54,9 +54,14 @@ public class AlertSloDigestScheduler {
     /** One digest pass; safe to call manually. Posts the digest and logs the outcome. */
     public void runOnce() {
         try {
+            if (alerts.expireMuteIfDue()) {
+                log.info("[alerts] SLO digest resumed after mute; sending the next scheduled digest");
+            }
             Map<String, Object> result = alerts.postSloDigest();
             if (Boolean.TRUE.equals(result.get("posted"))) {
                 log.info("[alerts] SLO digest posted: " + result.get("summary"));
+            } else if ("muted".equals(result.get("mode"))) {
+                log.info("[alerts] SLO digest suppressed (muted until " + result.get("muted_until") + ")");
             } else {
                 log.warn("[alerts] SLO digest not posted: " + result);
             }

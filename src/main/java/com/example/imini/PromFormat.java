@@ -224,6 +224,14 @@ public final class PromFormat {
                     line(sb, PREFIX + "alerts_selftest_flapping", null, Boolean.TRUE.equals(m.get("flapping")) ? 1 : 0);
                 }
             }
+            if (alerts.get("digest_muted_until") instanceof Number mu) {
+                long until = mu.longValue();
+                boolean muted = until > System.currentTimeMillis();
+                help(sb, "alerts_digest_muted", "SLO digest is muted (1=yes, 0=no)", "gauge");
+                line(sb, PREFIX + "alerts_digest_muted", null, muted ? 1 : 0);
+                help(sb, "alerts_digest_mute_until_seconds", "Unix time the SLO digest mute expires (0 = not muted)", "gauge");
+                line(sb, PREFIX + "alerts_digest_mute_until_seconds", null, muted ? until / 1000L : 0L);
+            }
         }
         return sb.toString();
     }
