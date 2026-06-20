@@ -81,18 +81,27 @@ public final class AlertsOverview {
         sloCard(sb, "succ_budget", "success budget", pct(slo(stats, "delivery_success_slo", "budget_remaining")));
         sb.append("</div>");
 
-        // rolling-window daily success-ratio sparkline
+        // rolling-window daily success-ratio sparkline (target line + per-day tooltips)
         List<Double> series = sloSeries(stats);
-        sb.append("<div class=\"spark\"><span class=\"sparklabel\">window success ratio (daily): </span>");
-        sb.append("<span id=\"sparkbox\">").append(sparklineSvg(series)).append("</span></div>");
+        double sloTarget = slo(stats, "delivery_slo", "target");
+        int windowDays = (int) Math.round(slo(stats, "delivery_slo_window", "window_days"));
+        if (windowDays < 0) windowDays = 0;
+        sb.append("<div class=\"spark\"><span class=\"sparklabel\">window success ratio \u2014 ")
+          .append(windowDays > 0 ? windowDays + " days" : "daily")
+          .append(" (oldest \u2192 today")
+          .append(Double.isNaN(sloTarget) ? "" : ", target " + pct(sloTarget))
+          .append("): </span>");
+        sb.append("<span id=\"sparkbox\">").append(sparklineSvg(series, sloTarget, windowDays, 160, 28)).append("</span></div>");
 
         // per-route
         Object byRoute = stats.get("by_route");
         Map<String, Map<String, Long>> routes = (byRoute instanceof Map) ? (Map<String, Map<String, Long>>) byRoute : Map.of();
+        Object seriesByRoute = stats.get("slo_window_series_by_route");
+        Map<String, List<Double>> routeSeries = (seriesByRoute instanceof Map) ? (Map<String, List<Double>>) seriesByRoute : Map.of();
         if (live || !routes.isEmpty()) {
             sb.append("<h2>By route</h2><table><thead><tr><th>route</th>"
                     + "<th class=\"num\">sent</th><th class=\"num\">failed</th>"
-                    + "<th class=\"num\">dead-lettered</th><th class=\"num\">suppressed</th></tr></thead>");
+                    + "<th class=\"num\">dead-lettered</th><th class=\"num\">suppressed</th><th>trend</th></tr></thead>");
             sb.append("<tbody id=\"rt_body\">");
             for (Map.Entry<String, Map<String, Long>> e : routes.entrySet()) {
                 Map<String, Long> r = e.getValue();
@@ -100,7 +109,8 @@ public final class AlertsOverview {
                 sb.append("<td class=\"num\">").append(val(r, "sent")).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "failed")).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "dead_lettered")).append("</td>");
-                sb.append("<td class=\"num\">").append(val(r, "suppressed")).append("</td></tr>");
+                sb.append("<td class=\"num\">").append(val(r, "suppressed")).append("</td>");
+                sb.append("<td>").append(sparklineSvg(routeSeries.get(e.getKey()), sloTarget, windowDays, 90, 20)).append("</td></tr>");
             }
             sb.append("</tbody></table>");
         }
@@ -170,14 +180,21 @@ public final class AlertsOverview {
             + "setS('slo_ratio',dl.success_ratio);setS('slo_budget',dl.budget_remaining);"
             + "setS('slo_win_budget',dw.budget_remaining);setS('succ_ratio',ds.success_ratio);"
             + "setS('succ_budget',ds.budget_remaining);"
-            + "var ser=s.slo_window_series||[],W=160,H=28,pts='',np=0,n=ser.length;"
-            + "for(var i=0;i<n;i++){var r=ser[i];if(r<0)continue;"
-            + "var x=n<=1?0:(i/(n-1))*W,y=H-r*H;pts+=(pts?' ':'')+(Math.round(x*10)/10)+','+(Math.round(y*10)/10);np++;}"
-            + "var sk=document.getElementById('sparkbox');if(sk){sk=sk;"
-            + "if(np>=2){sk.innerHTML='<svg width=\"'+W+'\" height=\"'+H+'\" viewBox=\"0 0 '+W+' '+H+'\" preserveAspectRatio=\"none\" class=\"sparksvg\"><polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"'+pts+'\"/></svg>';}}"
+            + "var TGT=(dl.target||0);"
+            + "function sparkSVG(ser,W,H){if(!ser)return '';var pts='',np=0,n=ser.length,dots='';"
+            + "for(var i=0;i<n;i++){var r=ser[i];if(r<0)continue;var x=n<=1?0:(i/(n-1))*W,y=H-r*H;"
+            + "pts+=(pts?' ':'')+(Math.round(x*10)/10)+','+(Math.round(y*10)/10);"
+            + "var ago=n-1-i,wh=ago===0?'today':ago+'d ago';"
+            + "dots+='<circle cx=\"'+(Math.round(x*10)/10)+'\" cy=\"'+(Math.round(y*10)/10)+'\" r=\"1.6\" fill=\"#2a7\"><title>'+wh+': '+(Math.round(r*1000)/10)+'%</title></circle>';np++;}"
+            + "if(np<2)return '<span class=\"muted\">collecting\\u2026</span>';"
+            + "var tl=(TGT>0&&TGT<1)?'<line x1=\"0\" y1=\"'+(Math.round((H-TGT*H)*10)/10)+'\" x2=\"'+W+'\" y2=\"'+(Math.round((H-TGT*H)*10)/10)+'\" stroke=\"#c33\" stroke-width=\"1\" stroke-dasharray=\"3,2\" opacity=\"0.7\"/>':'';"
+            + "return '<svg width=\"'+W+'\" height=\"'+H+'\" viewBox=\"0 0 '+W+' '+H+'\" preserveAspectRatio=\"none\" class=\"sparksvg\">'+tl+'<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"'+pts+'\"/>'+dots+'</svg>';}"
+            + "var sk=document.getElementById('sparkbox');if(sk){var g=sparkSVG(s.slo_window_series||[],160,28);if(g)sk.innerHTML=g;}"
+            + "var rs=s.slo_window_series_by_route||{};"
             + "var br=s.by_route||{},h='';Object.keys(br).forEach(function(k){var r=br[k]||{};"
             + "h+='<tr><td>'+esc(k)+'</td><td class=\"num\">'+(r.sent||0)+'</td><td class=\"num\">'+(r.failed||0)"
-            + "+'</td><td class=\"num\">'+(r.dead_lettered||0)+'</td><td class=\"num\">'+(r.suppressed||0)+'</td></tr>';});"
+            + "+'</td><td class=\"num\">'+(r.dead_lettered||0)+'</td><td class=\"num\">'+(r.suppressed||0)+'</td>"
+            + "<td>'+sparkSVG(rs[k]||[],90,20)+'</td></tr>';});"
             + "rows('rt_body',h);"
             + "var bt=s.by_tier||{},sl=s.ack_sla_by_tier||{},ks={};Object.keys(bt).forEach(function(k){ks[k]=1;});"
             + "Object.keys(sl).forEach(function(k){ks[k]=1;});h='';Object.keys(ks).sort().forEach(function(t){"
@@ -249,15 +266,52 @@ public final class AlertsOverview {
         return plotted >= 2 ? pts.toString() : "";
     }
 
-    /** Pure: a small inline SVG sparkline for the daily success-ratio series (empty-ish → a placeholder). */
+    /** Backwards-compatible default sparkline (no target line, default size). */
     static String sparklineSvg(List<Double> ratios) {
-        int w = 160, h = 28;
+        return sparklineSvg(ratios, Double.NaN, 0, 160, 28);
+    }
+
+    /**
+     * Pure: an inline-SVG sparkline of the daily success-ratio series. Draws a dashed reference line at
+     * {@code target} (when 0&lt;target&lt;1), the trend polyline, and one hoverable dot per day carrying a
+     * {@code <title>} tooltip ("today: 98%", "3d ago: 95%"). {@code windowDays} only affects the overall SVG
+     * {@code <title>}. Falls back to a "collecting…" placeholder with fewer than two plottable points.
+     */
+    static String sparklineSvg(List<Double> ratios, double target, int windowDays, int w, int h) {
         String points = sparklinePoints(ratios, w, h);
         if (points.isEmpty()) return "<span class=\"muted\">collecting\u2026</span>";
-        return "<svg width=\"" + w + "\" height=\"" + h + "\" viewBox=\"0 0 " + w + " " + h + "\" "
-                + "preserveAspectRatio=\"none\" class=\"sparksvg\">"
-                + "<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"" + points + "\"/></svg>";
+        int n = ratios.size();
+        StringBuilder sb = new StringBuilder();
+        String title = (windowDays > 0 ? windowDays + "-day " : "") + "daily success ratio";
+        sb.append("<svg width=\"").append(w).append("\" height=\"").append(h).append("\" viewBox=\"0 0 ")
+          .append(w).append(' ').append(h).append("\" preserveAspectRatio=\"none\" class=\"sparksvg\">");
+        sb.append("<title>").append(esc(title)).append("</title>");
+        // target reference line (dashed)
+        if (target > 0 && target < 1) {
+            double ty = round1d(h - target * h);
+            sb.append("<line x1=\"0\" y1=\"").append(round1(ty)).append("\" x2=\"").append(w)
+              .append("\" y2=\"").append(round1(ty)).append("\" stroke=\"#c33\" stroke-width=\"1\" ")
+              .append("stroke-dasharray=\"3,2\" opacity=\"0.7\"><title>target ").append(pct(target))
+              .append("</title></line>");
+        }
+        sb.append("<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"").append(points).append("\"/>");
+        // one hoverable dot per plotted day
+        for (int i = 0; i < n; i++) {
+            double r = ratios.get(i);
+            if (r < 0) continue;
+            double x = n == 1 ? 0 : (double) i / (n - 1) * w;
+            double y = h - r * h;
+            int ago = n - 1 - i;
+            String when = ago == 0 ? "today" : ago + "d ago";
+            sb.append("<circle cx=\"").append(round1(x)).append("\" cy=\"").append(round1(y))
+              .append("\" r=\"1.6\" fill=\"#2a7\"><title>").append(esc(when)).append(": ")
+              .append(pct(r)).append("</title></circle>");
+        }
+        sb.append("</svg>");
+        return sb.toString();
     }
+
+    private static double round1d(double d) { return Math.round(d * 10.0) / 10.0; }
 
     private static String round1(double d) {
         double r = Math.round(d * 10.0) / 10.0;

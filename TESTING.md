@@ -4108,3 +4108,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertRouteSuccessBurning`, a multi-window burn
   on `imini_alerts_route_success_good_total`/`_total_total` scaled by `(1 - imini_alerts_success_slo_target)`.
   Validate with `promtool check rules`.
+
+---
+
+# Richer SLO sparklines: target line, tooltips, per-route trends
+
+## 493. Sparkline target line + tooltips + window label (AlertSparklineTargetRouteTest)
+
+- **Run:** `./mvnw -Dtest=AlertSparklineTargetRouteTest test`.
+- **Observe:** `sparklineSvg(ratios, target, windowDays, w, h)` draws a dashed target line (with a `target N%`
+  tooltip) when `0<target<1` and none when unset; emits one `<circle>` per day with a `today:`/`Nd ago:`
+  tooltip; the SVG `<title>` carries the window length ("30-day daily success ratio"); sparse series fall back
+  to "collecting…". The no-arg `sparklineSvg` overload remains for back-compat.
+
+## 494. Per-route daily series (AlertSparklineTargetRouteTest)
+
+- **Observe:** `sloWindowSeriesByRoute()` is empty without traffic and surfaced in
+  `stats().slo_window_series_by_route`; per-route windows use the same `RollingWindow` day-series semantics
+  (in-memory, horizon = `alerts.slo-window-days`).
+
+## 495. Overview per-route trend column (AlertSparklineTargetRouteTest)
+
+- **Observe:** the By-route table gains a **trend** column rendering each route's mini-sparkline; the
+  auto-refresh JS redraws the global and per-route sparklines from `slo_window_series`/
+  `slo_window_series_by_route` via a shared `sparkSVG` builder (with the target line). Live:
+  `GET /admin/alerts/overview.html?refresh=5`.

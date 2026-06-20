@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Richer SLO sparklines: the overview window sparkline is now window-length-aware (labeled with the configured days), draws a dashed target reference line, and carries per-day hover tooltips (today / Nd ago : ratio); per-route daily series (slo_window_series_by_route, in-memory) drive a mini-sparkline trend column in the By-route table; all live-update with the page via a shared JS sparkline builder.
+
 - Bounded SLO bucket table + per-route success burn alerting + overview SLO sparkline: out-of-window alert_slo_buckets rows are pruned on each flush (windowFloorDay horizon) so the table stays bounded; a new IminiAlertRouteSuccessBurning multi-window rule pages when a single route burns its delivery-success budget; and the overview SLO summary now shows a daily success-ratio sparkline (slo_window_series) that live-updates with the page.
 
 - Durable rolling-window buckets + per-route success-target overrides + overview SLO summary: the rolling-window SLO buckets are now persisted to SQLite (alert_slo_buckets, flushed on the reaper tick and at shutdown, restored at startup) so the 30-day window survives restarts; a route in alerts.routes can set a 6th field for its own delivery-success target (action|url|template|latency|target|success-target); and the overview page shows a live SLO summary (latency success ratio, budget remaining, rolling-window budget, delivery-success ratio).
