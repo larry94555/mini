@@ -65,14 +65,14 @@ public class AlertSink {
 
     @Value("${alerts.enabled:false}") private boolean enabled;
     @Value("${alerts.webhook-url:}") private String webhookUrl;
-    @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private String actionsCfg;
+    @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private volatile String actionsCfg;
     @Value("${alerts.max-retries:3}") private int maxRetries;
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
     @Value("${alerts.queue-capacity:1000}") private int queueCapacity;
     @Value("${alerts.dead-letter-capacity:100}") private int deadLetterCapacity;
     @Value("${alerts.template:}") private String template;
     @Value("${alerts.dead-letter-persistent:true}") private boolean deadLetterPersistent;
-    @Value("${alerts.routes:}") private String routesCfg;
+    @Value("${alerts.routes:}") private volatile String routesCfg;
     @Value("${alerts.dead-letter-retention-hours:168}") private long retentionHours;
     @Value("${alerts.dedup-window-seconds:0}") private long dedupWindowSeconds;
     @Value("${alerts.dedup-shared:true}") private boolean dedupShared;
@@ -82,6 +82,9 @@ public class AlertSink {
     @Value("${alerts.dedup-digest:true}") private boolean dedupDigest;
     @Value("${alerts.slo-latency-ms:1000}") private volatile long sloLatencyMs;
     @Value("${alerts.slo-target:0.99}") private volatile double sloTarget;
+    @Value("${alerts.slo-window-days:30}") private int sloWindowDays;
+    @Value("${alerts.success-target:0.99}") private volatile double successTarget;
+    @Value("${alerts.config-override-file:}") private String configOverrideFile;
     @Value("${alerts.selftest-flap-threshold:3}") private int selftestFlapThreshold;
 
     private final AuditLog audit;
@@ -114,6 +117,49 @@ public class AlertSink {
     private final AtomicLong latencySumMs = new AtomicLong();
     private final AtomicLong latencyCount = new AtomicLong();
     private final AtomicLong latencyGood = new AtomicLong(); // deliveries within the SLO latency objective
+    private volatile RollingWindow latencyWindow = new RollingWindow(30); // re-sized in init() from config
+
+    /**
+     * A fixed-size ring of daily good/total buckets for a rolling-window SLO. Each bucket covers one UTC day;
+     * recording into a day whose slot holds a stale day resets that slot first, so the ring always reflects the
+     * last {@code days} days. Pure and time-injectable for testing (no wall-clock reads inside).
+     */
+    static final class RollingWindow {
+        static final long BUCKET_MS = 86_400_000L; // 1 day
+        private final int days;
+        private final long[] dayIndex; // which day each slot currently holds
+        private final long[] good;
+        private final long[] total;
+
+        RollingWindow(int days) {
+            this.days = Math.max(1, days);
+            this.dayIndex = new long[this.days];
+            this.good = new long[this.days];
+            this.total = new long[this.days];
+            java.util.Arrays.fill(dayIndex, -1);
+        }
+
+        synchronized void record(long nowMs, boolean isGood) {
+            long day = nowMs / BUCKET_MS;
+            int slot = (int) Math.floorMod(day, days);
+            if (dayIndex[slot] != day) { dayIndex[slot] = day; good[slot] = 0; total[slot] = 0; }
+            total[slot]++;
+            if (isGood) good[slot]++;
+        }
+
+        /** Sum of good/total across buckets within [nowDay - days + 1, nowDay]. Returns {good, total}. */
+        synchronized long[] snapshot(long nowMs) {
+            long day = nowMs / BUCKET_MS;
+            long lo = day - days + 1;
+            long g = 0, t = 0;
+            for (int i = 0; i < days; i++) {
+                if (dayIndex[i] >= lo && dayIndex[i] <= day) { g += good[i]; t += total[i]; }
+            }
+            return new long[]{g, t};
+        }
+
+        int days() { return days; }
+    }
 
     // last scheduled self-test result (set by AlertSelfTestScheduler)
     private final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> selfTestStatus =
@@ -141,6 +187,15 @@ public class AlertSink {
         latencySumMs.addAndGet(ms);
         latencyCount.incrementAndGet();
         if (ms <= sloLatencyMs) latencyGood.incrementAndGet();
+        latencyWindow.record(System.currentTimeMillis(), ms <= sloLatencyMs);
+    }
+
+    /** The rolling-window delivery-latency SLO snapshot (last {@code alerts.slo-window-days} days). */
+    public Map<String, Object> sloWindowSnapshot() {
+        long[] gt = latencyWindow.snapshot(System.currentTimeMillis());
+        Map<String, Object> m = sloSnapshot(gt[0], gt[1], sloTarget, sloLatencyMs);
+        m.put("window_days", latencyWindow.days());
+        return m;
     }
 
     /**
@@ -288,6 +343,8 @@ public class AlertSink {
 
     @jakarta.annotation.PostConstruct
     public void init() {
+        loadOverrides(); // persisted hot-reload changes win over @Value defaults
+        if (sloWindowDays > 0 && sloWindowDays != latencyWindow.days()) this.latencyWindow = new RollingWindow(sloWindowDays);
         this.actions = parseActions(actionsCfg);
         this.routes = parseRoutes(routesCfg);
         this.escalationTiers = resolveTiers();
@@ -936,16 +993,65 @@ public class AlertSink {
      */
     public synchronized Map<String, Object> reload(String actionsCfg, String routesCfg, String escalateTiersCfg,
                                                    Long sloLatencyMs, Double sloTarget) {
-        if (actionsCfg != null) this.actions = parseActions(actionsCfg);
-        if (routesCfg != null) this.routes = parseRoutes(routesCfg);
+        if (actionsCfg != null) { this.actionsCfg = actionsCfg; this.actions = parseActions(actionsCfg); }
+        if (routesCfg != null) { this.routesCfg = routesCfg; this.routes = parseRoutes(routesCfg); }
         if (escalateTiersCfg != null) { this.escalateTiersCfg = escalateTiersCfg; this.escalationTiers = resolveTiers(); }
         if (sloLatencyMs != null && sloLatencyMs > 0) this.sloLatencyMs = sloLatencyMs;
         if (sloTarget != null && sloTarget > 0 && sloTarget < 1) this.sloTarget = sloTarget;
         log.info("[alerts] config hot-reloaded: actions=" + actions + " routes=" + routes.keySet()
                 + " tiers=" + escalationTiers.size() + " slo=" + this.sloLatencyMs + "ms/" + this.sloTarget);
+        persistOverrides(); // durable across restarts when alerts.config-override-file is set
         Map<String, Object> snap = configSnapshot();
         for (String w : warnings()) log.warn("[alerts][config] " + w);
         return snap;
+    }
+
+    /**
+     * Pure: serialize the reloadable config to a .properties body (only non-blank keys). Round-trips through
+     * {@link java.util.Properties} so route strings with {@code | ; { } " = :} are escaped correctly.
+     */
+    static String serializeOverrides(String actions, String routes, String tiers, long latencyMs, double target) {
+        java.util.Properties p = new java.util.Properties();
+        if (actions != null && !actions.isBlank()) p.setProperty("alerts.actions", actions);
+        if (routes != null && !routes.isBlank()) p.setProperty("alerts.routes", routes);
+        if (tiers != null && !tiers.isBlank()) p.setProperty("alerts.escalate-tiers", tiers);
+        if (latencyMs > 0) p.setProperty("alerts.slo-latency-ms", Long.toString(latencyMs));
+        if (target > 0 && target < 1) p.setProperty("alerts.slo-target", Double.toString(target));
+        java.io.StringWriter sw = new java.io.StringWriter();
+        try { p.store(sw, "imini alerts config overrides (hot-reload)"); } catch (Exception ignore) {}
+        return sw.toString();
+    }
+
+    private void persistOverrides() {
+        if (configOverrideFile == null || configOverrideFile.isBlank()) return; // persistence disabled
+        String body = serializeOverrides(actionsCfg, routesCfg, escalateTiersCfg, sloLatencyMs, sloTarget);
+        try {
+            java.nio.file.Path path = java.nio.file.Path.of(configOverrideFile);
+            if (path.getParent() != null) java.nio.file.Files.createDirectories(path.getParent());
+            java.nio.file.Files.writeString(path, body);
+            log.info("[alerts] persisted config overrides to " + configOverrideFile);
+        } catch (Exception ex) {
+            log.warn("[alerts] could not persist config overrides to " + configOverrideFile + ": " + ex.getMessage());
+        }
+    }
+
+    /** Apply persisted overrides (if the file exists) over the @Value-injected defaults at startup. */
+    private void loadOverrides() {
+        if (configOverrideFile == null || configOverrideFile.isBlank()) return;
+        java.nio.file.Path path = java.nio.file.Path.of(configOverrideFile);
+        if (!java.nio.file.Files.exists(path)) return;
+        try {
+            java.util.Properties p = new java.util.Properties();
+            try (java.io.Reader r = java.nio.file.Files.newBufferedReader(path)) { p.load(r); }
+            if (p.containsKey("alerts.actions")) this.actionsCfg = p.getProperty("alerts.actions");
+            if (p.containsKey("alerts.routes")) this.routesCfg = p.getProperty("alerts.routes");
+            if (p.containsKey("alerts.escalate-tiers")) this.escalateTiersCfg = p.getProperty("alerts.escalate-tiers");
+            if (p.containsKey("alerts.slo-latency-ms")) this.sloLatencyMs = Long.parseLong(p.getProperty("alerts.slo-latency-ms").trim());
+            if (p.containsKey("alerts.slo-target")) this.sloTarget = Double.parseDouble(p.getProperty("alerts.slo-target").trim());
+            log.info("[alerts] applied persisted config overrides from " + configOverrideFile);
+        } catch (Exception ex) {
+            log.warn("[alerts] could not load config overrides from " + configOverrideFile + ": " + ex.getMessage());
+        }
     }
 
     /** Current config warnings (logged at startup and surfaced in {@code GET /admin/alerts/config}). */
@@ -1018,7 +1124,10 @@ public class AlertSink {
         m.put("sla_breaches", slaBreaches.get());
         m.put("delivery_latency", latencySnapshot());
         m.put("delivery_slo", sloSnapshot());
+        m.put("delivery_slo_window", sloWindowSnapshot());
+        m.put("delivery_success_slo", deliverySuccessSlo());
         m.put("slo_by_route", sloByRoute());
+        m.put("success_by_route", successSloByRoute());
         Map<String, Object> stReport = selfTestReport();
         Map<String, Object> stStat = new LinkedHashMap<>(selfTestStatus());
         stStat.put("flapping", stReport.get("flapping"));
@@ -1117,6 +1226,31 @@ public class AlertSink {
             synchronized (c) { total = c[5]; good = c[6]; }
             if (total <= 0) continue; // no timed deliveries on this route yet
             out.put(e.getKey(), sloSnapshot(good, total, sloTargetFor(e.getKey()), sloLatencyMsFor(e.getKey())));
+        }
+        return out;
+    }
+
+    /**
+     * The global delivery-success SLO: fraction of deliveries that ultimately landed (2xx) vs. those that gave
+     * up (dead-lettered), against {@code alerts.success-target}. Distinct from the latency SLO — a route can be
+     * fast but returning 5xx. {@code latency_ms} is 0 here (not a latency objective).
+     */
+    public Map<String, Object> deliverySuccessSlo() {
+        long delivered = sent.get();
+        long dropped = deadLettered.get();
+        return sloSnapshot(delivered, delivered + dropped, successTarget, 0);
+    }
+
+    /** Per-route delivery-success SLO ({route -> snapshot}); success = sent, failure = dead-lettered. */
+    Map<String, Map<String, Object>> successSloByRoute() {
+        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, long[]> e : byRoute.entrySet()) {
+            long[] c = e.getValue();
+            long delivered, dropped;
+            synchronized (c) { delivered = c[0]; dropped = c[2]; }
+            long total = delivered + dropped;
+            if (total <= 0) continue; // nothing finalized on this route yet
+            out.put(e.getKey(), sloSnapshot(delivered, total, successTarget, 0));
         }
         return out;
     }

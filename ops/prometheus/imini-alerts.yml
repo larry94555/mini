@@ -123,6 +123,36 @@ groups:
           summary: "imini delivery-latency error budget burning"
           description: "Burning >6x the error budget over 30m and 6h. Investigate the slow route on the overview page before it becomes a page."
 
+      - alert: IminiAlertSLOWindowBudgetExhausted
+        expr: imini_alerts_slo_window_budget_remaining < 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini rolling-window error budget exhausted"
+          description: "The delivery-latency error budget over the rolling window (alerts.slo-window-days) is fully spent — the SLO will be missed for the period. See GET /admin/alerts/overview.html."
+
+      - alert: IminiAlertDeliverySuccessBurnFast
+        expr: |
+          (1 - (rate(imini_alerts_success_slo_good_total[5m]) / rate(imini_alerts_success_slo_total_total[5m]))) > (14.4 * (1 - avg(imini_alerts_success_slo_target)))
+          and
+          (1 - (rate(imini_alerts_success_slo_good_total[1h]) / rate(imini_alerts_success_slo_total_total[1h]))) > (14.4 * (1 - avg(imini_alerts_success_slo_target)))
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini delivery-success error budget burning fast"
+          description: "Alerts are dead-lettering (not landing) faster than the success budget allows. Check receiver health and the dead-letter backlog."
+
+      - alert: IminiAlertRouteSuccessLow
+        expr: imini_alerts_route_success_ratio < avg(imini_alerts_success_slo_target)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini per-route delivery success low ({{ $labels.route }})"
+          description: "Route {{ $labels.route }} is delivering below the success target — that receiver is up-but-erroring or repeatedly dead-lettering."
+
       - alert: IminiAlertSLOBudgetExhausted
         expr: imini_alerts_slo_budget_remaining < 0
         for: 5m

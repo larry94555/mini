@@ -153,6 +153,26 @@ public final class PromFormat {
                 help(sb, "alerts_slo_total_total", "Cumulative timed deliveries (for burn-rate rules)", "counter");
                 line(sb, PREFIX + "alerts_slo_total_total", null, m.get("total") instanceof Number n ? n.longValue() : 0);
             }
+            if (alerts.get("delivery_slo_window") instanceof Map<?, ?> w) {
+                Map<String, Object> m = (Map<String, Object>) w;
+                gaugeNum(sb, "alerts_slo_window_success_ratio", "Rolling-window delivery success ratio within the SLO latency", m.get("success_ratio"));
+                gaugeNum(sb, "alerts_slo_window_burn_rate", "Rolling-window error-budget burn rate", m.get("burn_rate"));
+                gaugeNum(sb, "alerts_slo_window_budget_remaining", "Rolling-window error budget remaining (<0 = exhausted)", m.get("budget_remaining"));
+                gaugeNum(sb, "alerts_slo_window_good", "Within-SLO deliveries in the rolling window", m.get("good"));
+                gaugeNum(sb, "alerts_slo_window_total", "Timed deliveries in the rolling window", m.get("total"));
+                gaugeNum(sb, "alerts_slo_window_days", "Rolling SLO window length (days)", m.get("window_days"));
+            }
+            if (alerts.get("delivery_success_slo") instanceof Map<?, ?> ss) {
+                Map<String, Object> m = (Map<String, Object>) ss;
+                gaugeNum(sb, "alerts_success_slo_target", "Delivery-success SLO target ratio", m.get("target"));
+                gaugeNum(sb, "alerts_success_slo_ratio", "Observed delivery-success ratio (delivered vs dead-lettered)", m.get("success_ratio"));
+                gaugeNum(sb, "alerts_success_slo_burn_rate", "Delivery-success error-budget burn rate", m.get("burn_rate"));
+                gaugeNum(sb, "alerts_success_slo_budget_remaining", "Delivery-success error budget remaining (<0 = exhausted)", m.get("budget_remaining"));
+                help(sb, "alerts_success_slo_good_total", "Cumulative delivered (2xx) alerts (for burn-rate rules)", "counter");
+                line(sb, PREFIX + "alerts_success_slo_good_total", null, m.get("good") instanceof Number n ? n.longValue() : 0);
+                help(sb, "alerts_success_slo_total_total", "Cumulative finalized deliveries (delivered + dead-lettered)", "counter");
+                line(sb, PREFIX + "alerts_success_slo_total_total", null, m.get("total") instanceof Number n ? n.longValue() : 0);
+            }
             if (alerts.get("slo_by_route") instanceof Map<?, ?> sbr) {
                 Map<String, Map<String, Object>> m = (Map<String, Map<String, Object>>) sbr;
                 if (!m.isEmpty()) {
@@ -171,6 +191,23 @@ public final class PromFormat {
                     help(sb, "alerts_route_slo_total_total", "Per-route cumulative timed deliveries", "counter");
                     for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
                         line(sb, PREFIX + "alerts_route_slo_total_total", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("total"));
+                }
+            }
+            if (alerts.get("success_by_route") instanceof Map<?, ?> sbr2) {
+                Map<String, Map<String, Object>> m = (Map<String, Map<String, Object>>) sbr2;
+                if (!m.isEmpty()) {
+                    help(sb, "alerts_route_success_ratio", "Per-route delivery-success ratio (delivered vs dead-lettered)", "gauge");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_success_ratio", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("success_ratio"));
+                    help(sb, "alerts_route_success_burn_rate", "Per-route delivery-success burn rate", "gauge");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_success_burn_rate", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("burn_rate"));
+                    help(sb, "alerts_route_success_good_total", "Per-route cumulative delivered (2xx) alerts", "counter");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_success_good_total", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("good"));
+                    help(sb, "alerts_route_success_total_total", "Per-route cumulative finalized deliveries", "counter");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_success_total_total", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("total"));
                 }
             }
             if (alerts.get("selftest") instanceof Map<?, ?> st) {

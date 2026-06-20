@@ -589,6 +589,87 @@
      "refId": "B"
     }
    ]
+  },
+  {
+   "id": 25,
+   "title": "Rolling-window budget remaining",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 53,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_slo_window_budget_remaining",
+     "legendFormat": "window remaining",
+     "refId": "A"
+    },
+    {
+     "expr": "imini_alerts_slo_budget_remaining",
+     "legendFormat": "cumulative remaining",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "id": 26,
+   "title": "Delivery-success SLO",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 8,
+    "y": 53,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_success_slo_ratio",
+     "legendFormat": "success ratio",
+     "refId": "A"
+    },
+    {
+     "expr": "imini_alerts_success_slo_target",
+     "legendFormat": "target",
+     "refId": "B"
+    },
+    {
+     "expr": "imini_alerts_success_slo_budget_remaining",
+     "legendFormat": "budget remaining",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "id": 27,
+   "title": "Per-route delivery success ratio",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 16,
+    "y": 53,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_route_success_ratio",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
   }
  ],
  "schemaVersion": 39,
