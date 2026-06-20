@@ -562,6 +562,33 @@
      "refId": "A"
     }
    ]
+  },
+  {
+   "id": 24,
+   "title": "Error budget remaining (global & per-route)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 16,
+    "y": 46,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_slo_budget_remaining",
+     "legendFormat": "global",
+     "refId": "A"
+    },
+    {
+     "expr": "imini_alerts_route_slo_budget_remaining",
+     "legendFormat": "{{route}}",
+     "refId": "B"
+    }
+   ]
   }
  ],
  "schemaVersion": 39,

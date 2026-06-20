@@ -584,6 +584,28 @@ public class AgentController {
     }
 
     /**
+     * Hot-reload the alerting config without a restart. Pass any of {@code actions}, {@code routes},
+     * {@code escalate-tiers}, {@code slo-latency-ms}, {@code slo-target}; omitted pieces are left unchanged.
+     * Re-parses into the live sink and returns the resulting config (with fresh warnings). CSRF-guarded.
+     * Admin only.
+     */
+    @PostMapping("/admin/alerts/reload")
+    public Map<String, Object> adminAlertsReload(
+            @RequestParam(name = "actions", required = false) String actions,
+            @RequestParam(name = "routes", required = false) String routes,
+            @RequestParam(name = "escalate-tiers", required = false) String escalateTiers,
+            @RequestParam(name = "slo-latency-ms", required = false) Long sloLatencyMs,
+            @RequestParam(name = "slo-target", required = false) Double sloTarget,
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
+        requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
+        Map<String, Object> out = alertSink.reload(actions, routes, escalateTiers, sloLatencyMs, sloTarget);
+        out.put("csrf", csrf.configSnapshot());
+        return out;
+    }
+
+    /**
      * Push a synthetic alert through the pipeline and report where it lands. With {@code ?send=true} it performs
      * a live probe POST (CSRF-guarded, since it has a side effect). Admin only.
      */

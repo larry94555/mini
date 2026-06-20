@@ -144,6 +144,7 @@ public final class PromFormat {
                 gaugeNum(sb, "alerts_slo_target", "Delivery-latency SLO target success ratio", m.get("target"));
                 gaugeNum(sb, "alerts_slo_success_ratio", "Observed delivery success ratio within the SLO latency", m.get("success_ratio"));
                 gaugeNum(sb, "alerts_slo_burn_rate", "Error-budget burn rate (>1 = over budget)", m.get("burn_rate"));
+                gaugeNum(sb, "alerts_slo_budget_remaining", "Fraction of the error budget remaining (<0 = exhausted)", m.get("budget_remaining"));
                 gaugeNum(sb, "alerts_slo_total", "Timed deliveries counted toward the SLO", m.get("total"));
                 gaugeNum(sb, "alerts_slo_good", "Deliveries within the SLO latency objective", m.get("good"));
                 // monotonic counters so burn-rate rules can rate() them without hard-coding a latency bucket
@@ -161,6 +162,9 @@ public final class PromFormat {
                     help(sb, "alerts_route_slo_burn_rate", "Per-route error-budget burn rate", "gauge");
                     for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
                         line(sb, PREFIX + "alerts_route_slo_burn_rate", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("burn_rate"));
+                    help(sb, "alerts_route_slo_budget_remaining", "Per-route error budget remaining (<0 = exhausted)", "gauge");
+                    for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
+                        line(sb, PREFIX + "alerts_route_slo_budget_remaining", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("budget_remaining"));
                     help(sb, "alerts_route_slo_good_total", "Per-route cumulative within-SLO deliveries", "counter");
                     for (Map.Entry<String, Map<String, Object>> e : m.entrySet())
                         line(sb, PREFIX + "alerts_route_slo_good_total", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("good"));

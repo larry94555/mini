@@ -123,6 +123,24 @@ groups:
           summary: "imini delivery-latency error budget burning"
           description: "Burning >6x the error budget over 30m and 6h. Investigate the slow route on the overview page before it becomes a page."
 
+      - alert: IminiAlertSLOBudgetExhausted
+        expr: imini_alerts_slo_budget_remaining < 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini delivery-latency error budget exhausted"
+          description: "The observed error budget is fully spent (budget_remaining < 0). The SLO is being missed over the measured window — see GET /admin/alerts/overview.html."
+
+      - alert: IminiAlertRouteSLOBudgetExhausted
+        expr: imini_alerts_route_slo_budget_remaining < 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini per-route error budget exhausted ({{ $labels.route }})"
+          description: "Route {{ $labels.route }} has spent its error budget — a single receiver is missing its (possibly overridden) objective."
+
       - alert: IminiAlertRouteSLOBurning
         expr: |
           (1 - (rate(imini_alerts_route_slo_good_total[30m]) / rate(imini_alerts_route_slo_total_total[30m]))) > (6 * (1 - avg(imini_alerts_slo_target)))
