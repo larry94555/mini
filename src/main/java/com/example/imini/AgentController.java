@@ -584,14 +584,27 @@ public class AgentController {
     }
 
     /**
-     * Downloadable SLO report: daily good/total per day for the rolling window (global + per route). CSV by
-     * default ({@code Content-Disposition: attachment}); {@code ?format=json} returns the raw rows. Admin only.
+     * Downloadable SLO report: daily good/total per day for the rolling window (global + per route), with
+     * effective targets and a pass flag. CSV by default ({@code Content-Disposition: attachment});
+     * {@code ?format=json} returns the raw rows. Optional date range: {@code ?from=YYYY-MM-DD&to=YYYY-MM-DD} or
+     * {@code ?days=N} (last N days). Admin only.
      */
     @GetMapping("/admin/alerts/slo-report")
     public ResponseEntity<?> adminAlertsSloReport(
-            @RequestParam(name = "format", defaultValue = "csv") String format) {
+            @RequestParam(name = "format", defaultValue = "csv") String format,
+            @RequestParam(name = "from", defaultValue = "") String from,
+            @RequestParam(name = "to", defaultValue = "") String to,
+            @RequestParam(name = "days", defaultValue = "0") int days) {
         requireAdmin();
-        List<Map<String, Object>> rows = alertSink.sloReportRows();
+        long today = System.currentTimeMillis() / 86_400_000L;
+        long fromDay = Long.MIN_VALUE, toDay = Long.MAX_VALUE;
+        if (days > 0) {
+            fromDay = today - days + 1;
+        } else {
+            if (!from.isBlank()) try { fromDay = java.time.LocalDate.parse(from.trim()).toEpochDay(); } catch (Exception ignore) {}
+            if (!to.isBlank()) try { toDay = java.time.LocalDate.parse(to.trim()).toEpochDay(); } catch (Exception ignore) {}
+        }
+        List<Map<String, Object>> rows = alertSink.sloReportRows(fromDay, toDay);
         if ("json".equalsIgnoreCase(format)) {
             return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(rows);
         }
