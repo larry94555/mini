@@ -245,6 +245,60 @@ public class AlertSink {
     }
 
     /**
+     * Daily good/total rows for the rolling-window SLO, for an offline report: one row per day for the global
+     * window (scope "global") and one per route/day (scope "route"), sorted by scope, route, then day.
+     */
+    public List<Map<String, Object>> sloReportRows() {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (long[] b : latencyWindow.dump()) rows.add(reportRow("global", "", b));
+        List<String> routeNames = new ArrayList<>(routeWindows.keySet());
+        java.util.Collections.sort(routeNames);
+        for (String r : routeNames) for (long[] b : routeWindows.get(r).dump()) rows.add(reportRow("route", r, b));
+        rows.sort(java.util.Comparator
+                .comparing((Map<String, Object> m) -> (String) m.get("scope"))
+                .thenComparing(m -> (String) m.get("route"))
+                .thenComparingLong(m -> (Long) m.get("day")));
+        return rows;
+    }
+
+    private static Map<String, Object> reportRow(String scope, String route, long[] dayGoodTotal) {
+        long day = dayGoodTotal[0], good = dayGoodTotal[1], total = dayGoodTotal[2];
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("scope", scope);
+        m.put("route", route);
+        m.put("day", day);
+        m.put("date", java.time.LocalDate.ofEpochDay(day).toString());
+        m.put("good", good);
+        m.put("total", total);
+        m.put("ratio", total > 0 ? Math.round((double) good / total * 10000.0) / 10000.0 : 0.0);
+        return m;
+    }
+
+    /** Pure: render SLO report rows as CSV (header + rows; fields are simple numerics/identifiers). */
+    static String sloReportCsv(List<Map<String, Object>> rows) {
+        StringBuilder sb = new StringBuilder("scope,route,day,date,good,total,ratio\n");
+        if (rows != null) {
+            for (Map<String, Object> r : rows) {
+                sb.append(r.get("scope")).append(',')
+                  .append(csv(String.valueOf(r.get("route")))).append(',')
+                  .append(r.get("day")).append(',')
+                  .append(r.get("date")).append(',')
+                  .append(r.get("good")).append(',')
+                  .append(r.get("total")).append(',')
+                  .append(r.get("ratio")).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Minimal CSV field quoting (only when the value contains a comma, quote, or newline). */
+    private static String csv(String v) {
+        if (v == null) return "";
+        if (v.contains(",") || v.contains("\"") || v.contains("\n")) return '"' + v.replace("\"", "\"\"") + '"';
+        return v;
+    }
+
+    /**
      * Pure: a latency-SLO snapshot. {@code good} = deliveries within the latency objective, {@code total} = all
      * timed deliveries. success_ratio = good/total; error_budget = 1-target; burn_rate = observed error ratio
      * divided by the budget (>1 means burning the budget faster than allowed). Values rounded to 4 dp.
@@ -441,6 +495,12 @@ public class AlertSink {
                     rs -> new long[]{rs.getLong("day"), rs.getLong("good"), rs.getLong("total")}, lo)) {
                 latencyWindow.load(row[0], row[1], row[2]);
             }
+            for (Object[] row : db.query("SELECT route, day, good, total FROM alert_slo_route_buckets WHERE day >= ?",
+                    rs -> new Object[]{rs.getString("route"), rs.getLong("day"), rs.getLong("good"), rs.getLong("total")}, lo)) {
+                String route = (String) row[0];
+                routeWindows.computeIfAbsent(route, k -> new RollingWindow(latencyWindow.days()))
+                        .load((Long) row[1], (Long) row[2], (Long) row[3]);
+            }
             log.info("[alerts] restored rolling-window SLO buckets from SQLite");
         } catch (Exception ex) {
             log.warn("[alerts] could not load SLO buckets: " + ex.getMessage());
@@ -464,6 +524,13 @@ public class AlertSink {
                         + "ON CONFLICT(day) DO UPDATE SET good=excluded.good, total=excluded.total",
                         b[0], b[1], b[2]);
             }
+            for (Map.Entry<String, RollingWindow> e : routeWindows.entrySet()) {
+                for (long[] b : e.getValue().dump()) {
+                    db.update("INSERT INTO alert_slo_route_buckets(route, day, good, total) VALUES(?,?,?,?) "
+                            + "ON CONFLICT(route, day) DO UPDATE SET good=excluded.good, total=excluded.total",
+                            e.getKey(), b[0], b[1], b[2]);
+                }
+            }
             pruneWindow(); // drop rows that have aged out of the horizon so the table stays bounded
         } catch (Exception ex) {
             log.warn("[alerts] could not persist SLO buckets: " + ex.getMessage());
@@ -476,6 +543,7 @@ public class AlertSink {
         try {
             long floor = windowFloorDay(System.currentTimeMillis(), latencyWindow.days());
             int removed = db.update("DELETE FROM alert_slo_buckets WHERE day < ?", floor);
+            removed += db.update("DELETE FROM alert_slo_route_buckets WHERE day < ?", floor);
             if (removed > 0) log.info("[alerts] pruned " + removed + " out-of-window SLO bucket(s)");
             return removed;
         } catch (Exception ex) {

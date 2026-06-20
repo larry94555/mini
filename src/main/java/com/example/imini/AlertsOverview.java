@@ -99,18 +99,21 @@ public final class AlertsOverview {
         Object seriesByRoute = stats.get("slo_window_series_by_route");
         Map<String, List<Double>> routeSeries = (seriesByRoute instanceof Map) ? (Map<String, List<Double>>) seriesByRoute : Map.of();
         if (live || !routes.isEmpty()) {
-            sb.append("<h2>By route</h2><table><thead><tr><th>route</th>"
+            sb.append("<h2>By route <span class=\"muted\">(worst trend first)</span></h2>"
+                    + "<table><thead><tr><th>route</th>"
                     + "<th class=\"num\">sent</th><th class=\"num\">failed</th>"
                     + "<th class=\"num\">dead-lettered</th><th class=\"num\">suppressed</th><th>trend</th></tr></thead>");
             sb.append("<tbody id=\"rt_body\">");
-            for (Map.Entry<String, Map<String, Long>> e : routes.entrySet()) {
-                Map<String, Long> r = e.getValue();
-                sb.append("<tr><td>").append(esc(e.getKey())).append("</td>");
+            List<String> ordered = new java.util.ArrayList<>(routes.keySet());
+            ordered.sort(java.util.Comparator.comparingDouble(k -> routeTrendScore(routeSeries.get(k))));
+            for (String k : ordered) {
+                Map<String, Long> r = routes.get(k);
+                sb.append("<tr><td>").append(esc(k)).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "sent")).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "failed")).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "dead_lettered")).append("</td>");
                 sb.append("<td class=\"num\">").append(val(r, "suppressed")).append("</td>");
-                sb.append("<td>").append(sparklineSvg(routeSeries.get(e.getKey()), sloTarget, windowDays, 90, 20)).append("</td></tr>");
+                sb.append("<td>").append(sparklineSvg(routeSeries.get(k), sloTarget, windowDays, 90, 20)).append("</td></tr>");
             }
             sb.append("</tbody></table>");
         }
@@ -191,7 +194,10 @@ public final class AlertsOverview {
             + "return '<svg width=\"'+W+'\" height=\"'+H+'\" viewBox=\"0 0 '+W+' '+H+'\" preserveAspectRatio=\"none\" class=\"sparksvg\">'+tl+'<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"'+pts+'\"/>'+dots+'</svg>';}"
             + "var sk=document.getElementById('sparkbox');if(sk){var g=sparkSVG(s.slo_window_series||[],160,28);if(g)sk.innerHTML=g;}"
             + "var rs=s.slo_window_series_by_route||{};"
-            + "var br=s.by_route||{},h='';Object.keys(br).forEach(function(k){var r=br[k]||{};"
+            + "var br=s.by_route||{};"
+            + "function trendScore(ser){if(ser){for(var j=ser.length-1;j>=0;j--){if(ser[j]>=0)return ser[j];}}return 2;}"
+            + "var rk=Object.keys(br).sort(function(p,q){return trendScore(rs[p]||[])-trendScore(rs[q]||[]);});"
+            + "var h='';rk.forEach(function(k){var r=br[k]||{};"
             + "h+='<tr><td>'+esc(k)+'</td><td class=\"num\">'+(r.sent||0)+'</td><td class=\"num\">'+(r.failed||0)"
             + "+'</td><td class=\"num\">'+(r.dead_lettered||0)+'</td><td class=\"num\">'+(r.suppressed||0)+'</td>"
             + "<td>'+sparkSVG(rs[k]||[],90,20)+'</td></tr>';});"
@@ -231,6 +237,20 @@ public final class AlertsOverview {
         double p = Math.round(r * 1000.0) / 10.0;
         String num = (p == Math.rint(p)) ? Long.toString((long) p) : Double.toString(p);
         return num + "%";
+    }
+
+    /**
+     * Pure: a route's "worst trend" sort key — its most recent day with data (lower ratio = worse, sorted
+     * first). Routes with no data sort last (returns 2.0, above any real ratio).
+     */
+    static double routeTrendScore(List<Double> series) {
+        if (series != null) {
+            for (int i = series.size() - 1; i >= 0; i--) {
+                double r = series.get(i);
+                if (r >= 0) return r; // most recent day with data
+            }
+        }
+        return 2.0; // no data -> sort after all real ratios
     }
 
     @SuppressWarnings("unchecked")
