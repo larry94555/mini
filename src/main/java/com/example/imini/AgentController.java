@@ -653,12 +653,20 @@ public class AgentController {
         }
     }
 
-    /** Recent digest mute/unmute/auto-expire audit events (newest-first). Admin only. */
+    /** Recent digest mute/unmute/auto-expire audit events (newest-first), JSON (default) or CSV. Admin only. */
     @GetMapping("/admin/alerts/digest-audit")
-    public List<Map<String, Object>> adminAlertsDigestAudit(
-            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+    public ResponseEntity<?> adminAlertsDigestAudit(
+            @RequestParam(name = "limit", defaultValue = "20") int limit,
+            @RequestParam(name = "format", defaultValue = "json") String format) {
         requireAdmin();
-        return alertSink.digestAuditTrail(Math.max(1, Math.min(200, limit)));
+        List<Map<String, Object>> rows = alertSink.digestAuditTrail(Math.max(1, Math.min(200, limit)));
+        if ("csv".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok()
+                    .header("Content-Type", "text/csv")
+                    .header("Content-Disposition", "attachment; filename=\"imini-digest-audit.csv\"")
+                    .body(AlertSink.digestAuditCsv(rows));
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(rows);
     }
 
     /** Clear any SLO digest mute. CSRF-guarded. Admin only. */
