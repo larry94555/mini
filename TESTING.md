@@ -4346,3 +4346,31 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   carries `catchup=true`, `formatSloDigest` appends "(catch-up after mute)", and `renderDigest` exposes
   `{catchup}`. The flag is cleared once a digest is actually sent (probe/pipeline). The catch-up rides the next
   scheduled tick or manual post after expiry.
+
+---
+
+# Structured digest history, trend chart, digest-audit CSV, catch-up audit
+
+## 524. Structured (v2) history rows (AlertDigestStructuredTrendCsvCatchupTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestStructuredTrendCsvCatchupTest test`.
+- **Observe:** `serializeDigestHistory(...,wr,ds,br)` emits a `v2|`-prefixed row keeping metrics + the summary
+  tail (pipes preserved); `parseDigestHistory` reads v2 and legacy 4-field rows, omits NaN metrics, and rejects
+  malformed rows.
+
+## 525. Delivery-success trend chart (AlertDigestStructuredTrendCsvCatchupTest)
+
+- **Observe:** the overview renders a "delivery-success across recent digests" sparkline (`digest_trendbox`)
+  from the structured `recent_digests` metrics, oldest-to-newest; live-updated. Live:
+  `GET /admin/alerts/overview.html`.
+
+## 526. Digest-audit CSV export (AlertDigestStructuredTrendCsvCatchupTest)
+
+- **Observe:** `digestAuditCsv` emits `time,user,action,target,outcome` with RFC-4180 quoting; empty input is
+  header-only. Endpoint: `GET /admin/alerts/digest-audit?format=csv` (JSON remains the default).
+
+## 527. Catch-up audit event (AlertDigestStructuredTrendCsvCatchupTest)
+
+- **Observe:** when a catch-up digest is actually sent (probe ok / pipeline), an `alert_digest_catchup` audit
+  event (system) is recorded; when no URL is configured (not sent), it is not. The mute-expiry itself remains
+  audited as `alert_digest_mute_expired`.

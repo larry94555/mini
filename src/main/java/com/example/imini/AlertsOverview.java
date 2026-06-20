@@ -121,6 +121,10 @@ public final class AlertsOverview {
             long mu = num(stats, "digest_muted_until");
             String reason = String.valueOf(stats.getOrDefault("digest_mute_reason", ""));
             sb.append("<p class=\"muted\" id=\"digest_mute_note\">").append(muteNote(mu, System.currentTimeMillis(), reason)).append("</p>");
+            // delivery-success trend across recent digests (oldest -> newest), charted left to right
+            List<Double> trend = digestTrend(recent);
+            sb.append("<div class=\"spark\"><span class=\"sparklabel\">delivery-success across recent digests: </span>");
+            sb.append("<span id=\"digest_trendbox\">").append(sparklineSvg(trend, Double.NaN, 0, 160, 28)).append("</span></div>");
             sb.append("<table><thead><tr><th>time</th><th>posted</th><th>mode</th><th>summary</th></tr></thead>");
             sb.append("<tbody id=\"digest_body\">");
             for (Map<String, Object> r : recent) sb.append(digestRow(r));
@@ -256,6 +260,7 @@ public final class AlertsOverview {
             + "+'</td><td class=\"num\">'+(x.suppressed||0)+'</td></tr>';});rows('sup_body',h);"
             + "var rd=s.recent_digests||[];h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
             + "+'</td><td>'+esc(x.mode||'')+'</td><td>'+esc((x.summary||'').slice(0,120))+'</td></tr>';});rows('digest_body',h);"
+            + "var dtb=document.getElementById('digest_trendbox');if(dtb){var tr=[];rd.forEach(function(x){if(typeof x.delivery_success==='number')tr.push(x.delivery_success);});tr.reverse();var tg=sparkSVG(tr,160,28);if(tg)dtb.innerHTML=tg;}"
             + "var da=s.digest_audit||[];h='';da.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+esc(x.user||'')"
             + "+'</td><td>'+esc(x.action||'')+'</td><td>'+esc((x.outcome||'').slice(0,80))+'</td></tr>';});rows('digest_audit_body',h);"
             + "var mn=document.getElementById('digest_mute_note');if(mn){var mu=s.digest_muted_until||0,now=Date.now();"
@@ -405,6 +410,17 @@ public final class AlertsOverview {
     private static List<Map<String, Object>> recentDigests(Map<String, Object> stats) {
         Object r = stats.get("recent_digests");
         return (r instanceof List) ? (List<Map<String, Object>>) r : List.of();
+    }
+
+    /** delivery-success values from recent digests (which arrive newest-first), reversed to oldest-&gt;newest. */
+    private static List<Double> digestTrend(List<Map<String, Object>> recent) {
+        List<Double> out = new java.util.ArrayList<>();
+        if (recent != null) for (Map<String, Object> r : recent) {
+            Object v = r.get("delivery_success");
+            if (v instanceof Number n) out.add(n.doubleValue());
+        }
+        java.util.Collections.reverse(out); // newest-first input -> chart oldest on the left
+        return out;
     }
 
     /** A digest history table row. */

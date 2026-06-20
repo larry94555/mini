@@ -1587,17 +1587,42 @@ public class AlertSink {
     /** Pure: a lexically-sortable history key for an epoch-ms timestamp (zero-padded so DESC = newest-first). */
     static String digestHistoryKey(long ts) { return "digest_history:" + String.format("%020d", ts); }
 
-    /** Pure: serialize a history row (summary kept as the tail so its '|' chars are preserved on parse). */
-    static String serializeDigestHistory(long ts, boolean posted, String mode, String summary) {
-        return ts + "|" + posted + "|" + (mode == null ? "" : mode) + "|" + (summary == null ? "" : summary);
+    /**
+     * Pure: serialize a history row. v2 keeps structured metrics for trend charting and keeps the summary as the
+     * tail so its '|' chars survive: {@code v2|ts|posted|mode|window_ratio|delivery_success|budget_remaining|summary}.
+     */
+    static String serializeDigestHistory(long ts, boolean posted, String mode, String summary,
+                                         double windowRatio, double deliverySuccess, double budgetRemaining) {
+        return "v2|" + ts + "|" + posted + "|" + (mode == null ? "" : mode) + "|"
+                + windowRatio + "|" + deliverySuccess + "|" + budgetRemaining + "|" + (summary == null ? "" : summary);
     }
 
-    /** Pure: parse a serialized history row into {ts,time,posted,mode,summary}; null if malformed. */
+    /** Back-compat shim: a v2 row with no metrics (NaN, omitted on parse). */
+    static String serializeDigestHistory(long ts, boolean posted, String mode, String summary) {
+        return serializeDigestHistory(ts, posted, mode, summary, Double.NaN, Double.NaN, Double.NaN);
+    }
+
+    /** Pure: parse a v2 (structured) or legacy (4-field) history row into a map; null if malformed. */
     static Map<String, Object> parseDigestHistory(String s) {
         if (s == null || s.isBlank()) return null;
-        String[] p = s.split("\\|", 4);
-        if (p.length < 4) return null;
         try {
+            if (s.startsWith("v2|")) {
+                String[] p = s.split("\\|", 8);
+                if (p.length < 8) return null;
+                long ts = Long.parseLong(p[1].trim());
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("ts", ts);
+                m.put("time", java.time.Instant.ofEpochMilli(ts).toString());
+                m.put("posted", Boolean.parseBoolean(p[2].trim()));
+                m.put("mode", p[3]);
+                putNum(m, "window_ratio", p[4]);
+                putNum(m, "delivery_success", p[5]);
+                putNum(m, "budget_remaining", p[6]);
+                m.put("summary", p[7]);
+                return m;
+            }
+            String[] p = s.split("\\|", 4); // legacy ts|posted|mode|summary
+            if (p.length < 4) return null;
             long ts = Long.parseLong(p[0].trim());
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("ts", ts);
@@ -1609,6 +1634,12 @@ public class AlertSink {
         } catch (NumberFormatException ex) { return null; }
     }
 
+    /** Parse a double field into the map only when finite (skips NaN placeholders). */
+    private static void putNum(Map<String, Object> m, String key, String raw) {
+        try { double d = Double.parseDouble(raw.trim()); if (!Double.isNaN(d)) m.put(key, d); }
+        catch (NumberFormatException ignore) {}
+    }
+
     /** Pure: of history keys sorted newest-first, the ones beyond {@code max} that should be pruned. */
     static List<String> historyKeysToPrune(List<String> keysNewestFirst, int max) {
         if (keysNewestFirst == null || max < 0 || keysNewestFirst.size() <= max) return List.of();
@@ -1616,13 +1647,16 @@ public class AlertSink {
     }
 
     /** Record a posted/suppressed digest in the bounded history (no-op without a database). */
-    private void recordDigestHistory(boolean posted, String mode, String summary) {
+    private void recordDigestHistory(boolean posted, String mode, String summary, Map<String, Object> digest) {
         if (db == null || !db.available()) return;
         try {
             long ts = System.currentTimeMillis();
+            double wr = digest == null ? Double.NaN : num(digest.get("window_success_ratio"));
+            double ds = digest == null ? Double.NaN : num(digest.get("delivery_success_ratio"));
+            double br = digest == null ? Double.NaN : num(digest.get("window_budget_remaining"));
             db.update("INSERT INTO alert_meta(meta_key, meta_value) VALUES(?, ?) "
                     + "ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value",
-                    digestHistoryKey(ts), serializeDigestHistory(ts, posted, mode, summary));
+                    digestHistoryKey(ts), serializeDigestHistory(ts, posted, mode, summary, wr, ds, br));
             int max = Math.max(0, sloDigestHistoryMax);
             db.update("DELETE FROM alert_meta WHERE meta_key LIKE 'digest_history:%' AND meta_key NOT IN "
                     + "(SELECT meta_key FROM alert_meta WHERE meta_key LIKE 'digest_history:%' "
@@ -1630,6 +1664,24 @@ public class AlertSink {
         } catch (Exception ex) {
             log.warn("[alerts] could not record digest history: " + ex.getMessage());
         }
+    }
+
+    /** Pure: CSV of digest audit rows (header: time,user,action,target,outcome). */
+    static String digestAuditCsv(List<Map<String, Object>> rows) {
+        StringBuilder sb = new StringBuilder("time,user,action,target,outcome\n");
+        if (rows != null) for (Map<String, Object> r : rows) {
+            sb.append(csvCell(r.get("time"))).append(',').append(csvCell(r.get("user"))).append(',')
+              .append(csvCell(r.get("action"))).append(',').append(csvCell(r.get("target"))).append(',')
+              .append(csvCell(r.get("outcome"))).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** Pure: minimal RFC-4180 CSV cell quoting. */
+    private static String csvCell(Object v) {
+        String s = v == null ? "" : String.valueOf(v);
+        if (s.contains(",") || s.contains("\"") || s.contains("\n")) return '"' + s.replace("\"", "\"\"") + '"';
+        return s;
     }
 
     /** Recent digest mute/unmute/expiry audit events (newest-first). Empty without a database. */
@@ -1773,7 +1825,7 @@ public class AlertSink {
         Map<String, Object> digest = sloDigest();
         String summary = renderDigest(digest, sloDigestTemplate);
         if (!force && digestMuted(System.currentTimeMillis(), digestMuteUntil)) {
-            recordDigestHistory(false, "muted", summary);
+            recordDigestHistory(false, "muted", summary, digest);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("posted", false);
             out.put("mode", "muted");
@@ -1784,16 +1836,17 @@ public class AlertSink {
         String url = digestUrl();
         if (url == null || url.isBlank()) {
             markDigestBaseline(digest); // still advance so deltas track wall-clock periods
-            recordDigestHistory(false, "no-url", summary);
+            recordDigestHistory(false, "no-url", summary, digest);
             return Map.of("posted", false, "reason", "no digest/webhook URL", "summary", summary);
         }
         String payload = "{\"text\":\"" + jsonEscape(summary) + "\"}";
         if (sloDigestViaPipeline) {
             enqueue(payload, url, null, "slo_digest"); // retry + dead-letter via the normal pipeline
             markDigestBaseline(digest);
-            recordDigestHistory(true, "pipeline", summary);
+            recordDigestHistory(true, "pipeline", summary, digest);
             boolean wasCatchup = pendingCatchup;
             pendingCatchup = false;
+            if (wasCatchup && audit != null) audit.record("system", "alert_digest_catchup", "mode:pipeline", "catch-up sent");
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("posted", true);
             out.put("mode", "pipeline");
@@ -1804,9 +1857,10 @@ public class AlertSink {
         Map<String, Object> probe = probe(url, payload); // synchronous one-shot POST (no retry)
         markDigestBaseline(digest);
         boolean ok = Boolean.TRUE.equals(probe.get("ok"));
-        recordDigestHistory(ok, "probe", summary);
+        recordDigestHistory(ok, "probe", summary, digest);
         boolean wasCatchup = pendingCatchup;
         pendingCatchup = false;
+        if (wasCatchup && ok && audit != null) audit.record("system", "alert_digest_catchup", "mode:probe", "catch-up sent");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("posted", ok);
         out.put("mode", "probe");
