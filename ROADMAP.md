@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Digest mute audit trail UI + reason-required-for-long-mutes + mute-expiry catch-up: the mute/unmute/auto-expire audit events are surfaced via GET /admin/alerts/digest-audit and a "Digest mute audit" section on the overview; a reason is mandatory for mutes beyond alerts.slo-digest-reason-required-hours (default 8, rejected with HTTP 400 otherwise); and a mute auto-expiry flags the next digest as a catch-up ((catch-up after mute) suffix + {catchup} placeholder) summarizing the silenced window.
+
 - SLO digest mute accountability: mute/unmute/auto-expire are now recorded as audit-log events with the acting user (alert_digest_mute/unmute/mute_expired); a mute carries an optional reason note surfaced in the digest ([muted: reason]), a {muted_reason} template placeholder, the overview, and the audit outcome; and a requested duration is clamped to alerts.slo-digest-mute-max-hours (default 72, 0 = no cap).
 
 - SLO digest mute observability + auto-expiry: the digest carries a muted flag (formatted as a [muted] prefix and a {muted} template placeholder), Prometheus exports imini_alerts_digest_muted / imini_alerts_digest_mute_until_seconds with an IminiAlertSloDigestMuted rule + Grafana panel, and a mute window now auto-expires (cleared + logged resumption on the next scheduler tick or post via expireMuteIfDue).

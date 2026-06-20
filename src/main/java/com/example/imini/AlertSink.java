@@ -70,6 +70,7 @@ public class AlertSink {
     @Value("${alerts.slo-digest-via-pipeline:false}") private boolean sloDigestViaPipeline;
     @Value("${alerts.slo-digest-history-max:50}") private int sloDigestHistoryMax;
     @Value("${alerts.slo-digest-mute-max-hours:72}") private double sloDigestMuteMaxHours;
+    @Value("${alerts.slo-digest-reason-required-hours:8}") private double sloDigestReasonRequiredHours;
     @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private volatile String actionsCfg;
     @Value("${alerts.max-retries:3}") private int maxRetries;
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
@@ -127,6 +128,7 @@ public class AlertSink {
     private volatile Map<String, Object> lastDigestBaseline; // snapshot from the previous posted digest (for deltas)
     private volatile long digestMuteUntil; // epoch ms; while now < this, scheduled digests are suppressed
     private volatile String digestMuteReason = ""; // optional note for why digests are muted
+    private volatile boolean pendingCatchup; // set when a mute elapses; the next sent digest is a catch-up
 
     /**
      * A fixed-size ring of daily good/total buckets for a rolling-window SLO. Each bucket covers one UTC day;
@@ -1348,6 +1350,7 @@ public class AlertSink {
         m.put("recent_digests", sloDigestHistory(5));
         m.put("digest_muted_until", digestMuteUntil);
         m.put("digest_mute_reason", digestMuteReason);
+        m.put("digest_audit", digestAuditTrail(10));
         m.put("slo_by_route", sloByRoute());
         m.put("success_by_route", successSloByRoute());
         Map<String, Object> stReport = selfTestReport();
@@ -1482,6 +1485,7 @@ public class AlertSink {
         d.put("muted", muted);
         d.put("muted_until", muted ? digestMuteUntil : 0L);
         d.put("muted_reason", muted ? digestMuteReason : "");
+        d.put("catchup", pendingCatchup && !muted);
         // worst route by per-route latency SLO success ratio
         String[] worstLatency = worstRoute(sloByRoute());
         d.put("worst_route", worstLatency[0]);
@@ -1628,6 +1632,26 @@ public class AlertSink {
         }
     }
 
+    /** Recent digest mute/unmute/expiry audit events (newest-first). Empty without a database. */
+    public List<Map<String, Object>> digestAuditTrail(int limit) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (audit == null || db == null || !db.available()) return out;
+        try {
+            for (AuditLog.Entry e : audit.recent(null, "alert_digest", null, 0, Math.max(1, limit))) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("time", e.time());
+                m.put("user", e.user());
+                m.put("action", e.action());
+                m.put("target", e.target());
+                m.put("outcome", e.outcome());
+                out.add(m);
+            }
+        } catch (Exception ex) {
+            log.warn("[alerts] could not read digest audit trail: " + ex.getMessage());
+        }
+        return out;
+    }
+
     /** Recent digests (newest-first), each {ts,time,posted,mode,summary}. Empty without a database. */
     public List<Map<String, Object>> sloDigestHistory(int limit) {
         List<Map<String, Object>> out = new ArrayList<>();
@@ -1664,6 +1688,7 @@ public class AlertSink {
         if (worstS != null && !String.valueOf(worstS).isEmpty()) {
             sb.append(", worst delivery ").append(worstS).append(" @ ").append(pctOf(d.get("worst_success_route_ratio")));
         }
+        if (Boolean.TRUE.equals(d.get("catchup"))) sb.append(" (catch-up after mute)");
         return sb.toString();
     }
 
@@ -1692,7 +1717,8 @@ public class AlertSink {
                 .replace("{since_last_minutes}", String.valueOf(d.getOrDefault("since_last_minutes", "n/a")))
                 .replace("{muted}", Boolean.TRUE.equals(d.get("muted")) ? "muted" : "")
                 .replace("{muted_reason}", String.valueOf(d.getOrDefault("muted_reason", "")))
-                .replace("{muted_until}", String.valueOf(d.getOrDefault("muted_until", 0L)));
+                .replace("{muted_until}", String.valueOf(d.getOrDefault("muted_until", 0L)))
+                .replace("{catchup}", Boolean.TRUE.equals(d.get("catchup")) ? "catch-up" : "");
     }
 
     /** Format a ratio delta as signed percentage points, e.g. +1.2pp / -0.4pp. */
@@ -1766,9 +1792,12 @@ public class AlertSink {
             enqueue(payload, url, null, "slo_digest"); // retry + dead-letter via the normal pipeline
             markDigestBaseline(digest);
             recordDigestHistory(true, "pipeline", summary);
+            boolean wasCatchup = pendingCatchup;
+            pendingCatchup = false;
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("posted", true);
             out.put("mode", "pipeline");
+            out.put("catchup", wasCatchup);
             out.put("summary", summary);
             return out;
         }
@@ -1776,9 +1805,12 @@ public class AlertSink {
         markDigestBaseline(digest);
         boolean ok = Boolean.TRUE.equals(probe.get("ok"));
         recordDigestHistory(ok, "probe", summary);
+        boolean wasCatchup = pendingCatchup;
+        pendingCatchup = false;
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("posted", ok);
         out.put("mode", "probe");
+        out.put("catchup", wasCatchup);
         out.put("summary", summary);
         out.put("probe", probe);
         return out;
@@ -1800,6 +1832,7 @@ public class AlertSink {
             String reason = digestMuteReason;
             digestMuteUntil = 0;
             digestMuteReason = "";
+            pendingCatchup = true; // the next sent digest summarizes the silenced window
             persistMeta("digest_mute_until", "0");
             persistMeta("digest_mute_reason", "");
             log.info("[alerts] SLO digest mute window elapsed; digests resumed");
@@ -1821,15 +1854,25 @@ public class AlertSink {
      */
     public long muteDigest(double hours, String reason, String user) {
         double capped = clampMuteHours(hours, sloDigestMuteMaxHours);
+        String note = (reason == null) ? "" : reason.trim();
+        if (note.isEmpty() && reasonRequired(capped, sloDigestReasonRequiredHours)) {
+            throw new IllegalArgumentException("a reason is required to mute digests for more than "
+                    + sloDigestReasonRequiredHours + "h");
+        }
         long until = System.currentTimeMillis() + Math.round(capped * 3_600_000.0);
         digestMuteUntil = until;
-        digestMuteReason = (reason == null) ? "" : reason.trim();
+        digestMuteReason = note;
         persistMeta("digest_mute_until", Long.toString(until));
         persistMeta("digest_mute_reason", digestMuteReason);
         log.info("[alerts] SLO digest muted for " + capped + "h" + (digestMuteReason.isEmpty() ? "" : " (" + digestMuteReason + ")"));
         if (audit != null) audit.record(user == null ? "system" : user, "alert_digest_mute",
                 "until:" + until, digestMuteReason.isEmpty() ? "muted" : "muted: " + digestMuteReason);
         return until;
+    }
+
+    /** Pure: is a reason mandatory for a mute of {@code hours} given a {@code threshold} (&le;0 disables)? */
+    static boolean reasonRequired(double hours, double threshold) {
+        return threshold > 0 && hours > threshold;
     }
 
     /** Back-compat: clear the mute, attributed to the system. */
