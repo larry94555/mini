@@ -67,6 +67,7 @@ public class AlertSink {
     @Value("${alerts.webhook-url:}") private String webhookUrl;
     @Value("${alerts.slo-digest-url:}") private String sloDigestUrl;
     @Value("${alerts.slo-digest-template:}") private String sloDigestTemplate;
+    @Value("${alerts.slo-digest-via-pipeline:false}") private boolean sloDigestViaPipeline;
     @Value("${alerts.actions:capability_denied,spend_alert,tool_rate_limited}") private volatile String actionsCfg;
     @Value("${alerts.max-retries:3}") private int maxRetries;
     @Value("${alerts.retry-backoff-ms:500}") private long retryBackoffMs;
@@ -477,6 +478,7 @@ public class AlertSink {
         loadOverrides(); // persisted hot-reload changes win over @Value defaults
         if (sloWindowDays > 0 && sloWindowDays != latencyWindow.days()) this.latencyWindow = new RollingWindow(sloWindowDays);
         loadWindow(); // restore the rolling-window SLO buckets from SQLite (if available)
+        loadDigestBaseline(); // restore digest deltas baseline so a restart doesn't lose "since last"
         this.actions = parseActions(actionsCfg);
         this.routes = parseRoutes(routesCfg);
         this.escalationTiers = resolveTiers();
@@ -1510,6 +1512,50 @@ public class AlertSink {
         base.put("delivery_success_ratio", d.get("delivery_success_ratio"));
         base.put("dead_lettered", deadLettered.get());
         lastDigestBaseline = base;
+        if (db != null && db.available()) {
+            try {
+                db.update("INSERT INTO alert_meta(meta_key, meta_value) VALUES('digest_baseline', ?) "
+                        + "ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value",
+                        serializeBaseline(base));
+            } catch (Exception ex) {
+                log.warn("[alerts] could not persist digest baseline: " + ex.getMessage());
+            }
+        }
+    }
+
+    /** Pure: serialize a digest baseline to a compact pipe-joined string (ts|budget|success|dead_lettered). */
+    static String serializeBaseline(Map<String, Object> base) {
+        return num(base.get("ts")) + "|" + num(base.get("window_budget_remaining")) + "|"
+                + num(base.get("delivery_success_ratio")) + "|" + num(base.get("dead_lettered"));
+    }
+
+    /** Pure: parse a serialized baseline back into a map, or null if malformed. */
+    static Map<String, Object> parseBaseline(String s) {
+        if (s == null || s.isBlank()) return null;
+        String[] p = s.split("\\|", -1);
+        if (p.length != 4) return null;
+        try {
+            Map<String, Object> base = new LinkedHashMap<>();
+            base.put("ts", (long) Double.parseDouble(p[0]));
+            base.put("window_budget_remaining", Double.parseDouble(p[1]));
+            base.put("delivery_success_ratio", Double.parseDouble(p[2]));
+            base.put("dead_lettered", (long) Double.parseDouble(p[3]));
+            return base;
+        } catch (NumberFormatException ex) { return null; }
+    }
+
+    /** Restore the digest baseline from SQLite (if available) so deltas survive a restart. */
+    private void loadDigestBaseline() {
+        if (db == null || !db.available()) return;
+        try {
+            for (String v : db.query("SELECT meta_value FROM alert_meta WHERE meta_key='digest_baseline'",
+                    rs -> rs.getString("meta_value"))) {
+                Map<String, Object> base = parseBaseline(v);
+                if (base != null) { lastDigestBaseline = base; log.info("[alerts] restored digest baseline"); }
+            }
+        } catch (Exception ex) {
+            log.warn("[alerts] could not load digest baseline: " + ex.getMessage());
+        }
     }
 
     /** Pure: a short human-readable digest line from {@link #sloDigest()} output (default format). */
@@ -1605,10 +1651,21 @@ public class AlertSink {
             return Map.of("posted", false, "reason", "no digest/webhook URL", "summary", summary);
         }
         String payload = "{\"text\":\"" + jsonEscape(summary) + "\"}";
-        Map<String, Object> probe = probe(url, payload); // reuses the synchronous POST path
+        if (sloDigestViaPipeline) {
+            // route through the normal delivery pipeline (retry + dead-letter) instead of a one-shot probe
+            enqueue(payload, url, null, "slo_digest");
+            markDigestBaseline(digest);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("posted", true);
+            out.put("mode", "pipeline");
+            out.put("summary", summary);
+            return out;
+        }
+        Map<String, Object> probe = probe(url, payload); // synchronous one-shot POST (no retry)
         markDigestBaseline(digest);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("posted", Boolean.TRUE.equals(probe.get("ok")));
+        out.put("mode", "probe");
         out.put("summary", summary);
         out.put("probe", probe);
         return out;
