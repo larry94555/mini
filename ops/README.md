@@ -39,7 +39,7 @@ Included alerts (tune thresholds to your traffic):
   healthy again).
 - **Escalation & noise** — `IminiAlertSlaBreaches` (an alert went un-acked past its tier SLA and was
   re-escalated), `IminiAlertEscalating` (alerts climbing the ladder), `IminiAlertAckLatencyHigh` (acks taking
-  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`, `IminiAlertSelfTestFlapping`, `IminiAlertRouteSLOBurning`. See the runbook below.
+  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`, `IminiAlertSelfTestFlapping`, `IminiAlertRouteSLOBurning`, `IminiAlertSLOBudgetExhausted`. See the runbook below.
 - **SLO** — `IminiRunSuccessRateLow`, `IminiRunLatencyP95High`.
 
 ## Grafana dashboard — `grafana/imini-dashboard.json`
@@ -67,6 +67,7 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertSelfTestFailing` | The scheduled synthetic self-test isn't passing | Alert wiring is likely broken — check `GET /admin/alerts/config` warnings and `POST /admin/alerts/selftest?send=true` |
 | `IminiAlertSelfTestFlapping` | The self-test is oscillating pass/fail | Intermittent delivery problem; inspect the run history at `GET /admin/alerts/selftest` |
 | `IminiAlertRouteSLOBurning` | One route is burning its budget while the global SLO may look fine | Find the degraded receiver via the per-route SLO panel; check that route's webhook |
+| `IminiAlertSLOBudgetExhausted` / `IminiAlertRouteSLOBudgetExhausted` | The error budget (global or per-route) is fully spent (`budget_remaining < 0`) | The SLO is being missed over the window; the budget panel shows runway — treat as a sustained-degradation signal, not a transient blip |
 
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a

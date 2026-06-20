@@ -3989,3 +3989,36 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   bucket); `IminiAlertRouteSLOBurning` and `IminiAlertSelfTestFlapping` are present. `ops/grafana/
   imini-dashboard.json` has per-route SLO success/burn and self-test flapping panels. Validate with `promtool
   check rules` and a Grafana import.
+
+---
+
+# Per-route SLO objective overrides, error-budget-remaining, config hot-reload
+
+## 478. Per-route objective parsing (AlertRouteSloOverrideReloadTest)
+
+- **Run:** `./mvnw -Dtest=AlertRouteSloOverrideReloadTest test`.
+- **Observe:** `parseRoutes` reads optional 4th/5th fields (`action|url|template|latency|target`): a route with
+  `500|0.999` gets that objective; a bare `||250` sets latency with no template; an out-of-range target
+  (>=1) is ignored (inherits global). `sloLatencyMsFor`/`sloTargetFor` return the override or the global.
+
+## 479. Error budget remaining (AlertRouteSloOverrideReloadTest)
+
+- **Run:** same class.
+- **Observe:** `sloSnapshot` adds `budget_used` (= burn) and `budget_remaining` (= 1 - burn): 995/1000 at a
+  99% target → 0.5 used / 0.5 remaining; 90/100 → 10 used / -9 remaining (exhausted + overspent).
+  `imini_alerts_slo_budget_remaining` (global + per route) is exported; `IminiAlertSLOBudgetExhausted` fires at
+  < 0.
+
+## 480. Config hot-reload (AlertRouteSloOverrideReloadTest + manual)
+
+- **Observe (unit):** `reload(actions, routes, tiers, latencyMs, target)` re-parses into the live sink — the
+  per-route resolvers and global objective reflect the new values immediately; a null argument leaves that
+  piece unchanged.
+- **Observe (manual):** `POST /admin/alerts/reload?routes=...` (CSRF-guarded, admin) returns the new resolved
+  config + warnings; the running pipeline picks up the change with no restart.
+
+## 481. ops budget + override rules/panels (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertSLOBudgetExhausted` and
+  `IminiAlertRouteSLOBudgetExhausted`; `ops/grafana/imini-dashboard.json` has an "Error budget remaining"
+  panel. Validate with `promtool check rules` and a Grafana import.

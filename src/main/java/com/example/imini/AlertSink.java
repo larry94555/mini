@@ -78,16 +78,16 @@ public class AlertSink {
     @Value("${alerts.dedup-shared:true}") private boolean dedupShared;
     @Value("${alerts.escalate-after-minutes:0}") private long escalateAfterMinutes;
     @Value("${alerts.escalate-url:}") private String escalateUrl;
-    @Value("${alerts.escalate-tiers:}") private String escalateTiersCfg;
+    @Value("${alerts.escalate-tiers:}") private volatile String escalateTiersCfg;
     @Value("${alerts.dedup-digest:true}") private boolean dedupDigest;
-    @Value("${alerts.slo-latency-ms:1000}") private long sloLatencyMs;
-    @Value("${alerts.slo-target:0.99}") private double sloTarget;
+    @Value("${alerts.slo-latency-ms:1000}") private volatile long sloLatencyMs;
+    @Value("${alerts.slo-target:0.99}") private volatile double sloTarget;
     @Value("${alerts.selftest-flap-threshold:3}") private int selftestFlapThreshold;
 
     private final AuditLog audit;
     private final Database db;
-    private Set<String> actions = Set.of();
-    private Map<String, Route> routes = Map.of();
+    private volatile Set<String> actions = Set.of();
+    private volatile Map<String, Route> routes = Map.of();
 
     private HttpClient http;
     private ScheduledExecutorService scheduler;
@@ -162,6 +162,10 @@ public class AlertSink {
         m.put("success_ratio", round4(successRatio));
         m.put("error_budget", round4(errorBudget));
         m.put("burn_rate", round4(burn));
+        // budget consumption over the observed window: used = bad / allowed_bad; remaining = 1 - used
+        // (can go negative when the budget is exhausted and overspent).
+        m.put("budget_used", round4(burn));
+        m.put("budget_remaining", round4(1.0 - burn));
         m.put("meeting_objective", successRatio >= target);
         return m;
     }
@@ -240,7 +244,7 @@ public class AlertSink {
         return out;
     }
 
-    private List<Tier> escalationTiers = List.of();
+    private volatile List<Tier> escalationTiers = List.of();
 
     // per-route delivery counters: action -> [sent, failed, dead_lettered]
     private final Map<String, long[]> byRoute = new java.util.concurrent.ConcurrentHashMap<>();
@@ -252,7 +256,8 @@ public class AlertSink {
     private final Object dedupLock = new Object();
 
     /** A per-action route: a webhook URL and an optional template (null = use the global template). */
-    public record Route(String url, String template) {}
+    /** A per-action route. {@code latencyMs}/{@code target} of 0 mean "inherit the global SLO objective". */
+    public record Route(String url, String template, long latencyMs, double target) {}
 
     /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}. */
     /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}; if
@@ -337,15 +342,22 @@ public class AlertSink {
         for (String entry : cfg.split(";;")) {
             String e = entry.trim();
             if (e.isEmpty()) continue;
-            int p1 = e.indexOf('|');
-            if (p1 <= 0) continue;
-            String action = e.substring(0, p1).trim();
-            String rest = e.substring(p1 + 1);
-            int p2 = rest.indexOf('|');
-            String url = (p2 < 0 ? rest : rest.substring(0, p2)).trim();
-            String tmpl = (p2 < 0 ? null : rest.substring(p2 + 1));
+            // action|url|template|latency|target — only action+url required; the rest optional
+            String[] parts = e.split("\\|", -1);
+            if (parts.length < 2) continue;
+            String action = parts[0].trim();
+            String url = parts[1].trim();
             if (action.isEmpty() || url.isEmpty()) continue;
-            out.put(action, new Route(url, (tmpl == null || tmpl.isBlank()) ? null : tmpl));
+            String tmpl = parts.length > 2 ? parts[2] : null;
+            long latency = parts.length > 3 ? Math.max(0, parseDuration(parts[3].trim())) : 0;
+            double target = 0;
+            if (parts.length > 4 && !parts[4].isBlank()) {
+                try {
+                    double t = Double.parseDouble(parts[4].trim());
+                    if (t > 0 && t < 1) target = t;
+                } catch (NumberFormatException ignore) { /* inherit */ }
+            }
+            out.put(action, new Route(url, (tmpl == null || tmpl.isBlank()) ? null : tmpl, latency, target));
         }
         return out;
     }
@@ -732,7 +744,19 @@ public class AlertSink {
         if (action == null || action.isBlank()) action = "default";
         if (ms < 0) ms = 0;
         long[] c = byRoute.computeIfAbsent(action, k -> new long[7]);
-        synchronized (c) { c[4] += ms; c[5]++; if (ms <= sloLatencyMs) c[6]++; }
+        synchronized (c) { c[4] += ms; c[5]++; if (ms <= sloLatencyMsFor(action)) c[6]++; }
+    }
+
+    /** The effective SLO latency objective for an action: the route override if set, else the global. */
+    long sloLatencyMsFor(String action) {
+        Route r = action == null ? null : routes.get(action);
+        return (r != null && r.latencyMs() > 0) ? r.latencyMs() : sloLatencyMs;
+    }
+
+    /** The effective SLO target for an action: the route override if set, else the global. */
+    double sloTargetFor(String action) {
+        Route r = action == null ? null : routes.get(action);
+        return (r != null && r.target() > 0) ? r.target() : sloTarget;
     }
 
     /** One delivery attempt; on failure reschedule with backoff or dead-letter. Runs on the scheduler. */
@@ -877,6 +901,9 @@ public class AlertSink {
             r.put("action", e.getKey());
             r.put("url", maskUrl(e.getValue().url()));
             r.put("template_set", e.getValue().template() != null && !e.getValue().template().isBlank());
+            r.put("slo_latency_ms", e.getValue().latencyMs() > 0 ? e.getValue().latencyMs() : sloLatencyMs);
+            r.put("slo_target", e.getValue().target() > 0 ? e.getValue().target() : sloTarget);
+            r.put("slo_override", e.getValue().latencyMs() > 0 || e.getValue().target() > 0);
             routeList.add(r);
         }
         c.put("routes", routeList);
@@ -898,6 +925,27 @@ public class AlertSink {
         c.put("legacy_escalate_url", maskUrl(escalateUrl));
         c.put("warnings", warnings());
         return c;
+    }
+
+    /**
+     * Hot-reload the alerting config without a restart: re-parse the supplied config strings/thresholds into
+     * the live parsed structures (actions, routes, escalation ladder, SLO objective). A {@code null} argument
+     * leaves that piece unchanged. Returns the resulting {@link #configSnapshot()} (incl. fresh warnings).
+     * Updates in-memory state only — it does not rewrite application.properties, and does not start/stop the
+     * scheduler or change persistence wiring (those are construction-time concerns).
+     */
+    public synchronized Map<String, Object> reload(String actionsCfg, String routesCfg, String escalateTiersCfg,
+                                                   Long sloLatencyMs, Double sloTarget) {
+        if (actionsCfg != null) this.actions = parseActions(actionsCfg);
+        if (routesCfg != null) this.routes = parseRoutes(routesCfg);
+        if (escalateTiersCfg != null) { this.escalateTiersCfg = escalateTiersCfg; this.escalationTiers = resolveTiers(); }
+        if (sloLatencyMs != null && sloLatencyMs > 0) this.sloLatencyMs = sloLatencyMs;
+        if (sloTarget != null && sloTarget > 0 && sloTarget < 1) this.sloTarget = sloTarget;
+        log.info("[alerts] config hot-reloaded: actions=" + actions + " routes=" + routes.keySet()
+                + " tiers=" + escalationTiers.size() + " slo=" + this.sloLatencyMs + "ms/" + this.sloTarget);
+        Map<String, Object> snap = configSnapshot();
+        for (String w : warnings()) log.warn("[alerts][config] " + w);
+        return snap;
     }
 
     /** Current config warnings (logged at startup and surfaced in {@code GET /admin/alerts/config}). */
@@ -1068,7 +1116,7 @@ public class AlertSink {
             long total, good;
             synchronized (c) { total = c[5]; good = c[6]; }
             if (total <= 0) continue; // no timed deliveries on this route yet
-            out.put(e.getKey(), sloSnapshot(good, total, sloTarget, sloLatencyMs));
+            out.put(e.getKey(), sloSnapshot(good, total, sloTargetFor(e.getKey()), sloLatencyMsFor(e.getKey())));
         }
         return out;
     }
