@@ -4055,3 +4055,32 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   `IminiAlertDeliverySuccessBurnFast`, `IminiAlertRouteSuccessLow`; `ops/grafana/imini-dashboard.json` has
   rolling-window budget, delivery-success SLO, and per-route success panels. Validate with `promtool check
   rules` and a Grafana import.
+
+---
+
+# Durable rolling-window buckets, per-route success-target, overview SLO summary
+
+## 486. Rolling-window bucket persistence (AlertWindowPersistSuccessOverrideTest)
+
+- **Run:** `./mvnw -Dtest=AlertWindowPersistSuccessOverrideTest test`.
+- **Observe (unit):** `RollingWindow.dump()` emits only non-empty `{day,good,total}` buckets; `load()` restores
+  them; a dump→load round-trip preserves the windowed snapshot.
+- **Observe (manual, needs SQLite):** with a database, buckets persist to `alert_slo_buckets` (flushed on the
+  reaper tick and at shutdown) and are restored at startup, so `imini_alerts_slo_window_*` survives a restart.
+
+## 487. Per-route success-target override (AlertWindowPersistSuccessOverrideTest)
+
+- **Observe:** `parseRoutes` reads a 6th field as the per-route delivery-success target
+  (`action|url|template|latency|target|success-target`); `parseRatio` accepts 0&lt;r&lt;1 and treats blank/
+  out-of-range/non-numeric as inherit; `successTargetFor` returns the override or the global.
+
+## 488. Overview SLO summary (AlertWindowPersistSuccessOverrideTest)
+
+- **Observe:** `AlertsOverview.render` emits an `<h2>SLO</h2>` section with live-updatable cards
+  (`s_slo_ratio`, `s_slo_budget`, `s_slo_win_budget`, `s_succ_ratio`, `s_succ_budget`); `pct` formats ratios as
+  percentages (no trailing `.0`, `—` for NaN). The auto-refresh script updates the SLO cards from the JSON.
+
+## 489. Schema migration (manual)
+
+- **Observe:** `Database` adds the `alert_slo_buckets` migration (no data backfill needed; the window
+  repopulates from live deliveries). Verify the schema version bumped and the table exists.

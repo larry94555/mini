@@ -159,6 +159,23 @@ public class AlertSink {
         }
 
         int days() { return days; }
+
+        /** Snapshot of live buckets as {day, good, total} rows (only slots holding a real day). */
+        synchronized java.util.List<long[]> dump() {
+            java.util.List<long[]> out = new java.util.ArrayList<>();
+            for (int i = 0; i < days; i++) {
+                if (dayIndex[i] >= 0 && total[i] > 0) out.add(new long[]{dayIndex[i], good[i], total[i]});
+            }
+            return out;
+        }
+
+        /** Seed a day's counts (used at startup from persisted rows). Last write wins for a given day. */
+        synchronized void load(long day, long g, long t) {
+            int slot = (int) Math.floorMod(day, days);
+            dayIndex[slot] = day;
+            good[slot] = g;
+            total[slot] = t;
+        }
     }
 
     // last scheduled self-test result (set by AlertSelfTestScheduler)
@@ -311,8 +328,11 @@ public class AlertSink {
     private final Object dedupLock = new Object();
 
     /** A per-action route: a webhook URL and an optional template (null = use the global template). */
-    /** A per-action route. {@code latencyMs}/{@code target} of 0 mean "inherit the global SLO objective". */
-    public record Route(String url, String template, long latencyMs, double target) {}
+    /**
+     * A per-action route. {@code latencyMs}/{@code target} of 0 mean "inherit the global latency SLO";
+     * {@code successTarget} of 0 means "inherit the global delivery-success target".
+     */
+    public record Route(String url, String template, long latencyMs, double target, double successTarget) {}
 
     /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}. */
     /** One escalation tier: page to {@code url} once a dead-letter is older than {@code afterMs}; if
@@ -345,6 +365,7 @@ public class AlertSink {
     public void init() {
         loadOverrides(); // persisted hot-reload changes win over @Value defaults
         if (sloWindowDays > 0 && sloWindowDays != latencyWindow.days()) this.latencyWindow = new RollingWindow(sloWindowDays);
+        loadWindow(); // restore the rolling-window SLO buckets from SQLite (if available)
         this.actions = parseActions(actionsCfg);
         this.routes = parseRoutes(routesCfg);
         this.escalationTiers = resolveTiers();
@@ -374,7 +395,44 @@ public class AlertSink {
 
     @jakarta.annotation.PreDestroy
     public void shutdown() {
+        flushWindow(); // persist rolling-window buckets so they survive a restart
         if (scheduler != null) scheduler.shutdownNow();
+    }
+
+    /** True when rolling-window buckets are being persisted (a database is available). */
+    public boolean windowPersistent() { return db != null && db.available(); }
+
+    /** Restore rolling-window SLO buckets within the horizon from SQLite (no-op without a database). */
+    private void loadWindow() {
+        if (db == null || !db.available()) return;
+        try {
+            long today = System.currentTimeMillis() / RollingWindow.BUCKET_MS;
+            long lo = today - latencyWindow.days() + 1;
+            for (long[] row : db.query("SELECT day, good, total FROM alert_slo_buckets WHERE day >= ?",
+                    rs -> new long[]{rs.getLong("day"), rs.getLong("good"), rs.getLong("total")}, lo)) {
+                latencyWindow.load(row[0], row[1], row[2]);
+            }
+            log.info("[alerts] restored rolling-window SLO buckets from SQLite");
+        } catch (Exception ex) {
+            log.warn("[alerts] could not load SLO buckets: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Persist the live rolling-window buckets to SQLite (upsert per day) so the window survives a restart.
+     * Safe to call periodically; no-op without a database. Public so the reaper can flush on its tick.
+     */
+    public void flushWindow() {
+        if (db == null || !db.available()) return;
+        try {
+            for (long[] b : latencyWindow.dump()) {
+                db.update("INSERT INTO alert_slo_buckets(day, good, total) VALUES(?,?,?) "
+                        + "ON CONFLICT(day) DO UPDATE SET good=excluded.good, total=excluded.total",
+                        b[0], b[1], b[2]);
+            }
+        } catch (Exception ex) {
+            log.warn("[alerts] could not persist SLO buckets: " + ex.getMessage());
+        }
     }
 
     /** Pure: parse a comma-separated action list into a set (trimmed, non-empty). */
@@ -399,7 +457,7 @@ public class AlertSink {
         for (String entry : cfg.split(";;")) {
             String e = entry.trim();
             if (e.isEmpty()) continue;
-            // action|url|template|latency|target — only action+url required; the rest optional
+            // action|url|template|latency|target|success-target — only action+url required; the rest optional
             String[] parts = e.split("\\|", -1);
             if (parts.length < 2) continue;
             String action = parts[0].trim();
@@ -407,16 +465,20 @@ public class AlertSink {
             if (action.isEmpty() || url.isEmpty()) continue;
             String tmpl = parts.length > 2 ? parts[2] : null;
             long latency = parts.length > 3 ? Math.max(0, parseDuration(parts[3].trim())) : 0;
-            double target = 0;
-            if (parts.length > 4 && !parts[4].isBlank()) {
-                try {
-                    double t = Double.parseDouble(parts[4].trim());
-                    if (t > 0 && t < 1) target = t;
-                } catch (NumberFormatException ignore) { /* inherit */ }
-            }
-            out.put(action, new Route(url, (tmpl == null || tmpl.isBlank()) ? null : tmpl, latency, target));
+            double target = parts.length > 4 ? parseRatio(parts[4]) : 0;
+            double successTarget = parts.length > 5 ? parseRatio(parts[5]) : 0;
+            out.put(action, new Route(url, (tmpl == null || tmpl.isBlank()) ? null : tmpl, latency, target, successTarget));
         }
         return out;
+    }
+
+    /** Pure: parse a 0&lt;r&lt;1 ratio, or 0 to mean "inherit". */
+    static double parseRatio(String s) {
+        if (s == null || s.isBlank()) return 0;
+        try {
+            double r = Double.parseDouble(s.trim());
+            return (r > 0 && r < 1) ? r : 0;
+        } catch (NumberFormatException ignore) { return 0; }
     }
 
     /** Pure: should an entry with this action be forwarded, given current config? */
@@ -960,7 +1022,8 @@ public class AlertSink {
             r.put("template_set", e.getValue().template() != null && !e.getValue().template().isBlank());
             r.put("slo_latency_ms", e.getValue().latencyMs() > 0 ? e.getValue().latencyMs() : sloLatencyMs);
             r.put("slo_target", e.getValue().target() > 0 ? e.getValue().target() : sloTarget);
-            r.put("slo_override", e.getValue().latencyMs() > 0 || e.getValue().target() > 0);
+            r.put("success_target", e.getValue().successTarget() > 0 ? e.getValue().successTarget() : successTarget);
+            r.put("slo_override", e.getValue().latencyMs() > 0 || e.getValue().target() > 0 || e.getValue().successTarget() > 0);
             routeList.add(r);
         }
         c.put("routes", routeList);
@@ -1250,9 +1313,15 @@ public class AlertSink {
             synchronized (c) { delivered = c[0]; dropped = c[2]; }
             long total = delivered + dropped;
             if (total <= 0) continue; // nothing finalized on this route yet
-            out.put(e.getKey(), sloSnapshot(delivered, total, successTarget, 0));
+            out.put(e.getKey(), sloSnapshot(delivered, total, successTargetFor(e.getKey()), 0));
         }
         return out;
+    }
+
+    /** The effective delivery-success target for an action: the route override if set, else the global. */
+    double successTargetFor(String action) {
+        Route r = action == null ? null : routes.get(action);
+        return (r != null && r.successTarget() > 0) ? r.successTarget() : successTarget;
     }
 
     /** Pure: the epoch-ms cutoff before which failed dead-letters should be purged (0 = keep forever). */

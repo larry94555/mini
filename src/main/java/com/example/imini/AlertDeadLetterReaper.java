@@ -36,7 +36,8 @@ public class AlertDeadLetterReaper {
 
     @PostConstruct
     public void start() {
-        boolean work = alerts.retentionHours() > 0 || alerts.escalationEnabled() || alerts.digestEnabled();
+        boolean work = alerts.retentionHours() > 0 || alerts.escalationEnabled() || alerts.digestEnabled()
+                || alerts.windowPersistent();
         if (!enabled || intervalMinutes <= 0 || !work) {
             log.info("[alerts] dead-letter reaper disabled (enabled=" + enabled
                     + ", interval=" + intervalMinutes + "min, retention=" + alerts.retentionHours()
@@ -59,6 +60,7 @@ public class AlertDeadLetterReaper {
             long now = System.currentTimeMillis();
             alerts.escalateStale(now);     // walk un-acked dead-letters up the escalation ladder
             alerts.dedupDigestSweep(now);  // emit digests for elapsed dedup windows with suppressions
+            alerts.flushWindow();          // persist rolling-window SLO buckets
             return alerts.purgeOlderThan(alerts.retentionHours(), now);
         } catch (Exception e) {
             log.warn("[alerts] dead-letter reap failed: " + e.getMessage());
