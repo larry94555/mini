@@ -4374,3 +4374,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** when a catch-up digest is actually sent (probe ok / pipeline), an `alert_digest_catchup` audit
   event (system) is recorded; when no URL is configured (not sent), it is not. The mute-expiry itself remains
   audited as `alert_digest_mute_expired`.
+
+---
+
+# Full digest trends, date-range filtering, mute/catch-up markers
+
+## 528. Date-range filter (AlertDigestTrendsRangeMarkersTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestTrendsRangeMarkersTest test`.
+- **Observe:** pure `withinRange(ts, from, to)` is an inclusive bound; `sloDigestHistory(limit, from, to)` and
+  `digestAuditTrail(limit, from, to)` are empty without a database. Endpoints accept `?from=YYYY-MM-DD&to=...`
+  or `?days=N`: `GET /admin/alerts/slo-digest/history`, `GET /admin/alerts/digest-audit`.
+
+## 529. Full budget/window trends (AlertDigestTrendsRangeMarkersTest)
+
+- **Observe:** the overview renders three trend sparklines from the structured `recent_digests` metrics —
+  delivery-success (`digest_trendbox`), window SLO ratio (`digest_wtrendbox`), and budget remaining
+  (`digest_btrendbox`); all live-updated. Live: `GET /admin/alerts/overview.html`.
+
+## 530. Mute/catch-up trend markers (AlertDigestTrendsRangeMarkersTest)
+
+- **Observe:** `digestTrendSvg(rowsOldestFirst, key, w, h)` marks a "muted" row with a grey square and a posted
+  row immediately after a muted run (a catch-up) with a blue diamond; a clean run draws plain dots; an empty
+  series shows "collecting". (Markers are server-rendered; the live poll redraws the base trend.)

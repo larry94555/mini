@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Full digest trends + date-range filtering + mute/catch-up trend markers: the overview charts three trends across recent digests (delivery-success, window ratio, budget remaining), with the delivery-success trend annotated by mute (square) and catch-up (diamond) markers; the digest history and digest-audit endpoints accept ?from/?to/?days date-range filters (audit still supports ?format=csv).
+
 - Structured digest history + trend chart + digest-audit CSV + catch-up audit: digest history rows are now versioned (v2) and carry structured metrics (window ratio, delivery-success, budget) so the overview charts a delivery-success trend across recent digests; the mute audit trail exports as CSV (GET /admin/alerts/digest-audit?format=csv); and a mute-expiry catch-up send records an alert_digest_catchup audit event. Legacy 4-field history rows still parse.
 
 - Digest mute audit trail UI + reason-required-for-long-mutes + mute-expiry catch-up: the mute/unmute/auto-expire audit events are surfaced via GET /admin/alerts/digest-audit and a "Digest mute audit" section on the overview; a reason is mandatory for mutes beyond alerts.slo-digest-reason-required-hours (default 8, rejected with HTTP 400 otherwise); and a mute auto-expiry flags the next digest as a catch-up ((catch-up after mute) suffix + {catchup} placeholder) summarizing the silenced window.

@@ -1686,10 +1686,16 @@ public class AlertSink {
 
     /** Recent digest mute/unmute/expiry audit events (newest-first). Empty without a database. */
     public List<Map<String, Object>> digestAuditTrail(int limit) {
+        return digestAuditTrail(limit, Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    /** Recent digest mute/unmute/expiry/catch-up audit events (newest-first) within a time range. */
+    public List<Map<String, Object>> digestAuditTrail(int limit, long fromMs, long toMs) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (audit == null || db == null || !db.available()) return out;
         try {
-            for (AuditLog.Entry e : audit.recent(null, "alert_digest", null, 0, Math.max(1, limit))) {
+            for (AuditLog.Entry e : audit.recent(null, "alert_digest", null, 0, Math.max(1, limit) * 4)) {
+                if (!withinRange(e.ts(), fromMs, toMs)) continue;
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("time", e.time());
                 m.put("user", e.user());
@@ -1697,6 +1703,7 @@ public class AlertSink {
                 m.put("target", e.target());
                 m.put("outcome", e.outcome());
                 out.add(m);
+                if (out.size() >= Math.max(1, limit)) break;
             }
         } catch (Exception ex) {
             log.warn("[alerts] could not read digest audit trail: " + ex.getMessage());
@@ -1706,13 +1713,22 @@ public class AlertSink {
 
     /** Recent digests (newest-first), each {ts,time,posted,mode,summary}. Empty without a database. */
     public List<Map<String, Object>> sloDigestHistory(int limit) {
+        return sloDigestHistory(limit, Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    /** Pure: is an epoch-ms timestamp within [fromMs, toMs] (inclusive)? */
+    static boolean withinRange(long ts, long fromMs, long toMs) { return ts >= fromMs && ts <= toMs; }
+
+    /** Recent digests (newest-first) within a time range, each {ts,time,posted,mode,metrics,summary}. */
+    public List<Map<String, Object>> sloDigestHistory(int limit, long fromMs, long toMs) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (db == null || !db.available()) return out;
         try {
             for (String v : db.query("SELECT meta_value FROM alert_meta WHERE meta_key LIKE 'digest_history:%' "
-                    + "ORDER BY meta_key DESC LIMIT ?", rs -> rs.getString("meta_value"), Math.max(1, limit))) {
+                    + "ORDER BY meta_key DESC LIMIT ?", rs -> rs.getString("meta_value"), Math.max(1, limit) * 4)) {
                 Map<String, Object> row = parseDigestHistory(v);
-                if (row != null) out.add(row);
+                if (row != null && withinRange((Long) row.get("ts"), fromMs, toMs)) out.add(row);
+                if (out.size() >= Math.max(1, limit)) break;
             }
         } catch (Exception ex) {
             log.warn("[alerts] could not read digest history: " + ex.getMessage());
