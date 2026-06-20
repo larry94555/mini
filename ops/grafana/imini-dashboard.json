@@ -420,6 +420,82 @@
      "refId": "B"
     }
    ]
+  },
+  {
+   "id": 18,
+   "title": "Per-route avg delivery latency (ms)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 16,
+    "y": 32,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_route_latency_avg_ms",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 19,
+   "title": "Delivery SLO: success ratio & burn",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 39,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_slo_success_ratio",
+     "legendFormat": "success ratio",
+     "refId": "A"
+    },
+    {
+     "expr": "imini_alerts_slo_target",
+     "legendFormat": "target",
+     "refId": "B"
+    },
+    {
+     "expr": "imini_alerts_slo_burn_rate",
+     "legendFormat": "burn rate",
+     "refId": "C"
+    }
+   ]
+  },
+  {
+   "id": 20,
+   "title": "Self-test ok (1=ok)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 8,
+    "y": 39,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_selftest_ok",
+     "legendFormat": "selftest ok",
+     "refId": "A"
+    }
+   ]
   }
  ],
  "schemaVersion": 39,
