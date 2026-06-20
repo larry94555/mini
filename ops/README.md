@@ -39,14 +39,14 @@ Included alerts (tune thresholds to your traffic):
   healthy again).
 - **Escalation & noise** — `IminiAlertSlaBreaches` (an alert went un-acked past its tier SLA and was
   re-escalated), `IminiAlertEscalating` (alerts climbing the ladder), `IminiAlertAckLatencyHigh` (acks taking
-  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`. See the runbook below.
+  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`, `IminiAlertSelfTestFlapping`, `IminiAlertRouteSLOBurning`. See the runbook below.
 - **SLO** — `IminiRunSuccessRateLow`, `IminiRunLatencyP95High`.
 
 ## Grafana dashboard — `grafana/imini-dashboard.json`
 
 Grafana → Dashboards → New → Import → upload the JSON, then pick your Prometheus datasource when prompted
 (the dashboard declares a `DS_PROMETHEUS` input). Panels cover the SLO summary, security-event rates,
-the alert-delivery pipeline (sent / failed / dead-lettered / dropped / backlog), escalations & SLA breaches, per-tier escalations and ack latency, dedup suppression/digests, and tool/endpoint usage.
+the alert-delivery pipeline (sent / failed / dead-lettered / dropped / backlog), escalations & SLA breaches, per-tier escalations and ack latency, dedup suppression/digests, delivery latency + SLO burn (global and per-route), self-test status/flapping, and tool/endpoint usage. The burn-rate rules reference the app's own `imini_alerts_slo_good_total`/`_total_total` counters and `imini_alerts_slo_target` gauge, so the objective lives only in `alerts.slo-*` config — change it without editing the rules.
 
 ## Runbook — responding to alerting-pipeline pages
 
@@ -65,6 +65,8 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertDeliveryLatencyHigh` | The webhook receiver is slow (p95 >2s) | Probe it with `POST /admin/alerts/selftest?send=true`; check the receiver before it starts failing |
 | `IminiAlertDeliverySLOBurnFast` / `...BurnSlow` | Delivery-latency error budget is burning (multi-window) | Find the slow route on the overview page; the fast variant means the 30-day budget is gone in ~2 days |
 | `IminiAlertSelfTestFailing` | The scheduled synthetic self-test isn't passing | Alert wiring is likely broken — check `GET /admin/alerts/config` warnings and `POST /admin/alerts/selftest?send=true` |
+| `IminiAlertSelfTestFlapping` | The self-test is oscillating pass/fail | Intermittent delivery problem; inspect the run history at `GET /admin/alerts/selftest` |
+| `IminiAlertRouteSLOBurning` | One route is burning its budget while the global SLO may look fine | Find the degraded receiver via the per-route SLO panel; check that route's webhook |
 
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a

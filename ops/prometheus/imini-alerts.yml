@@ -96,31 +96,51 @@ groups:
           summary: "imini webhook delivery is slow"
           description: "p95 webhook POST latency has exceeded 2s for 5m; the receiver may be degrading before it starts failing. Try POST /admin/alerts/selftest?send=true."
 
-      # Multi-window error-budget burn (fast page + slow ticket) for the delivery-latency SLO. "Good" = a
-      # delivery within the SLO latency (le="1000" — keep this label in sync with alerts.slo-latency-ms).
+      # Multi-window error-budget burn (fast page + slow ticket) for the delivery-latency SLO. These reference
+      # the app's own good/total counters and target gauge, so the objective lives only in alerts.slo-* config
+      # (no hard-coded latency bucket to drift out of sync).
       - alert: IminiAlertDeliverySLOBurnFast
         expr: |
-          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[5m])) / sum(rate(imini_alerts_delivery_latency_ms_count[5m])))) > (14.4 * 0.01)
+          (1 - (rate(imini_alerts_slo_good_total[5m]) / rate(imini_alerts_slo_total_total[5m]))) > (14.4 * (1 - avg(imini_alerts_slo_target)))
           and
-          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[1h])) / sum(rate(imini_alerts_delivery_latency_ms_count[1h])))) > (14.4 * 0.01)
+          (1 - (rate(imini_alerts_slo_good_total[1h]) / rate(imini_alerts_slo_total_total[1h]))) > (14.4 * (1 - avg(imini_alerts_slo_target)))
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "imini delivery-latency error budget burning fast"
-          description: "Burning >14.4x the 1% error budget over 5m and 1h — at this rate a 30-day budget is gone in ~2 days. See GET /admin/alerts/overview.html."
+          description: "Burning >14.4x the error budget over 5m and 1h — at this rate a 30-day budget is gone in ~2 days. See GET /admin/alerts/overview.html."
 
       - alert: IminiAlertDeliverySLOBurnSlow
         expr: |
-          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[30m])) / sum(rate(imini_alerts_delivery_latency_ms_count[30m])))) > (6 * 0.01)
+          (1 - (rate(imini_alerts_slo_good_total[30m]) / rate(imini_alerts_slo_total_total[30m]))) > (6 * (1 - avg(imini_alerts_slo_target)))
           and
-          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[6h])) / sum(rate(imini_alerts_delivery_latency_ms_count[6h])))) > (6 * 0.01)
+          (1 - (rate(imini_alerts_slo_good_total[6h]) / rate(imini_alerts_slo_total_total[6h]))) > (6 * (1 - avg(imini_alerts_slo_target)))
         for: 15m
         labels:
           severity: warning
         annotations:
           summary: "imini delivery-latency error budget burning"
           description: "Burning >6x the error budget over 30m and 6h. Investigate the slow route on the overview page before it becomes a page."
+
+      - alert: IminiAlertRouteSLOBurning
+        expr: |
+          (1 - (rate(imini_alerts_route_slo_good_total[30m]) / rate(imini_alerts_route_slo_total_total[30m]))) > (6 * (1 - avg(imini_alerts_slo_target)))
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini per-route delivery SLO burning ({{ $labels.route }})"
+          description: "Route {{ $labels.route }} is burning >6x the error budget over 30m — a single receiver is degraded even if the global SLO looks healthy."
+
+      - alert: IminiAlertSelfTestFlapping
+        expr: imini_alerts_selftest_flapping == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini alert self-test is flapping"
+          description: "The synthetic self-test outcome is oscillating — an intermittent delivery problem. Inspect GET /admin/alerts/selftest history."
 
       - alert: IminiAlertSelfTestFailing
         expr: imini_alerts_selftest_ok == 0

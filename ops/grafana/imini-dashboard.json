@@ -496,6 +496,72 @@
      "refId": "A"
     }
    ]
+  },
+  {
+   "id": 21,
+   "title": "Per-route SLO success ratio",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 16,
+    "y": 39,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_route_slo_success_ratio",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 22,
+   "title": "Per-route SLO burn rate",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 0,
+    "y": 46,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_route_slo_burn_rate",
+     "legendFormat": "{{route}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 23,
+   "title": "Self-test flapping (1=yes)",
+   "type": "timeseries",
+   "gridPos": {
+    "x": 8,
+    "y": 46,
+    "w": 8,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS_PROMETHEUS}"
+   },
+   "targets": [
+    {
+     "expr": "imini_alerts_selftest_flapping",
+     "legendFormat": "flapping",
+     "refId": "A"
+    }
+   ]
   }
  ],
  "schemaVersion": 39,
