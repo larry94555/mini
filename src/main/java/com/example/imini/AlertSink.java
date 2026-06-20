@@ -176,6 +176,19 @@ public class AlertSink {
             good[slot] = g;
             total[slot] = t;
         }
+
+        /** Daily success ratios within the window, oldest→newest; -1 for a day with no deliveries. */
+        synchronized java.util.List<Double> series(long nowMs) {
+            long today = nowMs / BUCKET_MS;
+            java.util.Map<Long, long[]> byDay = new java.util.HashMap<>();
+            for (int i = 0; i < days; i++) if (dayIndex[i] >= 0) byDay.put(dayIndex[i], new long[]{good[i], total[i]});
+            java.util.List<Double> out = new java.util.ArrayList<>();
+            for (long d = today - days + 1; d <= today; d++) {
+                long[] gt = byDay.get(d);
+                out.add(gt != null && gt[1] > 0 ? (double) gt[0] / gt[1] : -1.0);
+            }
+            return out;
+        }
     }
 
     // last scheduled self-test result (set by AlertSelfTestScheduler)
@@ -213,6 +226,11 @@ public class AlertSink {
         Map<String, Object> m = sloSnapshot(gt[0], gt[1], sloTarget, sloLatencyMs);
         m.put("window_days", latencyWindow.days());
         return m;
+    }
+
+    /** Daily success ratios across the rolling window (oldest→newest; -1 = no deliveries that day). */
+    public List<Double> sloWindowSeries() {
+        return latencyWindow.series(System.currentTimeMillis());
     }
 
     /**
@@ -422,6 +440,11 @@ public class AlertSink {
      * Persist the live rolling-window buckets to SQLite (upsert per day) so the window survives a restart.
      * Safe to call periodically; no-op without a database. Public so the reaper can flush on its tick.
      */
+    /** Pure: the oldest UTC day still inside a rolling window of {@code days} ending at {@code nowMs}. */
+    static long windowFloorDay(long nowMs, int days) {
+        return nowMs / RollingWindow.BUCKET_MS - Math.max(1, days) + 1;
+    }
+
     public void flushWindow() {
         if (db == null || !db.available()) return;
         try {
@@ -430,8 +453,23 @@ public class AlertSink {
                         + "ON CONFLICT(day) DO UPDATE SET good=excluded.good, total=excluded.total",
                         b[0], b[1], b[2]);
             }
+            pruneWindow(); // drop rows that have aged out of the horizon so the table stays bounded
         } catch (Exception ex) {
             log.warn("[alerts] could not persist SLO buckets: " + ex.getMessage());
+        }
+    }
+
+    /** Delete persisted bucket rows older than the rolling-window horizon. No-op without a database. */
+    public int pruneWindow() {
+        if (db == null || !db.available()) return 0;
+        try {
+            long floor = windowFloorDay(System.currentTimeMillis(), latencyWindow.days());
+            int removed = db.update("DELETE FROM alert_slo_buckets WHERE day < ?", floor);
+            if (removed > 0) log.info("[alerts] pruned " + removed + " out-of-window SLO bucket(s)");
+            return removed;
+        } catch (Exception ex) {
+            log.warn("[alerts] could not prune SLO buckets: " + ex.getMessage());
+            return 0;
         }
     }
 
@@ -1188,6 +1226,7 @@ public class AlertSink {
         m.put("delivery_latency", latencySnapshot());
         m.put("delivery_slo", sloSnapshot());
         m.put("delivery_slo_window", sloWindowSnapshot());
+        m.put("slo_window_series", sloWindowSeries());
         m.put("delivery_success_slo", deliverySuccessSlo());
         m.put("slo_by_route", sloByRoute());
         m.put("success_by_route", successSloByRoute());

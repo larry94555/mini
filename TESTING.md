@@ -4084,3 +4084,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** `Database` adds the `alert_slo_buckets` migration (no data backfill needed; the window
   repopulates from live deliveries). Verify the schema version bumped and the table exists.
+
+---
+
+# Bounded SLO buckets, per-route success burn, overview sparkline
+
+## 490. Window prune horizon (AlertWindowPruneSparklineTest)
+
+- **Run:** `./mvnw -Dtest=AlertWindowPruneSparklineTest test`.
+- **Observe:** `windowFloorDay(now, days)` is the inclusive oldest in-window day (`today - days + 1`, clamps
+  days to >= 1); `pruneWindow()` is a no-op (returns 0) without a database. With SQLite, `flushWindow` deletes
+  `alert_slo_buckets` rows with `day < floor` so the table stays bounded.
+
+## 491. Rolling-window series + sparkline (AlertWindowPruneSparklineTest)
+
+- **Observe:** `RollingWindow.series(now)` returns day-ordered daily success ratios with `-1` for empty days;
+  `stats().slo_window_series` exposes it. `AlertsOverview.sparklinePoints` skips gaps, scales ratio→y
+  (1.0 top), and needs >= 2 plottable points; `sparklineSvg` falls back to "collecting…" when sparse. The
+  overview page renders `#sparkbox` and the auto-refresh JS redraws it.
+
+## 492. Per-route success burn rule (manual)
+
+- **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertRouteSuccessBurning`, a multi-window burn
+  on `imini_alerts_route_success_good_total`/`_total_total` scaled by `(1 - imini_alerts_success_slo_target)`.
+  Validate with `promtool check rules`.

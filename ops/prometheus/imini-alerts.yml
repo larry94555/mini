@@ -153,6 +153,16 @@ groups:
           summary: "imini per-route delivery success low ({{ $labels.route }})"
           description: "Route {{ $labels.route }} is delivering below the success target — that receiver is up-but-erroring or repeatedly dead-lettering."
 
+      - alert: IminiAlertRouteSuccessBurning
+        expr: |
+          (1 - (rate(imini_alerts_route_success_good_total[30m]) / rate(imini_alerts_route_success_total_total[30m]))) > (6 * (1 - avg(imini_alerts_success_slo_target)))
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini per-route delivery-success budget burning ({{ $labels.route }})"
+          description: "Route {{ $labels.route }} is burning >6x its delivery-success error budget over 30m — failing deliveries are concentrated on this receiver even if the global success SLO looks healthy."
+
       - alert: IminiAlertSLOBudgetExhausted
         expr: imini_alerts_slo_budget_remaining < 0
         for: 5m

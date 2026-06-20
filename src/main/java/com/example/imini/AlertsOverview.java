@@ -50,6 +50,8 @@ public final class AlertsOverview {
         sb.append("th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #ddd;}");
         sb.append("th{background:#f5f5f5;} td.num{text-align:right;font-variant-numeric:tabular-nums;}");
         sb.append("a.nav{margin-right:1rem;}");
+        sb.append(".spark{margin:.4rem 0 1rem;} .sparklabel{font-size:.8rem;color:#666;} ");
+        sb.append(".sparksvg{vertical-align:middle;border-bottom:1px solid #eee;}");
         sb.append("</style></head><body>");
         sb.append("<h1>imini alerting overview</h1>");
         sb.append("<p class=\"muted\"><a class=\"nav\" href=\"/admin/alerts.html\">Dead-letter viewer \u2192</a>");
@@ -78,6 +80,11 @@ public final class AlertsOverview {
         sloCard(sb, "succ_ratio", "delivery success", pct(slo(stats, "delivery_success_slo", "success_ratio")));
         sloCard(sb, "succ_budget", "success budget", pct(slo(stats, "delivery_success_slo", "budget_remaining")));
         sb.append("</div>");
+
+        // rolling-window daily success-ratio sparkline
+        List<Double> series = sloSeries(stats);
+        sb.append("<div class=\"spark\"><span class=\"sparklabel\">window success ratio (daily): </span>");
+        sb.append("<span id=\"sparkbox\">").append(sparklineSvg(series)).append("</span></div>");
 
         // per-route
         Object byRoute = stats.get("by_route");
@@ -163,6 +170,11 @@ public final class AlertsOverview {
             + "setS('slo_ratio',dl.success_ratio);setS('slo_budget',dl.budget_remaining);"
             + "setS('slo_win_budget',dw.budget_remaining);setS('succ_ratio',ds.success_ratio);"
             + "setS('succ_budget',ds.budget_remaining);"
+            + "var ser=s.slo_window_series||[],W=160,H=28,pts='',np=0,n=ser.length;"
+            + "for(var i=0;i<n;i++){var r=ser[i];if(r<0)continue;"
+            + "var x=n<=1?0:(i/(n-1))*W,y=H-r*H;pts+=(pts?' ':'')+(Math.round(x*10)/10)+','+(Math.round(y*10)/10);np++;}"
+            + "var sk=document.getElementById('sparkbox');if(sk){sk=sk;"
+            + "if(np>=2){sk.innerHTML='<svg width=\"'+W+'\" height=\"'+H+'\" viewBox=\"0 0 '+W+' '+H+'\" preserveAspectRatio=\"none\" class=\"sparksvg\"><polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"'+pts+'\"/></svg>';}}"
             + "var br=s.by_route||{},h='';Object.keys(br).forEach(function(k){var r=br[k]||{};"
             + "h+='<tr><td>'+esc(k)+'</td><td class=\"num\">'+(r.sent||0)+'</td><td class=\"num\">'+(r.failed||0)"
             + "+'</td><td class=\"num\">'+(r.dead_lettered||0)+'</td><td class=\"num\">'+(r.suppressed||0)+'</td></tr>';});"
@@ -202,6 +214,54 @@ public final class AlertsOverview {
         double p = Math.round(r * 1000.0) / 10.0;
         String num = (p == Math.rint(p)) ? Long.toString((long) p) : Double.toString(p);
         return num + "%";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Double> sloSeries(Map<String, Object> stats) {
+        Object s = stats.get("slo_window_series");
+        if (s instanceof List<?> l) {
+            List<Double> out = new java.util.ArrayList<>();
+            for (Object o : l) out.add(o instanceof Number n ? n.doubleValue() : -1.0);
+            return out;
+        }
+        return List.of();
+    }
+
+    /**
+     * Pure: map daily success ratios (oldest→newest; -1 = no data) to an SVG polyline points string over a
+     * {@code w}×{@code h} box. Days with no data are skipped (the line connects across them). Returns "" when
+     * there are fewer than two plottable points.
+     */
+    static String sparklinePoints(List<Double> ratios, int w, int h) {
+        if (ratios == null || ratios.isEmpty()) return "";
+        int n = ratios.size();
+        StringBuilder pts = new StringBuilder();
+        int plotted = 0;
+        for (int i = 0; i < n; i++) {
+            double r = ratios.get(i);
+            if (r < 0) continue; // no data that day
+            double x = n == 1 ? 0 : (double) i / (n - 1) * w;
+            double y = h - r * h; // ratio 1.0 at top, 0.0 at bottom
+            if (pts.length() > 0) pts.append(' ');
+            pts.append(round1(x)).append(',').append(round1(y));
+            plotted++;
+        }
+        return plotted >= 2 ? pts.toString() : "";
+    }
+
+    /** Pure: a small inline SVG sparkline for the daily success-ratio series (empty-ish → a placeholder). */
+    static String sparklineSvg(List<Double> ratios) {
+        int w = 160, h = 28;
+        String points = sparklinePoints(ratios, w, h);
+        if (points.isEmpty()) return "<span class=\"muted\">collecting\u2026</span>";
+        return "<svg width=\"" + w + "\" height=\"" + h + "\" viewBox=\"0 0 " + w + " " + h + "\" "
+                + "preserveAspectRatio=\"none\" class=\"sparksvg\">"
+                + "<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"" + points + "\"/></svg>";
+    }
+
+    private static String round1(double d) {
+        double r = Math.round(d * 10.0) / 10.0;
+        return (r == Math.rint(r)) ? Long.toString((long) r) : Double.toString(r);
     }
 
     private static void card(StringBuilder sb, String key, String label, long n, boolean warn) {
