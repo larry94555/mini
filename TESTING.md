@@ -3924,3 +3924,35 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `ops/prometheus/imini-alerts.yml` includes `IminiAlertDeliveryLatencyHigh` (p95 > 2s) and
   `ops/grafana/imini-dashboard.json` has a "Webhook delivery latency (p50/p95)" panel. Validate with
   `promtool check rules` and a Grafana import.
+
+---
+
+# Delivery-latency SLO + burn alerting, per-route latency, scheduled self-test
+
+## 470. Latency-SLO math (AlertSloRouteSelftestTest)
+
+- **Run:** `./mvnw -Dtest=AlertSloRouteSelftestTest test`.
+- **Observe:** `AlertSink.sloSnapshot` computes success_ratio, error_budget (1-target), and burn_rate
+  (observed error ratio / budget): at-budget burn=1.0/meeting=true, 10% errors vs 1% budget burn=10.0/
+  meeting=false, and empty traffic is healthy (ratio 1.0, burn 0). `stats().delivery_slo` exposes it.
+
+## 471. Per-route latency breakdown (AlertSloRouteSelftestTest + manual)
+
+- **Observe (unit):** `PromFormat` renders `imini_alerts_route_latency_avg_ms{route="..."}` from the per-route
+  snapshot; `by_route` rows carry `avg_latency_ms`/`latency_count`.
+- **Observe (manual):** with multiple routes delivering, the per-route panel/metric shows which receiver is
+  slow (vs the global histogram).
+
+## 472. SLO + self-test Prometheus output (AlertSloRouteSelftestTest)
+
+- **Observe:** `imini_alerts_slo_success_ratio`/`_burn_rate`/`_target`/`_total`/`_good`, and
+  `imini_alerts_selftest_ok`/`_latency_ms` render from stats. Burn rate of 5 for 95/100 at a 99% target.
+
+## 473. Scheduled self-test (AlertSloRouteSelftestTest + manual)
+
+- **Observe (unit):** `AlertSelfTestScheduler.interpret` passes on `would_deliver` (resolution mode) and on
+  `probe.ok` (send mode), and fails a send-mode result with no probe; `AlertSink.recordSelfTest` round-trips
+  into `selfTestStatus()`.
+- **Observe (manual):** set `alerts.selftest-interval-minutes=1` (and optionally `alerts.selftest-send=true`
+  with `alerts.selftest-action` pointed at a health route); `imini_alerts_selftest_ok` reflects the last run
+  and `IminiAlertSelfTestFailing` fires if it stays 0.

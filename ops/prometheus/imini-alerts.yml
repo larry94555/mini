@@ -96,6 +96,41 @@ groups:
           summary: "imini webhook delivery is slow"
           description: "p95 webhook POST latency has exceeded 2s for 5m; the receiver may be degrading before it starts failing. Try POST /admin/alerts/selftest?send=true."
 
+      # Multi-window error-budget burn (fast page + slow ticket) for the delivery-latency SLO. "Good" = a
+      # delivery within the SLO latency (le="1000" — keep this label in sync with alerts.slo-latency-ms).
+      - alert: IminiAlertDeliverySLOBurnFast
+        expr: |
+          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[5m])) / sum(rate(imini_alerts_delivery_latency_ms_count[5m])))) > (14.4 * 0.01)
+          and
+          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[1h])) / sum(rate(imini_alerts_delivery_latency_ms_count[1h])))) > (14.4 * 0.01)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini delivery-latency error budget burning fast"
+          description: "Burning >14.4x the 1% error budget over 5m and 1h — at this rate a 30-day budget is gone in ~2 days. See GET /admin/alerts/overview.html."
+
+      - alert: IminiAlertDeliverySLOBurnSlow
+        expr: |
+          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[30m])) / sum(rate(imini_alerts_delivery_latency_ms_count[30m])))) > (6 * 0.01)
+          and
+          (1 - (sum(rate(imini_alerts_delivery_latency_ms_bucket{le="1000"}[6h])) / sum(rate(imini_alerts_delivery_latency_ms_count[6h])))) > (6 * 0.01)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "imini delivery-latency error budget burning"
+          description: "Burning >6x the error budget over 30m and 6h. Investigate the slow route on the overview page before it becomes a page."
+
+      - alert: IminiAlertSelfTestFailing
+        expr: imini_alerts_selftest_ok == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "imini scheduled alert self-test is failing"
+          description: "The synthetic self-test has not passed for 10m — alert delivery may be misconfigured or the receiver is down. Check GET /admin/alerts/config and POST /admin/alerts/selftest?send=true."
+
       - alert: IminiAlertSuppressionStorm
         expr: increase(imini_alerts_suppressed[15m]) > 100
         for: 0m

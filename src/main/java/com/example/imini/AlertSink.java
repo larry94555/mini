@@ -80,6 +80,8 @@ public class AlertSink {
     @Value("${alerts.escalate-url:}") private String escalateUrl;
     @Value("${alerts.escalate-tiers:}") private String escalateTiersCfg;
     @Value("${alerts.dedup-digest:true}") private boolean dedupDigest;
+    @Value("${alerts.slo-latency-ms:1000}") private long sloLatencyMs;
+    @Value("${alerts.slo-target:0.99}") private double sloTarget;
 
     private final AuditLog audit;
     private final Database db;
@@ -110,6 +112,11 @@ public class AlertSink {
     private final AtomicLong[] latencyBuckets = newBuckets(); // length = buckets + 1 (last = +Inf)
     private final AtomicLong latencySumMs = new AtomicLong();
     private final AtomicLong latencyCount = new AtomicLong();
+    private final AtomicLong latencyGood = new AtomicLong(); // deliveries within the SLO latency objective
+
+    // last scheduled self-test result (set by AlertSelfTestScheduler)
+    private final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> selfTestStatus =
+            new java.util.concurrent.atomic.AtomicReference<>(Map.of("ran", false));
 
     private static AtomicLong[] newBuckets() {
         AtomicLong[] a = new AtomicLong[LATENCY_BUCKETS_MS.length + 1];
@@ -130,7 +137,52 @@ public class AlertSink {
         latencyBuckets[bucketIndex(ms)].incrementAndGet();
         latencySumMs.addAndGet(ms);
         latencyCount.incrementAndGet();
+        if (ms <= sloLatencyMs) latencyGood.incrementAndGet();
     }
+
+    /**
+     * Pure: a latency-SLO snapshot. {@code good} = deliveries within the latency objective, {@code total} = all
+     * timed deliveries. success_ratio = good/total; error_budget = 1-target; burn_rate = observed error ratio
+     * divided by the budget (>1 means burning the budget faster than allowed). Values rounded to 4 dp.
+     */
+    static Map<String, Object> sloSnapshot(long good, long total, double target, long latencyMs) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("latency_ms", latencyMs);
+        m.put("target", round4(target));
+        m.put("total", total);
+        m.put("good", good);
+        m.put("bad", Math.max(0, total - good));
+        double successRatio = total <= 0 ? 1.0 : (double) good / total;
+        double errorBudget = Math.max(0, 1.0 - target);
+        double errorRatio = 1.0 - successRatio;
+        double burn = errorBudget <= 0 ? 0.0 : errorRatio / errorBudget;
+        m.put("success_ratio", round4(successRatio));
+        m.put("error_budget", round4(errorBudget));
+        m.put("burn_rate", round4(burn));
+        m.put("meeting_objective", successRatio >= target);
+        return m;
+    }
+
+    private static double round4(double d) { return Math.round(d * 10000.0) / 10000.0; }
+
+    /** The live delivery-latency SLO snapshot. */
+    public Map<String, Object> sloSnapshot() {
+        return sloSnapshot(latencyGood.get(), latencyCount.get(), sloTarget, sloLatencyMs);
+    }
+
+    /** Record the outcome of a scheduled self-test (called by {@link AlertSelfTestScheduler}). */
+    public void recordSelfTest(boolean ok, long latencyMs, String detail) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ran", true);
+        m.put("ok", ok);
+        m.put("latency_ms", latencyMs);
+        m.put("detail", detail == null ? "" : detail);
+        m.put("last_run_ms", System.currentTimeMillis());
+        selfTestStatus.set(m);
+    }
+
+    /** The last scheduled self-test result (or {ran:false} before the first run). */
+    public Map<String, Object> selfTestStatus() { return selfTestStatus.get(); }
 
     /** Histogram snapshot: ordered upper-bound -> non-cumulative count, plus sum_ms and count. */
     private Map<String, Object> latencySnapshot() {
@@ -629,8 +681,16 @@ public class AlertSink {
 
     private void routeInc(String action, int idx) {
         if (action == null || action.isBlank()) action = "default";
-        long[] c = byRoute.computeIfAbsent(action, k -> new long[4]); // sent, failed, dead_lettered, suppressed
+        long[] c = byRoute.computeIfAbsent(action, k -> new long[6]); // sent, failed, dead_lettered, suppressed, lat_sum, lat_count
         synchronized (c) { c[idx]++; }
+    }
+
+    /** Accumulate a delivery's round-trip latency against its route (for the per-route latency breakdown). */
+    private void routeLatency(String action, long ms) {
+        if (action == null || action.isBlank()) action = "default";
+        if (ms < 0) ms = 0;
+        long[] c = byRoute.computeIfAbsent(action, k -> new long[6]);
+        synchronized (c) { c[4] += ms; c[5]++; }
     }
 
     /** One delivery attempt; on failure reschedule with backoff or dead-letter. Runs on the scheduler. */
@@ -651,7 +711,9 @@ public class AlertSink {
             err = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             log.warn("[alerts] webhook post failed (attempt " + d.attemptNo() + "): " + ex.getMessage());
         } finally {
-            recordLatency((System.nanoTime() - startNs) / 1_000_000L); // round-trip incl. failures/timeouts
+            long ms = (System.nanoTime() - startNs) / 1_000_000L;
+            recordLatency(ms);              // global histogram + SLO (incl. failures/timeouts)
+            routeLatency(d.action(), ms);   // per-route latency breakdown
         }
         if (ok) {
             sent.incrementAndGet();
@@ -865,6 +927,8 @@ public class AlertSink {
         m.put("digested", digested.get());
         m.put("sla_breaches", slaBreaches.get());
         m.put("delivery_latency", latencySnapshot());
+        m.put("delivery_slo", sloSnapshot());
+        m.put("selftest", selfTestStatus());
         m.put("by_tier", byTierSnapshot());
         m.put("ack_sla_by_tier", ackSlaByTier());
         m.put("in_flight", (long) inFlight.get());
@@ -940,6 +1004,8 @@ public class AlertSink {
                 m.put("failed", c[1]);
                 m.put("dead_lettered", c[2]);
                 m.put("suppressed", c[3]);
+                m.put("avg_latency_ms", c[5] > 0 ? c[4] / c[5] : 0L);
+                m.put("latency_count", c[5]);
             }
             out.put(e.getKey(), m);
         }

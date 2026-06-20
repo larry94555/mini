@@ -99,6 +99,11 @@ public final class PromFormat {
                 for (Map.Entry<String, Map<String, Long>> e : sortedRoutes((Map<String, Map<String, Long>>) byRoute)) {
                     line(sb, PREFIX + "alerts_route_suppressed", "route=\"" + esc(e.getKey()) + "\"", e.getValue().get("suppressed"));
                 }
+                help(sb, "alerts_route_latency_avg_ms", "Mean webhook delivery latency by route (ms)", "gauge");
+                for (Map.Entry<String, Map<String, Long>> e : sortedRoutes((Map<String, Map<String, Long>>) byRoute)) {
+                    Long avg = e.getValue().get("avg_latency_ms");
+                    if (avg != null) line(sb, PREFIX + "alerts_route_latency_avg_ms", "route=\"" + esc(e.getKey()) + "\"", avg);
+                }
             }
             if (alerts.get("by_tier") instanceof Map<?, ?> byTier) {
                 help(sb, "alerts_escalated_tier", "Escalations paged by ladder tier", "counter");
@@ -134,8 +139,34 @@ public final class PromFormat {
                     line(sb, PREFIX + "alerts_delivery_latency_ms_count", null, cnt instanceof Number ? ((Number) cnt).longValue() : 0);
                 }
             }
+            if (alerts.get("delivery_slo") instanceof Map<?, ?> slo) {
+                Map<String, Object> m = (Map<String, Object>) slo;
+                gaugeNum(sb, "alerts_slo_target", "Delivery-latency SLO target success ratio", m.get("target"));
+                gaugeNum(sb, "alerts_slo_success_ratio", "Observed delivery success ratio within the SLO latency", m.get("success_ratio"));
+                gaugeNum(sb, "alerts_slo_burn_rate", "Error-budget burn rate (>1 = over budget)", m.get("burn_rate"));
+                gaugeNum(sb, "alerts_slo_total", "Timed deliveries counted toward the SLO", m.get("total"));
+                gaugeNum(sb, "alerts_slo_good", "Deliveries within the SLO latency objective", m.get("good"));
+            }
+            if (alerts.get("selftest") instanceof Map<?, ?> st) {
+                Map<String, Object> m = (Map<String, Object>) st;
+                if (Boolean.TRUE.equals(m.get("ran"))) {
+                    help(sb, "alerts_selftest_ok", "Last scheduled self-test result (1=ok, 0=failed)", "gauge");
+                    line(sb, PREFIX + "alerts_selftest_ok", null, Boolean.TRUE.equals(m.get("ok")) ? 1 : 0);
+                    Object lat = m.get("latency_ms");
+                    if (lat instanceof Number n && n.longValue() >= 0) {
+                        help(sb, "alerts_selftest_latency_ms", "Last scheduled self-test probe latency (ms)", "gauge");
+                        line(sb, PREFIX + "alerts_selftest_latency_ms", null, n.longValue());
+                    }
+                }
+            }
         }
         return sb.toString();
+    }
+
+    /** A single-line gauge for a numeric value (long or double), no labels. */
+    private static void gaugeNum(StringBuilder sb, String name, String helpText, Object value) {
+        help(sb, name, helpText, "gauge");
+        line(sb, PREFIX + name, null, value instanceof Number ? value : 0);
     }
 
     private static List<Map.Entry<String, Long>> sorted(Map<String, Long> m) {

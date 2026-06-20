@@ -39,7 +39,7 @@ Included alerts (tune thresholds to your traffic):
   healthy again).
 - **Escalation & noise** — `IminiAlertSlaBreaches` (an alert went un-acked past its tier SLA and was
   re-escalated), `IminiAlertEscalating` (alerts climbing the ladder), `IminiAlertAckLatencyHigh` (acks taking
-  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook). See the runbook below.
+  >30m), `IminiAlertSuppressionStorm` (dedup collapsing a flood), `IminiAlertDeliveryLatencyHigh` (slow webhook), `IminiAlertDeliverySLOBurnFast`/`...BurnSlow` (error-budget burn), `IminiAlertSelfTestFailing`. See the runbook below.
 - **SLO** — `IminiRunSuccessRateLow`, `IminiRunLatencyP95High`.
 
 ## Grafana dashboard — `grafana/imini-dashboard.json`
@@ -63,6 +63,8 @@ auto-refresh; add `?refresh=0` to freeze, `?refresh=5` for a 5s cadence) and the
 | `IminiAlertAckLatencyHigh` | Acks are slow (>30m max) | Review per-tier ack latency on the overview page; adjust on-call rotation or tier URLs |
 | `IminiAlertSuppressionStorm` | Dedup is collapsing a flood of duplicates | Inspect the top suppressed keys at `GET /admin/alerts/digests`; fix the upstream cause |
 | `IminiAlertDeliveryLatencyHigh` | The webhook receiver is slow (p95 >2s) | Probe it with `POST /admin/alerts/selftest?send=true`; check the receiver before it starts failing |
+| `IminiAlertDeliverySLOBurnFast` / `...BurnSlow` | Delivery-latency error budget is burning (multi-window) | Find the slow route on the overview page; the fast variant means the 30-day budget is gone in ~2 days |
+| `IminiAlertSelfTestFailing` | The scheduled synthetic self-test isn't passing | Alert wiring is likely broken — check `GET /admin/alerts/config` warnings and `POST /admin/alerts/selftest?send=true` |
 
 To confirm what's actually configured (parsed tiers + SLAs, routes, dedup/retention, CSRF mode), hit
 `GET /admin/alerts/config` — it returns the effective resolved config with webhook URLs masked, so a
