@@ -118,6 +118,7 @@ public class AlertSink {
     private final AtomicLong latencyCount = new AtomicLong();
     private final AtomicLong latencyGood = new AtomicLong(); // deliveries within the SLO latency objective
     private volatile RollingWindow latencyWindow = new RollingWindow(30); // re-sized in init() from config
+    private final Map<String, RollingWindow> routeWindows = new java.util.concurrent.ConcurrentHashMap<>(); // per-route daily latency-good
 
     /**
      * A fixed-size ring of daily good/total buckets for a rolling-window SLO. Each bucket covers one UTC day;
@@ -231,6 +232,16 @@ public class AlertSink {
     /** Daily success ratios across the rolling window (oldest→newest; -1 = no deliveries that day). */
     public List<Double> sloWindowSeries() {
         return latencyWindow.series(System.currentTimeMillis());
+    }
+
+    /** Per-route daily success-ratio series ({route -> ratios}), for per-route sparklines. In-memory only. */
+    public Map<String, List<Double>> sloWindowSeriesByRoute() {
+        long now = System.currentTimeMillis();
+        Map<String, List<Double>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, RollingWindow> e : routeWindows.entrySet()) {
+            out.put(e.getKey(), e.getValue().series(now));
+        }
+        return out;
     }
 
     /**
@@ -901,7 +912,10 @@ public class AlertSink {
         if (action == null || action.isBlank()) action = "default";
         if (ms < 0) ms = 0;
         long[] c = byRoute.computeIfAbsent(action, k -> new long[7]);
-        synchronized (c) { c[4] += ms; c[5]++; if (ms <= sloLatencyMsFor(action)) c[6]++; }
+        boolean good = ms <= sloLatencyMsFor(action);
+        synchronized (c) { c[4] += ms; c[5]++; if (good) c[6]++; }
+        routeWindows.computeIfAbsent(action, k -> new RollingWindow(latencyWindow.days()))
+                .record(System.currentTimeMillis(), good); // per-route daily trend (in-memory)
     }
 
     /** The effective SLO latency objective for an action: the route override if set, else the global. */
@@ -1227,6 +1241,7 @@ public class AlertSink {
         m.put("delivery_slo", sloSnapshot());
         m.put("delivery_slo_window", sloWindowSnapshot());
         m.put("slo_window_series", sloWindowSeries());
+        m.put("slo_window_series_by_route", sloWindowSeriesByRoute());
         m.put("delivery_success_slo", deliverySuccessSlo());
         m.put("slo_by_route", sloByRoute());
         m.put("success_by_route", successSloByRoute());
