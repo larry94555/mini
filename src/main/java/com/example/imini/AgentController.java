@@ -615,6 +615,19 @@ public class AgentController {
     }
 
     /**
+     * Manually send an SLO digest now (instead of waiting for the scheduler), using the configured template and
+     * webhook. Useful for testing the digest wiring/format. CSRF-guarded (it performs a live POST). Admin only.
+     */
+    @PostMapping("/admin/alerts/slo-digest")
+    public Map<String, Object> adminAlertsSloDigest(
+            @RequestHeader(name = "X-CSRF-Token", required = false, defaultValue = "") String csrfHeader,
+            @RequestParam(name = "csrf", required = false, defaultValue = "") String csrfParam) {
+        requireAdmin();
+        csrf.require(csrfToken(csrfHeader, csrfParam));
+        return alertSink.postSloDigest();
+    }
+
+    /**
      * Hot-reload the alerting config without a restart. Pass any of {@code actions}, {@code routes},
      * {@code escalate-tiers}, {@code slo-latency-ms}, {@code slo-target}; omitted pieces are left unchanged.
      * Re-parses into the live sink and returns the resulting config (with fresh warnings). CSRF-guarded.

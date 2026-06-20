@@ -35,7 +35,7 @@ class AlertSloDigestReportRangeTest {
         assertTrue(s.contains("window 98.5%"));
         assertTrue(s.contains("budget 50% left"));
         assertTrue(s.contains("delivery-success 99.7%"));
-        assertTrue(s.contains("worst route spend_alert @ 92%"));
+        assertTrue(s.contains("worst latency spend_alert @ 92%"));
     }
 
     @Test
@@ -46,7 +46,8 @@ class AlertSloDigestReportRangeTest {
         d.put("delivery_success_ratio", 1.0);
         d.put("worst_route", "");
         String s = AlertSink.formatSloDigest(d);
-        assertFalse(s.contains("worst route"));
+        assertFalse(s.contains("worst latency"));
+        assertFalse(s.contains("worst delivery"));
     }
 
     @Test
