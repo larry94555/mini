@@ -4713,3 +4713,42 @@ assertions.
 `.github/workflows/ci.yml` now runs `actions/setup-node@v4` before the test suite, so the stdio MCP
 integration tests (`McpLiveIntegrationTest`, the `mcpPromptSlashCommandTrace`) execute on CI instead of
 self-skipping when `node` is absent.
+
+---
+
+# Capability-scoping golden trace, HISTORY consolidation, unbounded SSE streaming
+
+## 563. Access-control golden trace — capability scoping + rate limiting (CapabilityScopingTraceTest)
+
+- **Run:** `./mvnw -Dtest=CapabilityScopingTraceTest test`.
+- **Observe (`toolOutsideRoleScopeIsDeniedAndNotExecuted`):** `CapabilityService` is enabled with
+  `reader=read_marker` and the caller's effective role set to `reader`. A scripted model calls `read_marker`
+  (in scope → runs) then `write_marker` (out of scope). The out-of-scope call returns `DENIED: tool
+  'write_marker' is outside this caller's capability scope.`, is audited (a `RecordingCapabilities`
+  subclass records the `auditDenial`), and **never executes** (its execution counter stays 0); the answer
+  still completes.
+- **Observe (`toolOverRateLimitReturnsRateLimited`):** `ToolRateLimiter` is enabled with `read_marker=1/60`
+  (in-memory). The first `read_marker` runs; the second returns `RATE_LIMITED: tool 'read_marker' exceeded
+  its per-tenant rate limit; retry after ~60s.` and does not execute (counter stays 1).
+- **Note:** drives the **real `AgentEngine`** via the shared `ScriptedAgent` fixture (a new `buildEngine`
+  overload accepts a pre-configured `CapabilityService` + `ToolRateLimiter`); fully offline, verified 8/8.
+
+## 564. Unbounded keep-alive SSE streaming (McpLiveIntegrationTest)
+
+- **Observe (`consumesUnboundedKeepAliveSseStream`):** a JDK `HttpServer` returns a chunked
+  `text/event-stream` that flushes keep-alive comments + an interim progress event, then the response, then
+  *more* keep-alives (standing in for an endless stream). The client reads incrementally and returns on the
+  response event without buffering the rest, then closes the stream. CI/live (the round-trip needs real
+  Jackson).
+- **Observe (`sseDataJsonExtractsOnlyDataObjectLines`, `isJsonRpcResponseMatchesIdOrResultOrError`):** pure
+  unit tests for the new incremental helpers — `sseDataJson` returns the JSON only for `data:` object lines
+  (skipping comments/`event:`/non-JSON), and `isJsonRpcResponse` matches a response by id or by carrying
+  `result`/`error` (an interim notification is not a response). Verified offline (11/11, with the
+  unbounded-stream read mechanism separately confirmed to return promptly rather than waiting for stream
+  end).
+
+## 565. HISTORY consolidation (docs only)
+
+Older `Recently completed` entries were moved out of `ROADMAP.md` into `docs/HISTORY.md` (which already held
+the alerting/SLO-era entries); `ROADMAP.md` now keeps only the most recent few with a pointer to the full
+archive. No entries were lost. Not a test; recorded so the doc move is auditable.

@@ -44,11 +44,11 @@ live-server **MCP integration test** (node stdio stub + JDK HttpServer stub, bot
 
 Remaining candidates are genuinely optional — pursue only if a concrete need appears:
 
-1. **True long-lived SSE streaming** — the HTTP transport now consumes a *terminating* multi-event
-   `text/event-stream` (it skips interim progress events and picks the response); genuinely unbounded,
-   server-initiated streams (keep-alive, server push) remain out of scope.
-2. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
+1. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
    if real usage shows a need.
+2. **More eval depth** — additional scripted scenarios (e.g. a multi-server MCP routing trace, or a
+   subagent hand-off trace) if a specific behaviour needs a regression guard. The core engine branches
+   (happy path, plan/invalid-args/dup guard, capability/rate-limit denial) are now all covered end to end.
 
 If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
 **done** — prefer educational depth (docs, diagrams, eval scenarios) over inventing new surface.
@@ -155,31 +155,12 @@ These remain valuable but rank below the workflow gaps and the educational core:
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
 
+- Capability-scoping golden trace + HISTORY consolidation + true long-lived SSE streaming: `CapabilityScopingTraceTest` drives the real `AgentEngine` through its access-control branches with a scripted model — capability scoping denies an out-of-scope tool with `outside this caller's capability scope` (audited, not executed) while the in-scope tool runs, and `ToolRateLimiter` throttles a tool over its per-tenant limit with the `RATE_LIMITED` message (verified 8/8 offline, reusing the shared `ScriptedAgent` fixture via a new `buildEngine` overload); older `Recently completed` entries were swept into `docs/HISTORY.md` to keep the roadmap focused; and the HTTP MCP transport now consumes an **unbounded** server-push `text/event-stream` via incremental line reads (`ofInputStream` + `readSseResponse`), returning as soon as the JSON-RPC response event arrives and closing the stream — keep-alive/interim events are skipped (`McpManager.sseDataJson`/`isJsonRpcResponse`), covered by a keep-alive `HttpServer` integration test + pure helper unit tests.
+
 - Recovery golden traces + shared scripted-agent fixture + node in CI: `RecoveryTraceTest` drives the real `AgentEngine` through its non-happy-path branches — a mutation denied in PLAN mode (`RECORD_PLAN`, nothing executed), an invalid-args call that becomes corrective feedback then a successful retry, and a repeated identical mutating call that trips the duplicate-call guard (execution capped, run stopped) — asserting the permission decision, the validation/guard messages, and the final answer for each; a shared `ScriptedAgent` test fixture (scripted `LlamaClient` + real-engine `buildEngine` + decision-recording permissions) now backs `GoldenTraceWorkflowTest`, `RecoveryTraceTest`, and `FakeModelHarnessTest` (the last upgraded to drive the real engine), removing the parallel harness; and `ci.yml` installs Node so the stdio MCP integration tests run in CI instead of self-skipping.
 
 - Golden-trace workflow test + streaming SSE MCP + learning-path/workshop modules: `GoldenTraceWorkflowTest` drives the real `AgentEngine` loop with a scripted (model-free) `LlamaClient` through edit→stage→commit, asserting tool dispatch, the permission decision, hook firing, and the git-verified edit-trust summary in one trace (plus an MCP-prompt-slash-command trace); the HTTP MCP transport now consumes a terminating multi-event `text/event-stream`, skipping interim progress events to pick the JSON-RPC response (`McpManager.jsonFromHttpBody`), covered by a streaming-SSE integration test + a pure selector test; and `docs/WORKFLOW_WALKTHROUGH.md` is wired into `docs/LEARNING_PATH.md` (Module 13.5) and `docs/WORKSHOP.md` (Lab 6) with the new tests as checkpoints.
 
 - Live MCP integration test + git-commit approval-flow test + workflow walkthrough doc: `McpLiveIntegrationTest` connects `McpManager` to a stub server over both transports (a node child process over stdio + a JDK `HttpServer` over HTTP) and asserts tools/resources/prompts discovery plus `read_resource` and the `/mcp__server__prompt` slash command returning rendered content (stdio half self-skips without node); `GitCommitApprovalFlowTest` drives a real repo through stage → approval → commit, asserting the staged diff is attached to the approval payload; and `docs/WORKFLOW_WALKTHROUGH.md` documents the edit→verify→commit loop, the six-event hook lifecycle, and the MCP lifecycle with mermaid diagrams. A small package-private `McpManager.connect()` test seam was added.
 
-- MCP prompts as slash commands + SessionStart/Notification hooks + git_push & approval-diff: discovered MCP prompts are now invokable as `/mcp__<server>__<name>` slash commands (listed in `/help`, `key=value` args parsed, rendered prompt becomes the turn input); `HookService` gains `sessionStart` (first-turn context injection) and `notification` (fires when the agent requests approval) events; and a capability-gated, off-by-default `git_push` tool (`git.allow-push`) plus the staged diff (`git diff --cached --stat`) surfaced in the commit approval prompt complete the git workflow.
-
-- Git write workflow + hook breadth + MCP resources/prompts/HTTP transport: new mutating `git_stage`/`git_commit`/`git_branch` tools (approval-gated, message via the `commit-message` skill) complete the edit→verify→commit loop; `HookService` gains `userPromptSubmit` (block-or-inject) and `stop` (append) turn-level events alongside the existing tool hooks; and the MCP client discovers `resources/list`+`resources/read` (a `<server>_read_resource` tool) and `prompts/list`+`prompts/get` (per-prompt tools) and can reach servers over an HTTP transport (`mcp.json` `transport:"http"`, plain-JSON or single-event SSE) as well as stdio.
-
-- Live posture row + structured-payload toggle + posture Prometheus gauges: the overview current-posture row is rebuilt from overview.json on each poll (no longer stale until reload); alerts.slo-digest-structured (default true) lets receivers opt out of the digest object in the webhook payload; and the snapshot posture is exported as imini_alerts_digest_window_ratio/_delivery_ratio/_worst_route_ratio/_worst_success_route_ratio gauges.
-
-- Overview posture row + structured webhook payload + report format choice: the digest section opens with a compact current-posture row (window/delivery vs targets, worst routes, mute/catch-up) from the live sloDigest() snapshot (now also in stats()); the scheduled webhook digest payload includes the snapshot as a structured digest object alongside the back-compat text field; and the report link/download lets the reviewer pick JSON or CSV.
-
-- Report bundle snapshot + download link + picker validation feedback: the digest-report bundle now includes the latest sloDigest() snapshot (JSON snapshot field + a # snapshot CSV section); the overview gains a Download report bundle link (digest-report CSV for the current range); and the date-picker surfaces the server-side range validation error inline (without pinning the view) instead of failing silently.
-
-- Combined digest report bundle + copy-link + range validation: GET /admin/alerts/digest-report returns mute state + history + audit for a date range (JSON or one sectioned CSV); the overview gains a Copy report link button that copies the bundle URL for the current range; and the history/audit/report endpoints reject malformed or inverted date ranges with HTTP 400 + a clear message (pure rangeError).
-
-- Digest history CSV + quick-range buttons + CSV download links: GET /admin/alerts/slo-digest/history gains ?format=csv (parity with digest-audit); the overview date-picker adds 24h/7d/30d quick-range buttons that set the window and apply; and History/Audit CSV download links export the current from/to range.
-
-- Marker-faithful live trends + overview date-picker + window-ratio target line: the delivery-success trend now redraws its mute (square) / catch-up (diamond) markers on every auto-refresh via a JS trendSVG (previously markers were server-render only); the digest section gains a from/to date-picker that fetches the ranged history/audit and pauses the live poll while pinned; and the window-ratio trend overlays the SLO target reference line.
-
-- Full digest trends + date-range filtering + mute/catch-up trend markers: the overview charts three trends across recent digests (delivery-success, window ratio, budget remaining), with the delivery-success trend annotated by mute (square) and catch-up (diamond) markers; the digest history and digest-audit endpoints accept ?from/?to/?days date-range filters (audit still supports ?format=csv).
-
-- Structured digest history + trend chart + digest-audit CSV + catch-up audit: digest history rows are now versioned (v2) and carry structured metrics (window ratio, delivery-success, budget) so the overview charts a delivery-success trend across recent digests; the mute audit trail exports as CSV (GET /admin/alerts/digest-audit?format=csv); and a mute-expiry catch-up send records an alert_digest_catchup audit event. Legacy 4-field history rows still parse.
-
-
-_…older entries moved to [`docs/HISTORY.md`](docs/HISTORY.md)._
+_Older entries have been moved to [`docs/HISTORY.md`](docs/HISTORY.md)._

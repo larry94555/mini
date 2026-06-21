@@ -711,12 +711,18 @@ tiny stub server over **both** transports — a node child process (`src/test/re
 over stdio, and a JDK `HttpServer` over HTTP — and asserts that tools, resources and prompts are discovered
 and that `read_resource` and the `/mcp__server__prompt` slash command return the server-rendered content.
 The stdio half self-skips if `node` isn't on `PATH`; the HTTP half always runs (including a streaming
-multi-event SSE response). See [`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md) for the
+multi-event SSE response). The HTTP transport consumes an **unbounded** server-push `text/event-stream`:
+it reads events incrementally (`ofInputStream` + a line-reading loop) and returns as soon as the JSON-RPC
+response event arrives — skipping keep-alive comments and interim progress events and closing the stream —
+so a long-lived streaming server works without buffering the whole (possibly endless) body. See
+[`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md) for the
 lifecycle diagrams. The whole edit → verify → commit turn is also covered by `GoldenTraceWorkflowTest`,
 which drives the **real agent loop** with a scripted (model-free) client and asserts tool dispatch, the
 permission decision, hook firing, and the git-verified edit-trust summary in one trace. The non-happy-path
 branches — a mutation denied in PLAN mode, an invalid-args call that recovers, and the duplicate-call guard
-— are covered the same way by `RecoveryTraceTest`. Both share the `ScriptedAgent` test fixture (scripted
+— are covered the same way by `RecoveryTraceTest`, and the access-control branches — capability scoping
+(`outside this caller's capability scope`, audited, not executed) and per-tenant rate limiting
+(`RATE_LIMITED`) — by `CapabilityScopingTraceTest`. All share the `ScriptedAgent` test fixture (scripted
 model + real-engine builder), which `FakeModelHarnessTest` also uses. CI installs Node so the stdio MCP
 integration tests run rather than self-skip.
 

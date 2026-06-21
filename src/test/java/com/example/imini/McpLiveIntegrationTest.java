@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -95,6 +96,65 @@ class McpLiveIntegrationTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    // ---- HTTP transport: an UNBOUNDED keep-alive SSE stream (incremental line reads) ----
+
+    @Test
+    void consumesUnboundedKeepAliveSseStream() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/rpc", ex -> {
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String resp = handle(body);                 // null for notifications
+            ex.getResponseHeaders().add("Content-Type", "text/event-stream");
+            if (resp == null) { ex.sendResponseHeaders(200, -1); ex.close(); return; }
+            // Chunked (length 0) so the body streams; emit keep-alive comments + an interim progress event,
+            // flushing between writes, BEFORE the response event. The client must read incrementally and
+            // return as soon as the response arrives (it cannot buffer the whole body up front).
+            ex.sendResponseHeaders(200, 0);
+            try (OutputStream os = ex.getResponseBody()) {
+                os.write(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8)); os.flush();
+                os.write("event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"p\":0.5}}\n\n"
+                        .getBytes(StandardCharsets.UTF_8)); os.flush();
+                os.write(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8)); os.flush();
+                os.write(("event: message\ndata: " + resp + "\n\n").getBytes(StandardCharsets.UTF_8)); os.flush();
+                // a trailing keep-alive after the response: the client should already have returned.
+                os.write(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8)); os.flush();
+            } catch (Exception ignore) {
+                // client closed the stream after getting the response — expected for an unbounded stream.
+            }
+        });
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            McpManager mcp = new McpManager();
+            setTimeout(mcp, 30);
+            mcp.connect("ssekeepalive", Map.of("transport", "http", "url", "http://127.0.0.1:" + port + "/rpc"));
+            assertDiscoveryAndInvocation(mcp, "ssekeepalive");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    // ---- pure: incremental SSE helpers (no Jackson / no server needed) ----
+
+    @Test
+    void sseDataJsonExtractsOnlyDataObjectLines() {
+        assertTrue("{\"a\":1}".equals(McpManager.sseDataJson("data: {\"a\":1}")), "data: JSON");
+        assertTrue("{\"a\":1}".equals(McpManager.sseDataJson("data:{\"a\":1}")), "no space after colon");
+        assertTrue(McpManager.sseDataJson(": keep-alive") == null, "comment line is not data");
+        assertTrue(McpManager.sseDataJson("event: message") == null, "event line is not data");
+        assertTrue(McpManager.sseDataJson("data: not-json") == null, "non-JSON data is skipped");
+        assertTrue(McpManager.sseDataJson("") == null, "blank line");
+    }
+
+    @Test
+    void isJsonRpcResponseMatchesIdOrResultOrError() {
+        assertTrue(McpManager.isJsonRpcResponse(Map.of("id", 2, "result", Map.of()), 2), "matching id");
+        assertTrue(McpManager.isJsonRpcResponse(Map.of("result", Map.of()), 99), "has result");
+        assertTrue(McpManager.isJsonRpcResponse(Map.of("error", Map.of("code", -1)), 99), "has error");
+        assertFalse(McpManager.isJsonRpcResponse(Map.of("method", "notifications/progress"), 2),
+                "interim notification is not a response");
     }
 
     // ---- pure: the streaming SSE selector picks the response, not interim events ----
