@@ -36,6 +36,13 @@ fi
 # grep across exactly the living docs (read the file list from $doclist via xargs).
 scan() { xargs grep -rhoE "$1" < "$doclist" 2>/dev/null; }
 
+# slug TEXT -> a GitHub-style heading anchor: lowercase, drop punctuation (keep alnum/space/hyphen),
+# spaces->hyphens, collapse repeats, trim. Approximate but covers ordinary headings.
+slug() {
+  printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9 -]//g' -e 's/ /-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
 # 1) Test-class references: `FooTest` or `FooTest.method` -> must exist under src/test as FooTest.java
 scan '`[A-Z][A-Za-z0-9]+Test' | sed -e 's/`//' -e 's/\..*//' | sort -u | while IFS= read -r t; do
   [ -z "$t" ] && continue
@@ -58,23 +65,51 @@ scan 'cases? [0-9]+(-[0-9]+)?' | grep -oE '[0-9]+' | sort -nu | while IFS= read 
 done
 
 # 4) Relative Markdown links: [text](TARGET) -> the target must exist, resolved relative to the file the
-#    link appears in. http(s):// / mailto: / pure #anchor links are ignored; a trailing-slash or directory
-#    target is checked as a directory; an #anchor and an optional "title" suffix are stripped first.
+#    link appears in. http(s):// / mailto: links are ignored. For a target with an #anchor (cross-file
+#    FILE.md#heading, or same-file #heading), the anchor must match a heading in the target .md file.
+#    A trailing-slash/directory target is checked as a directory; an optional "title" suffix is stripped.
 while IFS= read -r f; do
   [ -z "$f" ] && continue
   d="$(dirname "$f")"
   grep -oE '\]\([^)]+\)' "$f" 2>/dev/null | sed -e 's/^](//' -e 's/)$//' | while IFS= read -r tgt; do
     case "$tgt" in
-      http://*|https://*|mailto:*|\#*|"") continue ;;
+      http://*|https://*|mailto:*|"") continue ;;
     esac
-    path="${tgt%%#*}"      # strip #anchor
-    path="${path%% *}"     # strip optional "title" suffix
-    [ -z "$path" ] && continue
-    resolved="$d/$path"
-    case "$path" in
-      */) [ -d "$resolved" ] || echo "broken link in $f -> $tgt (no dir $resolved)" >> "$broken" ;;
-      *)  [ -e "$resolved" ] || echo "broken link in $f -> $tgt (no file $resolved)" >> "$broken" ;;
-    esac
+    # split anchor (after first #) from path (before it); strip an optional "title" suffix from the path.
+    anchor=""
+    case "$tgt" in *"#"*) anchor="${tgt#*#}" ;; esac
+    path="${tgt%%#*}"
+    path="${path%% *}"
+
+    # Determine the .md file whose headings an anchor would refer to.
+    mdfile=""
+    if [ -z "$path" ]; then
+      # pure #anchor -> same file
+      mdfile="$f"
+    else
+      resolved="$d/$path"
+      case "$path" in
+        */) [ -d "$resolved" ] || echo "broken link in $f -> $tgt (no dir $resolved)" >> "$broken" ;;
+        *)  if [ -e "$resolved" ]; then
+              case "$path" in *.md) mdfile="$resolved" ;; esac
+            else
+              echo "broken link in $f -> $tgt (no file $resolved)" >> "$broken"
+            fi ;;
+      esac
+    fi
+
+    # Validate the anchor against the target file's headings (only when it's a readable .md).
+    if [ -n "$anchor" ] && [ -n "$mdfile" ] && [ -f "$mdfile" ]; then
+      want="$(printf '%s' "$anchor" | tr '[:upper:]' '[:lower:]')"
+      slugfile="$work/slugs"
+      : > "$slugfile"
+      grep -E '^#{1,6}[[:space:]]' "$mdfile" 2>/dev/null \
+        | sed 's/^#\{1,6\}[[:space:]][[:space:]]*//' | while IFS= read -r h; do
+            slug "$h" >> "$slugfile"
+          done
+      grep -qxF "$want" "$slugfile" \
+        || echo "broken anchor in $f -> $tgt (no heading '#$anchor' in $mdfile)" >> "$broken"
+    fi
   done
 done < "$doclist"
 

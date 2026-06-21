@@ -4,7 +4,10 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,5 +60,37 @@ class EvalSuiteFileTest {
         List<EvalHarness.Case> cases = EvalHarness.parseCases(Files.readString(p));
         assertTrue(cases.size() >= 4, "the shipped suite has several cases: " + cases.size());
         assertTrue(cases.stream().anyMatch(c -> c.id().equals("greet")), "includes the greet case");
+    }
+
+    /**
+     * Fixture/case coupling: every {@code eval/fixtures/...} path named in a shipped suite prompt must exist
+     * in the repo. This pins the harness-behavior cases to their fixtures so a rename/move breaks the build
+     * offline — without needing a live model — the same way check-docs.sh self-checks the docs.
+     */
+    @Test
+    void everyFixturePathNamedInTheSuiteExists() throws Exception {
+        Path p = Path.of("eval/suite.txt");
+        if (!Files.isRegularFile(p)) { System.out.println("[skip] eval/suite.txt not present"); return; }
+        List<EvalHarness.Case> cases = EvalHarness.parseCases(Files.readString(p));
+
+        // Match eval/fixtures and eval/fixtures/<segments> (letters, digits, _, -, ., /); trailing
+        // punctuation like a comma or period is excluded by the character class.
+        Pattern ref = Pattern.compile("eval/fixtures(?:/[A-Za-z0-9_.\\-/]+)?");
+        List<String> referenced = new ArrayList<>();
+        for (EvalHarness.Case c : cases) {
+            Matcher m = ref.matcher(c.prompt());
+            while (m.find()) {
+                String path = m.group().replaceAll("[.]+$", "");  // drop any trailing dots
+                if (!referenced.contains(path)) referenced.add(path);
+            }
+        }
+
+        assertTrue(referenced.size() >= 2,
+                "the harness-behavior cases reference fixture paths: " + referenced);
+        for (String path : referenced) {
+            assertTrue(Files.exists(Path.of(path)),
+                    "suite references a fixture path that does not exist in the repo: " + path
+                            + " (referenced=" + referenced + ")");
+        }
     }
 }
