@@ -637,6 +637,8 @@ public class AgentController {
             @RequestParam(name = "to", defaultValue = "") String to,
             @RequestParam(name = "days", defaultValue = "0") int days) {
         requireAdmin();
+        String err = AlertSink.rangeError(from, to, days);
+        if (err != null) return ResponseEntity.badRequest().body(Map.of("error", err));
         long[] r = dateRangeMs(from, to, days);
         List<Map<String, Object>> rows = alertSink.sloDigestHistory(Math.max(1, Math.min(200, limit)), r[0], r[1]);
         if ("csv".equalsIgnoreCase(format)) {
@@ -686,6 +688,8 @@ public class AgentController {
             @RequestParam(name = "to", defaultValue = "") String to,
             @RequestParam(name = "days", defaultValue = "0") int days) {
         requireAdmin();
+        String err = AlertSink.rangeError(from, to, days);
+        if (err != null) return ResponseEntity.badRequest().body(Map.of("error", err));
         long[] r = dateRangeMs(from, to, days);
         List<Map<String, Object>> rows = alertSink.digestAuditTrail(Math.max(1, Math.min(200, limit)), r[0], r[1]);
         if ("csv".equalsIgnoreCase(format)) {
@@ -695,6 +699,38 @@ public class AgentController {
                     .body(AlertSink.digestAuditCsv(rows));
         }
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(rows);
+    }
+
+    /**
+     * Combined digest report for a date range: current mute state + digest history + mute/audit trail in one
+     * response (JSON default, or a single sectioned CSV with {@code ?format=csv}). Admin only.
+     */
+    @GetMapping("/admin/alerts/digest-report")
+    public ResponseEntity<?> adminAlertsDigestReport(
+            @RequestParam(name = "limit", defaultValue = "50") int limit,
+            @RequestParam(name = "format", defaultValue = "json") String format,
+            @RequestParam(name = "from", defaultValue = "") String from,
+            @RequestParam(name = "to", defaultValue = "") String to,
+            @RequestParam(name = "days", defaultValue = "0") int days) {
+        requireAdmin();
+        String err = AlertSink.rangeError(from, to, days);
+        if (err != null) return ResponseEntity.badRequest().body(Map.of("error", err));
+        long[] r = dateRangeMs(from, to, days);
+        int lim = Math.max(1, Math.min(200, limit));
+        Map<String, Object> mute = alertSink.digestMuteState();
+        List<Map<String, Object>> history = alertSink.sloDigestHistory(lim, r[0], r[1]);
+        List<Map<String, Object>> audit = alertSink.digestAuditTrail(lim, r[0], r[1]);
+        if ("csv".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok()
+                    .header("Content-Type", "text/csv")
+                    .header("Content-Disposition", "attachment; filename=\"imini-digest-report.csv\"")
+                    .body(AlertSink.digestReportCsv(mute, history, audit));
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("mute", mute);
+        out.put("history", history);
+        out.put("audit", audit);
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(out);
     }
 
     /** Clear any SLO digest mute. CSRF-guarded. Admin only. */

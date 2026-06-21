@@ -1666,6 +1666,50 @@ public class AlertSink {
         }
     }
 
+    /**
+     * Pure: validate a requested date range, returning an error message or null if valid. {@code days>0} ignores
+     * from/to. Otherwise a non-blank from/to must be ISO yyyy-MM-dd, and from must not be after to.
+     */
+    static String rangeError(String from, String to, int days) {
+        if (days > 0) return null;
+        java.time.LocalDate f = null, t = null;
+        if (from != null && !from.isBlank()) {
+            try { f = java.time.LocalDate.parse(from.trim()); }
+            catch (Exception e) { return "invalid 'from' date (expected YYYY-MM-DD)"; }
+        }
+        if (to != null && !to.isBlank()) {
+            try { t = java.time.LocalDate.parse(to.trim()); }
+            catch (Exception e) { return "invalid 'to' date (expected YYYY-MM-DD)"; }
+        }
+        if (f != null && t != null && f.isAfter(t)) return "'from' must not be after 'to'";
+        return null;
+    }
+
+    /** Current mute posture as a map {muted, muted_until, muted_reason} (computed against now). */
+    public Map<String, Object> digestMuteState() {
+        boolean muted = digestMuted(System.currentTimeMillis(), digestMuteUntil);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("muted", muted);
+        m.put("muted_until", muted ? digestMuteUntil : 0L);
+        m.put("muted_reason", muted ? digestMuteReason : "");
+        return m;
+    }
+
+    /** Pure: a single sectioned CSV bundling mute state + history + audit (for an incident-review download). */
+    static String digestReportCsv(Map<String, Object> mute, List<Map<String, Object>> history,
+                                  List<Map<String, Object>> audit) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# mute\n");
+        sb.append("muted,muted_until,muted_reason\n");
+        if (mute != null) {
+            sb.append(csvCell(mute.get("muted"))).append(',').append(csvCell(mute.get("muted_until")))
+              .append(',').append(csvCell(mute.get("muted_reason"))).append('\n');
+        }
+        sb.append("# history\n").append(digestHistoryCsv(history));
+        sb.append("# audit\n").append(digestAuditCsv(audit));
+        return sb.toString();
+    }
+
     /** Pure: CSV of digest history rows (header: time,posted,mode,window_ratio,delivery_success,budget_remaining,summary). */
     static String digestHistoryCsv(List<Map<String, Object>> rows) {
         StringBuilder sb = new StringBuilder("time,posted,mode,window_ratio,delivery_success,budget_remaining,summary\n");

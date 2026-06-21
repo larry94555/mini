@@ -4445,3 +4445,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** "History CSV" and "Audit CSV" links call `downloadDigestCsv(kind)`, which builds
   `/admin/alerts/slo-digest/history` or `/admin/alerts/digest-audit` with `?format=csv` plus the current
   from/to, and navigates to it. (URL building verified with `node`.)
+
+---
+
+# Combined digest report bundle, copy-link, range validation
+
+## 537. Range validation (AlertDigestReportBundleRangeValidationTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestReportBundleRangeValidationTest test`.
+- **Observe:** pure `rangeError(from,to,days)` returns null for empty/valid ranges and when `days>0`, and a clear
+  message for a malformed `from`/`to` or `from` after `to`. The history, digest-audit, and digest-report
+  endpoints return HTTP 400 `{error:...}` on a bad range.
+
+## 538. Combined digest report bundle (AlertDigestReportBundleRangeValidationTest + manual)
+
+- **Observe (unit):** `digestReportCsv(mute, history, audit)` emits a single CSV with `# mute`, `# history`, and
+  `# audit` sections; `digestMuteState()` returns `{muted, muted_until, muted_reason}`. **Manual (SQLite):**
+  `GET /admin/alerts/digest-report?from=&to=` returns `{mute, history, audit}` (JSON) or the sectioned CSV with
+  `?format=csv`.
+
+## 539. Copy report link (AlertDigestReportBundleRangeValidationTest + node)
+
+- **Observe:** the overview renders a "Copy report link" button wired to `copyDigestLink()`, which builds the
+  `/admin/alerts/digest-report` URL for the current from/to and copies it (clipboard API with a text fallback).
+  (JS syntax-checked + exercised with `node`.)
