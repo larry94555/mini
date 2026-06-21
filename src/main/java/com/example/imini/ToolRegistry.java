@@ -21,11 +21,12 @@ public class ToolRegistry {
 
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
                         McpManager mcp, RetrievalService retrieval, SkillService skills,
-                        AgentRegistry agents, MemoryStore memory) {
+                        AgentRegistry agents, MemoryStore memory, GitWriteTools gitWrite) {
         this.subAgent = subAgent;
         this.agents = agents;
         for (Tool t : builtins.all()) register(t);
         for (Tool t : codebase.all()) register(t);   // glob, grep, repo_tree, read_many, git_status, git_diff
+        for (Tool t : gitWrite.all()) register(t);   // git_stage, git_commit, git_branch (mutating)
         register(delegateTool(subAgent));
         register(delegateAgentTool());
         register(retrieval.searchTool());          // search_memory (RAG over the workspace)

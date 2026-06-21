@@ -12,8 +12,14 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,13 +53,30 @@ public class McpManager {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<Server> servers = new ArrayList<>();
+    private final List<Transport> transports = new ArrayList<>();
     private final List<Tool> tools = new ArrayList<>();
+    // Discovered MCP resources/prompts (for introspection + tests). resource = {server,uri,name}; prompt = {server,name,description}.
+    private final List<Map<String, Object>> resources = new ArrayList<>();
+    private final List<Map<String, Object>> prompts = new ArrayList<>();
 
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
 
     public List<Tool> tools() {
         return tools;
+    }
+
+    /** Discovered MCP resources across all servers (each: {server, uri, name}). */
+    public List<Map<String, Object>> resources() { return resources; }
+
+    /** Discovered MCP prompts across all servers (each: {server, name, description}). */
+    public List<Map<String, Object>> prompts() { return prompts; }
+
+    /** Minimal JSON-RPC transport: stdio (child process) or streamable HTTP (POST to a URL). */
+    interface Transport {
+        Map<String, Object> request(String method, Map<String, Object> params) throws IOException;
+        void notify(String method, Map<String, Object> params) throws IOException;
+        void close();
     }
 
     @PostConstruct
@@ -80,55 +103,210 @@ public class McpManager {
     @SuppressWarnings("unchecked")
     private void startServer(String name, Map<String, Object> conf) {
         try {
-            List<String> cmd = new ArrayList<>();
-            cmd.add(String.valueOf(conf.get("command")));
-            Object args = conf.get("args");
-            if (args instanceof List<?> list) {
-                for (Object a : list) cmd.add(String.valueOf(a));
+            String transportKind = String.valueOf(conf.getOrDefault("transport", "stdio")).toLowerCase();
+            Transport t;
+            if ("http".equals(transportKind) || "sse".equals(transportKind)) {
+                String url = String.valueOf(conf.get("url"));
+                if (url == null || url.isBlank() || "null".equals(url)) {
+                    log.warn("[mcp] server '" + name + "' uses transport=" + transportKind + " but has no 'url'; skipping.");
+                    return;
+                }
+                t = new HttpTransport(name, url);
+                log.info("[mcp] " + name + " over HTTP transport -> " + url);
+            } else {
+                List<String> cmd = new ArrayList<>();
+                cmd.add(String.valueOf(conf.get("command")));
+                Object args = conf.get("args");
+                if (args instanceof List<?> list) {
+                    for (Object a : list) cmd.add(String.valueOf(a));
+                }
+                ProcessBuilder pb = new ProcessBuilder(cmd);
+                Object env = conf.get("env");
+                if (env instanceof Map<?, ?> m) {
+                    m.forEach((k, v) -> pb.environment().put(String.valueOf(k), String.valueOf(v)));
+                }
+                Files.createDirectories(Path.of(".imini"));
+                pb.redirectError(new File(".imini/mcp-" + name + ".log")); // keep stdout clean for JSON-RPC
+                Process proc = pb.start();
+                Server srv = new Server(name, proc);
+                servers.add(srv);
+                t = srv;
             }
-
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            Object env = conf.get("env");
-            if (env instanceof Map<?, ?> m) {
-                m.forEach((k, v) -> pb.environment().put(String.valueOf(k), String.valueOf(v)));
-            }
-            Files.createDirectories(Path.of(".imini"));
-            pb.redirectError(new File(".imini/mcp-" + name + ".log")); // keep stdout clean for JSON-RPC
-            Process proc = pb.start();
-
-            Server srv = new Server(name, proc);
-            servers.add(srv);
-
-            // --- handshake ---
-            Map<String, Object> initParams = new LinkedHashMap<>();
-            initParams.put("protocolVersion", PROTOCOL_VERSION);
-            initParams.put("capabilities", Map.of());
-            initParams.put("clientInfo", Map.of("name", "imini", "version", "0.3"));
-            srv.request("initialize", initParams);
-            srv.notify("notifications/initialized", Map.of());
-
-            // --- discover tools ---
-            Map<String, Object> listed = srv.request("tools/list", Map.of());
-            Map<String, Object> result = (Map<String, Object>) listed.getOrDefault("result", Map.of());
-            List<Map<String, Object>> mcpTools =
-                    (List<Map<String, Object>>) result.getOrDefault("tools", List.of());
-
-            for (Map<String, Object> t : mcpTools) {
-                String toolName = String.valueOf(t.get("name"));
-                String desc = String.valueOf(t.getOrDefault("description", ""));
-                Map<String, Object> schema = (Map<String, Object>) t.get("inputSchema");
-                if (schema == null) schema = Map.of("type", "object", "properties", Map.of());
-
-                String exposedName = sanitize(name + "_" + toolName);
-                final String original = toolName;
-                // MCP tools are external code -> treat as mutating so the permission gate applies.
-                tools.add(new Tool(exposedName, "[MCP:" + name + "] " + desc, schema, true, true,
-                        callArgs -> srv.callTool(original, callArgs)));
-                log.info("[mcp] " + name + " -> tool " + exposedName);
-            }
+            transports.add(t);
+            discover(name, t);
         } catch (Exception ex) {
             log.warn("[mcp] server '" + name + "' failed: " + ex.getMessage());
         }
+    }
+
+    /** Handshake then discover tools, resources, and prompts over the given transport. */
+    @SuppressWarnings("unchecked")
+    private void discover(String name, Transport t) throws IOException {
+        // --- handshake ---
+        Map<String, Object> initParams = new LinkedHashMap<>();
+        initParams.put("protocolVersion", PROTOCOL_VERSION);
+        initParams.put("capabilities", Map.of());
+        initParams.put("clientInfo", Map.of("name", "imini", "version", "0.3"));
+        t.request("initialize", initParams);
+        t.notify("notifications/initialized", Map.of());
+
+        // --- discover tools ---
+        Map<String, Object> listed = t.request("tools/list", Map.of());
+        Map<String, Object> result = (Map<String, Object>) listed.getOrDefault("result", Map.of());
+        List<Map<String, Object>> mcpTools = (List<Map<String, Object>>) result.getOrDefault("tools", List.of());
+        for (Map<String, Object> td : mcpTools) {
+            String toolName = String.valueOf(td.get("name"));
+            String desc = String.valueOf(td.getOrDefault("description", ""));
+            Map<String, Object> schema = (Map<String, Object>) td.get("inputSchema");
+            if (schema == null) schema = Map.of("type", "object", "properties", Map.of());
+            String exposedName = sanitize(name + "_" + toolName);
+            final String original = toolName;
+            // MCP tools are external code -> treat as mutating so the permission gate applies.
+            tools.add(new Tool(exposedName, "[MCP:" + name + "] " + desc, schema, true, true,
+                    callArgs -> callTool(t, name, original, callArgs)));
+            log.info("[mcp] " + name + " -> tool " + exposedName);
+        }
+
+        // --- discover resources (best-effort; servers may not support them) ---
+        try {
+            Map<String, Object> rl = t.request("resources/list", Map.of());
+            Map<String, Object> rr = (Map<String, Object>) rl.getOrDefault("result", Map.of());
+            List<Map<String, Object>> rs = (List<Map<String, Object>>) rr.getOrDefault("resources", List.of());
+            for (Map<String, Object> r : rs) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("server", name);
+                entry.put("uri", String.valueOf(r.get("uri")));
+                entry.put("name", String.valueOf(r.getOrDefault("name", r.get("uri"))));
+                resources.add(entry);
+            }
+            if (!rs.isEmpty()) {
+                tools.add(new Tool(sanitize(name + "_read_resource"),
+                        "[MCP:" + name + "] Read an MCP resource by uri (list available ones with no args).",
+                        Map.of("type", "object", "properties",
+                                Map.of("uri", Map.of("type", "string", "description", "Resource uri to read; omit to list."))),
+                        false, true, callArgs -> readResource(t, name, callArgs)));
+                log.info("[mcp] " + name + " -> " + rs.size() + " resource(s)");
+            }
+        } catch (Exception e) {
+            log.info("[mcp] " + name + " has no resources (" + e.getMessage() + ")");
+        }
+
+        // --- discover prompts (best-effort) ---
+        try {
+            Map<String, Object> pl = t.request("prompts/list", Map.of());
+            Map<String, Object> pr = (Map<String, Object>) pl.getOrDefault("result", Map.of());
+            List<Map<String, Object>> ps = (List<Map<String, Object>>) pr.getOrDefault("prompts", List.of());
+            for (Map<String, Object> p : ps) {
+                String pname = String.valueOf(p.get("name"));
+                String pdesc = String.valueOf(p.getOrDefault("description", ""));
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("server", name);
+                entry.put("name", pname);
+                entry.put("description", pdesc);
+                prompts.add(entry);
+                // Expose each prompt as a callable tool (the Claude-Code "/mcp__server__prompt" surface).
+                final String original = pname;
+                tools.add(new Tool(sanitize(name + "_prompt_" + pname),
+                        "[MCP:" + name + " prompt] " + pdesc,
+                        Map.of("type", "object", "properties",
+                                Map.of("arguments", Map.of("type", "object", "description", "Prompt arguments (optional)."))),
+                        false, true, callArgs -> getPrompt(t, name, original, callArgs)));
+                log.info("[mcp] " + name + " -> prompt " + pname);
+            }
+        } catch (Exception e) {
+            log.info("[mcp] " + name + " has no prompts (" + e.getMessage() + ")");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String callTool(Transport t, String server, String toolName, Map<String, Object> arguments) {
+        try {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("name", toolName);
+            params.put("arguments", arguments == null ? Map.of() : arguments);
+            Map<String, Object> resp = t.request("tools/call", params);
+            Object error = resp.get("error");
+            if (error != null) return "ERROR from MCP tool: " + error;
+            Map<String, Object> result = (Map<String, Object>) resp.get("result");
+            if (result == null) return "(no result)";
+            String text = extractText(result.get("content"));
+            return text.isEmpty() ? String.valueOf(result) : text;
+        } catch (Exception e) {
+            return "ERROR calling MCP tool '" + toolName + "': " + e.getMessage();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String readResource(Transport t, String server, Map<String, Object> args) {
+        try {
+            String uri = args == null ? "" : String.valueOf(args.getOrDefault("uri", ""));
+            if (uri.isBlank() || "null".equals(uri)) {
+                StringBuilder sb = new StringBuilder("Available resources on '" + server + "':\n");
+                for (Map<String, Object> r : resources) {
+                    if (server.equals(r.get("server"))) sb.append("  ").append(r.get("uri")).append("  (").append(r.get("name")).append(")\n");
+                }
+                return sb.toString().trim();
+            }
+            Map<String, Object> resp = t.request("resources/read", Map.of("uri", uri));
+            Object error = resp.get("error");
+            if (error != null) return "ERROR reading MCP resource: " + error;
+            Map<String, Object> result = (Map<String, Object>) resp.get("result");
+            if (result == null) return "(no result)";
+            // result.contents: [{uri, mimeType, text|blob}]
+            List<Map<String, Object>> contents = (List<Map<String, Object>>) result.getOrDefault("contents", List.of());
+            StringBuilder sb = new StringBuilder();
+            for (Map<String, Object> c : contents) {
+                Object text = c.get("text");
+                if (text != null) sb.append(text).append("\n");
+            }
+            String out = sb.toString().trim();
+            return out.isEmpty() ? String.valueOf(result) : out;
+        } catch (Exception e) {
+            return "ERROR reading MCP resource: " + e.getMessage();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String getPrompt(Transport t, String server, String promptName, Map<String, Object> args) {
+        try {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("name", promptName);
+            Object a = args == null ? null : args.get("arguments");
+            params.put("arguments", a instanceof Map ? a : Map.of());
+            Map<String, Object> resp = t.request("prompts/get", params);
+            Object error = resp.get("error");
+            if (error != null) return "ERROR getting MCP prompt: " + error;
+            Map<String, Object> result = (Map<String, Object>) resp.get("result");
+            if (result == null) return "(no result)";
+            // result.messages: [{role, content:{type:text,text}}]
+            List<Map<String, Object>> msgs = (List<Map<String, Object>>) result.getOrDefault("messages", List.of());
+            StringBuilder sb = new StringBuilder();
+            for (Map<String, Object> m : msgs) {
+                Object content = m.get("content");
+                String text = extractText(content instanceof List ? content : List.of(content));
+                if (!text.isBlank()) sb.append(text).append("\n");
+            }
+            String out = sb.toString().trim();
+            return out.isEmpty() ? String.valueOf(result) : out;
+        } catch (Exception e) {
+            return "ERROR getting MCP prompt: " + e.getMessage();
+        }
+    }
+
+    /** Pull text out of an MCP content value (a list of {type:text,text} parts, or a single such map). */
+    @SuppressWarnings("unchecked")
+    private static String extractText(Object content) {
+        StringBuilder sb = new StringBuilder();
+        if (content instanceof List<?> parts) {
+            for (Object p : parts) {
+                if (p instanceof Map<?, ?> part && "text".equals(part.get("type"))) {
+                    sb.append(part.get("text")).append("\n");
+                }
+            }
+        } else if (content instanceof Map<?, ?> m && "text".equals(m.get("type"))) {
+            sb.append(m.get("text")).append("\n");
+        }
+        return sb.toString().trim();
     }
 
     private static String sanitize(String s) {
@@ -137,7 +315,7 @@ public class McpManager {
 
     @PreDestroy
     public void stop() {
-        for (Server s : servers) s.close();
+        for (Transport t : transports) t.close();
     }
 
     /**
@@ -148,7 +326,7 @@ public class McpManager {
      * Limitation worth knowing: a misbehaving server that never replies will block this thread.
      * A production client would add per-call timeouts on a separate reader thread.
      */
-    private final class Server {
+    private final class Server implements Transport {
         private final String name;
         private final Process proc;
         private final BufferedWriter out;
@@ -169,7 +347,7 @@ public class McpManager {
             });
         }
 
-        synchronized Map<String, Object> request(String method, Map<String, Object> params) throws IOException {
+        @Override public synchronized Map<String, Object> request(String method, Map<String, Object> params) throws IOException {
             if (dead) throw new IOException("MCP server '" + name + "' is not running.");
             int id = nextId++;
             Map<String, Object> msg = new LinkedHashMap<>();
@@ -207,41 +385,12 @@ public class McpManager {
             }
         }
 
-        synchronized void notify(String method, Map<String, Object> params) throws IOException {
+        @Override public synchronized void notify(String method, Map<String, Object> params) throws IOException {
             Map<String, Object> msg = new LinkedHashMap<>();
             msg.put("jsonrpc", "2.0");
             msg.put("method", method);
             msg.put("params", params);
             writeLine(msg);
-        }
-
-        @SuppressWarnings("unchecked")
-        String callTool(String toolName, Map<String, Object> arguments) {
-            try {
-                Map<String, Object> params = new LinkedHashMap<>();
-                params.put("name", toolName);
-                params.put("arguments", arguments == null ? Map.of() : arguments);
-                Map<String, Object> resp = request("tools/call", params);
-
-                Object error = resp.get("error");
-                if (error != null) return "ERROR from MCP tool: " + error;
-
-                Map<String, Object> result = (Map<String, Object>) resp.get("result");
-                if (result == null) return "(no result)";
-
-                StringBuilder sb = new StringBuilder();
-                Object content = result.get("content");
-                if (content instanceof List<?> parts) {
-                    for (Object p : parts) {
-                        Map<String, Object> part = (Map<String, Object>) p;
-                        if ("text".equals(part.get("type"))) sb.append(part.get("text")).append("\n");
-                    }
-                }
-                String text = sb.toString().trim();
-                return text.isEmpty() ? String.valueOf(result) : text;
-            } catch (Exception e) {
-                return "ERROR calling MCP tool '" + toolName + "': " + e.getMessage();
-            }
         }
 
         private void writeLine(Map<String, Object> msg) throws IOException {
@@ -258,7 +407,7 @@ public class McpManager {
             }
         }
 
-        void close() {
+        @Override public void close() {
             try {
                 io.shutdownNow();
                 proc.destroy();
@@ -266,5 +415,107 @@ public class McpManager {
                 // best effort
             }
         }
+    }
+
+    /**
+     * Streamable-HTTP JSON-RPC transport: POSTs each request to a single endpoint URL and reads the
+     * response. Accepts either a plain {@code application/json} body or a {@code text/event-stream}
+     * (SSE) body, from which it extracts the first {@code data:} JSON line. Notifications are POSTed
+     * fire-and-forget. This is the dependency-free, non-streaming subset that covers most simple
+     * HTTP MCP servers; long-lived server-initiated SSE streams are out of scope here.
+     */
+    private final class HttpTransport implements Transport {
+        private final String name;
+        private final URI uri;
+        private final HttpClient client;
+        private int nextId = 1;
+
+        HttpTransport(String name, String url) {
+            this.name = name;
+            this.uri = URI.create(url);
+            this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        }
+
+        @Override public synchronized Map<String, Object> request(String method, Map<String, Object> params) throws IOException {
+            Map<String, Object> msg = new LinkedHashMap<>();
+            msg.put("jsonrpc", "2.0");
+            msg.put("id", nextId++);
+            msg.put("method", method);
+            msg.put("params", params);
+            try {
+                HttpRequest req = HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(toolTimeoutSeconds))
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "application/json, text/event-stream")
+                        .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(msg), StandardCharsets.UTF_8))
+                        .build();
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (resp.statusCode() / 100 != 2) {
+                    throw new IOException("MCP HTTP server '" + name + "' returned " + resp.statusCode());
+                }
+                Map<String, Object> parsed = parseHttpBody(resp.body());
+                if (parsed == null) throw new IOException("MCP HTTP server '" + name + "' returned no JSON-RPC body");
+                return parsed;
+            } catch (IOException ioe) {
+                throw ioe;
+            } catch (Exception e) {
+                throw new IOException("MCP HTTP request to '" + name + "' failed: " + e.getMessage());
+            }
+        }
+
+        @Override public synchronized void notify(String method, Map<String, Object> params) throws IOException {
+            Map<String, Object> msg = new LinkedHashMap<>();
+            msg.put("jsonrpc", "2.0");
+            msg.put("method", method);
+            msg.put("params", params);
+            try {
+                HttpRequest req = HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(toolTimeoutSeconds))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(msg), StandardCharsets.UTF_8))
+                        .build();
+                client.send(req, HttpResponse.BodyHandlers.discarding());
+            } catch (Exception e) {
+                // notifications are best-effort
+            }
+        }
+
+        @Override public void close() { /* stateless HTTP; nothing to tear down */ }
+    }
+
+    /** Parse an HTTP MCP body: plain JSON, or SSE — extract the first {@code data:} JSON line. Pure + static for testing. */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> parseHttpBodyStatic(ObjectMapper mapper, String body) {
+        String json = jsonFromHttpBody(body);
+        if (json == null) return null;
+        try {
+            return mapper.readValue(json, Map.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Pure: given an HTTP MCP body, return the JSON-RPC payload string — the body itself if it is a JSON
+     * object, or the first {@code data:} line's JSON for an SSE ({@code text/event-stream}) body; null if
+     * neither. Separated from JSON parsing so the transport selection is unit-testable without Jackson.
+     */
+    static String jsonFromHttpBody(String body) {
+        if (body == null) return null;
+        String trimmed = body.trim();
+        if (trimmed.isEmpty()) return null;
+        if (trimmed.startsWith("{")) return trimmed;
+        for (String line : trimmed.split("\\r?\\n")) {
+            String l = line.trim();
+            if (l.startsWith("data:")) {
+                String json = l.substring("data:".length()).trim();
+                if (json.startsWith("{")) return json;
+            }
+        }
+        return null;
+    }
+
+    private Map<String, Object> parseHttpBody(String body) {
+        return parseHttpBodyStatic(mapper, body);
     }
 }

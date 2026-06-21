@@ -90,10 +90,41 @@ public class AgentEngine {
     /** Run with a possibly-multimodal user content (a String, or an OpenAI parts array for images). */
     public String run(String systemPrompt, Object userContent, Map<String, Tool> tools,
                       Mode mode, String label, String sessionId, RunSink sink) throws Exception {
+        RunSink s = sink == null ? RunSink.NOOP : sink;
+        boolean mainTurn = "main".equals(label) && userContent instanceof String;
+        String promptStr = mainTurn ? (String) userContent : null;
+
+        // userPromptSubmit hooks: may block the whole turn or inject extra context before the prompt.
+        String injected = null;
+        if (mainTurn && hooks.hasPromptHooks()) {
+            HookService.PromptResult pr = hooks.runUserPromptSubmit(promptStr);
+            if (pr.blocked()) {
+                s.log("[hook:userPromptSubmit] blocked turn");
+                return pr.message();
+            }
+            if (pr.injectedContext() != null && !pr.injectedContext().isBlank()) {
+                injected = pr.injectedContext();
+                s.log("[hook:userPromptSubmit] injected context (" + injected.length() + " chars)");
+            }
+        }
+
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(msg("system", systemPrompt));
+        if (injected != null) {
+            messages.add(msg("system", "<hook-context>\n" + injected + "\n</hook-context>"));
+        }
         messages.add(msgObj("user", userContent));
-        return converse(messages, tools, mode, label, sessionId, sink).answer();
+        String answer = converse(messages, tools, mode, label, sessionId, s).answer();
+
+        // stop hooks: fire when the turn finishes; their stdout is appended to the final answer.
+        if (mainTurn && hooks.hasStopHooks()) {
+            String stopOut = hooks.runStop(promptStr, answer);
+            if (stopOut != null && !stopOut.isBlank()) {
+                s.log("[hook:stop] appended " + stopOut.length() + " chars");
+                answer = answer + "\n[stop-hook]\n" + stopOut;
+            }
+        }
+        return answer;
     }
 
     public AgentResult converse(List<Map<String, Object>> startingMessages, Map<String, Tool> tools,
