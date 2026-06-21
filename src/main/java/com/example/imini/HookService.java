@@ -18,16 +18,21 @@ import java.util.Map;
  *   { "preToolUse":  [ { "match": "run_command", "command": "..." } ],
  *     "postToolUse": [ { "match": "edit_file",   "command": "..." } ],
  *     "userPromptSubmit": [ { "command": "..." } ],
- *     "stop":             [ { "command": "..." } ] }
+ *     "stop":             [ { "command": "..." } ],
+ *     "sessionStart":     [ { "command": "..." } ],
+ *     "notification":     [ { "command": "..." } ] }
  *
- *   - "match" is a tool name or "*" (preToolUse/postToolUse only; prompt/stop hooks always run).
+ *   - "match" is a tool name or "*" (preToolUse/postToolUse only; the other events always run).
  *   - A preToolUse hook that exits NON-ZERO blocks the tool (its output becomes the tool result).
  *   - A userPromptSubmit hook that exits NON-ZERO blocks the whole turn (its output is returned to the
  *     user instead of running the model); its stdout on a zero exit is injected as extra context.
  *   - postToolUse stdout is appended to the tool result (e.g. run a linter/formatter and show output).
  *   - stop hooks fire when a turn finishes; their stdout is appended to the final answer (e.g. notify).
+ *   - sessionStart hooks fire on the first turn of a session; stdout is injected as session context.
+ *   - notification hooks fire on an attention event (e.g. the agent is requesting approval); fire-and-forget.
  *   - Hooks receive context via env: IMINI_TOOL, IMINI_ARGS (JSON), IMINI_RESULT (post only),
- *     IMINI_PROMPT (userPromptSubmit), IMINI_ANSWER (stop).
+ *     IMINI_PROMPT (userPromptSubmit), IMINI_ANSWER (stop), IMINI_SESSION (sessionStart),
+ *     IMINI_NOTIFY (notification).
  *
  * Off entirely if hooks.json is absent. Hook failures are logged and do NOT block (so a broken hook
  * can't brick the agent).
@@ -46,6 +51,8 @@ public class HookService {
     private final List<Hook> post = new ArrayList<>();
     private final List<Hook> userPromptSubmit = new ArrayList<>();
     private final List<Hook> stop = new ArrayList<>();
+    private final List<Hook> sessionStart = new ArrayList<>();
+    private final List<Hook> notification = new ArrayList<>();
 
     @PostConstruct
     @SuppressWarnings("unchecked")
@@ -60,8 +67,11 @@ public class HookService {
             addHooks(post, cfg.get("postToolUse"));
             addHooks(userPromptSubmit, cfg.get("userPromptSubmit"));
             addHooks(stop, cfg.get("stop"));
+            addHooks(sessionStart, cfg.get("sessionStart"));
+            addHooks(notification, cfg.get("notification"));
             log.info("[hooks] loaded " + pre.size() + " pre / " + post.size() + " post / "
-                    + userPromptSubmit.size() + " userPromptSubmit / " + stop.size() + " stop hook(s).");
+                    + userPromptSubmit.size() + " userPromptSubmit / " + stop.size() + " stop / "
+                    + sessionStart.size() + " sessionStart / " + notification.size() + " notification hook(s).");
         } catch (Exception e) {
             log.warn("[hooks] could not read hooks.json: " + e.getMessage());
         }
@@ -139,6 +149,42 @@ public class HookService {
 
     /** True if any stop hooks are configured. */
     public boolean hasStopHooks() { return !stop.isEmpty(); }
+
+    /** True if any sessionStart hooks are configured. */
+    public boolean hasSessionStartHooks() { return !sessionStart.isEmpty(); }
+
+    /** True if any notification hooks are configured. */
+    public boolean hasNotificationHooks() { return !notification.isEmpty(); }
+
+    /**
+     * Fires sessionStart hooks the first time a session runs. Like userPromptSubmit it cannot block; any
+     * stdout is returned as context to inject at the start of the session (env IMINI_SESSION).
+     */
+    public String runSessionStart(String sessionId) {
+        StringBuilder injected = new StringBuilder();
+        Map<String, String> e = new HashMap<>();
+        if (sessionId != null) e.put("IMINI_SESSION", sessionId);
+        for (Hook h : sessionStart) {
+            Run r = exec(h.command(), e);
+            if (r != null && !r.out.isBlank()) injected.append(r.out.trim()).append("\n");
+        }
+        return injected.toString().trim();
+    }
+
+    /**
+     * Fires notification hooks for an attention-worthy event (e.g. the agent is requesting approval).
+     * Fire-and-forget: output is logged, never blocks. env: IMINI_NOTIFY (the message), IMINI_TOOL (if any).
+     */
+    public void runNotification(String message, String tool) {
+        if (notification.isEmpty()) return;
+        Map<String, String> e = new HashMap<>();
+        if (message != null) e.put("IMINI_NOTIFY", message.length() > 2000 ? message.substring(0, 2000) : message);
+        if (tool != null) e.put("IMINI_TOOL", tool);
+        for (Hook h : notification) {
+            Run r = exec(h.command(), e);
+            if (r != null && r.exit != 0) log.info("[hooks] notification hook exited " + r.exit);
+        }
+    }
 
     private boolean matches(String match, String tool) {
         return "*".equals(match) || match.equals(tool);

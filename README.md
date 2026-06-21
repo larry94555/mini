@@ -665,15 +665,25 @@ and capability gate as `write_file` and `run_command`** — nothing is committed
 recommended flow is: make edits, review with `git_diff staged=true`, draft a message with the
 `commit-message` skill, then `git_commit`. `git_commit` refuses with a clear error when nothing is staged
 (unless `all=true`), and `git_branch` rejects unsafe names (flags, whitespace, `..`, shell metacharacters).
+**Pushing** is available via `git_push` but is **off by default** — set `git.allow-push=true` to enable it
+(it stays mutating/approval-gated and subject to capability scoping, since pushing affects shared remote
+state). When a `git_commit`/`git_stage` approval is requested in the web UI, the **staged diff** (`git diff
+--cached --stat`) is now surfaced alongside the tool arguments, so a reviewer sees exactly what will land
+before approving.
 
-**Hook lifecycle (`hooks.json`).** Beyond the `PreToolUse`/`PostToolUse` tool hooks, two turn-level events
-are now supported. A **`userPromptSubmit`** hook runs before a turn: a non-zero exit **blocks** the turn
+**Hook lifecycle (`hooks.json`).** Beyond the `PreToolUse`/`PostToolUse` tool hooks, four turn-level events
+are supported. A **`userPromptSubmit`** hook runs before a turn: a non-zero exit **blocks** the turn
 (its output is returned to the user), and stdout on a zero exit is **injected** as extra context ahead of
 the prompt (env `IMINI_PROMPT`). A **`stop`** hook runs when a turn finishes; its stdout is appended to the
-final answer (env `IMINI_PROMPT`, `IMINI_ANSWER`) — handy for notifications or a final lint. Example:
+final answer (env `IMINI_PROMPT`, `IMINI_ANSWER`). A **`sessionStart`** hook fires on the first turn of a
+session; its stdout is injected as session context (env `IMINI_SESSION`) — handy for loading per-session
+state. A **`notification`** hook fires on an attention event (currently: the agent requesting approval),
+fire-and-forget (env `IMINI_NOTIFY`, `IMINI_TOOL`) — handy for a desktop ping. Example:
 
 ```json
 { "userPromptSubmit": [ { "command": "./scripts/inject-ticket-context.sh" } ],
+  "sessionStart":     [ { "command": "cat .session-brief.md" } ],
+  "notification":     [ { "command": "notify-send \"imini needs approval\"" } ],
   "stop":             [ { "command": "notify-send 'imini finished'" } ] }
 ```
 
@@ -682,7 +692,10 @@ As before, hooks are off entirely when `hooks.json` is absent, and a hook failur
 **MCP resources, prompts, and an HTTP transport.** The MCP client now discovers more than tools. If a
 server advertises **resources**, imini registers a `<server>_read_resource` tool (call it with no args to
 list, or a `uri` to read). If a server advertises **prompts**, each is exposed as a callable
-`<server>_prompt_<name>` tool that runs `prompts/get` and returns the rendered messages. Servers can also
+`<server>_prompt_<name>` tool that runs `prompts/get` and returns the rendered messages — and is **also
+invokable as a slash command** `/mcp__<server>__<name>` (listed under `/help`), so you can run an MCP prompt
+the way Claude Code does. Arguments are passed as `key=value` tokens, e.g. `/mcp__docs__review file=A.java`;
+the rendered prompt becomes the turn's input. Servers can also
 be reached over **HTTP** instead of stdio: in `mcp.json`, set `"transport": "http"` and a `"url"` (a
 streamable-HTTP JSON-RPC endpoint; plain-JSON and single-event SSE responses are supported):
 

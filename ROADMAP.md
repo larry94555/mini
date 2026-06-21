@@ -31,19 +31,20 @@ request is explicitly about trust, security, or operations.
 ### Build next (ranked; re-verify against README + source before starting)
 
 The three previous "Build next" workflow gaps — **git write workflow**, **hook lifecycle breadth**, and
-**MCP resources + prompts + HTTP transport** — are now **complete** (see Recently completed). With those
-done, mini represents the high-value, frequently-used Claude Code **workflow** features end to end.
+**MCP resources + prompts + HTTP transport** — are complete, and so are the follow-on polish items that
+finished them: **MCP prompts as `/mcp__server__prompt` slash commands**, **`SessionStart`/`Notification`
+hooks**, and **`git_push` (off by default) + the staged diff in the approval UI** (see Recently completed).
 
-The remaining candidates are smaller completeness/quality items, not new high-frequency workflows. In
-rough priority:
+With those done, mini represents the high-value, frequently-used Claude Code **workflow** features end to
+end, and the supporting surfaces (hooks, MCP, git) are complete. **There is no remaining high-frequency
+workflow gap.** Prefer **educational depth** over new surface:
 
-1. **Surface MCP prompts as real `/`-slash-commands** — they are currently exposed as callable
-   `<server>_prompt_<name>` *tools*; wiring them into the slash-command dispatcher (like Claude Code's
-   `/mcp__server__prompt`) is the remaining UX step.
-2. **Hook event completeness** — add `SessionStart` / `Notification` events to round out the hook
-   lifecycle (the high-value `PreToolUse`/`PostToolUse`/`UserPromptSubmit`/`Stop` set is done).
-3. **Git workflow polish** — `git_push` (capability-gated, off by default) and surfacing the staged diff
-   in the approval UI rather than only in the tool result.
+1. **Educational depth** — more trace walkthroughs, loop/approval/MCP/hook diagrams, and deterministic
+   eval scenarios that exercise the new git/hook/MCP paths.
+2. **Test depth** — a live-server integration test for the MCP stdio/HTTP round-trip (resources/prompts),
+   and an end-to-end git-commit approval-flow test.
+3. **Only if a real need appears** — SSE *streaming* MCP (current HTTP transport handles single-response
+   JSON/SSE), or additional `Notification` trigger points.
 
 If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
 **done** — prefer educational depth (docs, diagrams, eval scenarios) over inventing new surface.
@@ -149,6 +150,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- MCP prompts as slash commands + SessionStart/Notification hooks + git_push & approval-diff: discovered MCP prompts are now invokable as `/mcp__<server>__<name>` slash commands (listed in `/help`, `key=value` args parsed, rendered prompt becomes the turn input); `HookService` gains `sessionStart` (first-turn context injection) and `notification` (fires when the agent requests approval) events; and a capability-gated, off-by-default `git_push` tool (`git.allow-push`) plus the staged diff (`git diff --cached --stat`) surfaced in the commit approval prompt complete the git workflow.
 
 - Git write workflow + hook breadth + MCP resources/prompts/HTTP transport: new mutating `git_stage`/`git_commit`/`git_branch` tools (approval-gated, message via the `commit-message` skill) complete the edit→verify→commit loop; `HookService` gains `userPromptSubmit` (block-or-inject) and `stop` (append) turn-level events alongside the existing tool hooks; and the MCP client discovers `resources/list`+`resources/read` (a `<server>_read_resource` tool) and `prompts/list`+`prompts/get` (per-prompt tools) and can reach servers over an HTTP transport (`mcp.json` `transport:"http"`, plain-JSON or single-event SSE) as well as stdio.
 

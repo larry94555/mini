@@ -46,7 +46,7 @@ class GitHookMcpWorkflowTest {
         for (Tool t : g.all()) {
             assertTrue(t.mutating, t.name + " must be mutating (goes through approval)");
         }
-        assertEquals(3, g.all().size());
+        assertEquals(4, g.all().size());
     }
 
     // ---- Feature 3: MCP — HTTP/SSE body -> JSON-RPC payload selection (pure) ----

@@ -70,6 +70,8 @@ public class PermissionService {
   private String approvalTimeoutAction;
 
   private final Approvals approvals;
+  private final GitInspector git;
+  private final HookService hooks;
   private final ObjectMapper mapper = new ObjectMapper();
   private final Set<String> allow = new LinkedHashSet<>();
   private final Set<String> deny = new LinkedHashSet<>();
@@ -78,8 +80,10 @@ public class PermissionService {
 
   private Path root;
 
-  public PermissionService(Approvals approvals) {
+  public PermissionService(Approvals approvals, GitInspector git, HookService hooks) {
     this.approvals = approvals;
+    this.git = git;
+    this.hooks = hooks;
   }
 
   @PostConstruct
@@ -146,11 +150,28 @@ public class PermissionService {
   }
 
   private Decision decideRemote(String sessionId, String tool, Map args) {
+    // Notify (attention: the agent is requesting approval) — fire-and-forget if configured.
+    hooks.runNotification("Approval requested for tool '" + tool + "'", tool);
+
+    // For a commit, surface the staged diff in the approval UI so the reviewer sees what will be committed.
+    Map enriched = args;
+    if (("git_commit".equals(tool) || "git_stage".equals(tool)) && git != null) {
+      try {
+        String staged = git.diffCachedStat();
+        if (staged != null && !staged.isBlank()) {
+          enriched = new java.util.LinkedHashMap<>(args);
+          enriched.put("_staged_diff", staged.length() > 4000 ? staged.substring(0, 4000) : staged);
+        }
+      } catch (Exception ignore) {
+        // best effort; never block approval on a diff failure
+      }
+    }
+
     String argsJson;
     try {
-      argsJson = mapper.writeValueAsString(args);
+      argsJson = mapper.writeValueAsString(enriched);
     } catch (Exception e) {
-      argsJson = String.valueOf(args);
+      argsJson = String.valueOf(enriched);
     }
 
     String decision =

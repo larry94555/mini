@@ -4573,3 +4573,35 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Honest note:** the JSON-RPC round-trip (stdio child process / live HTTP server) is CI/live-verified,
   not exercised in the offline stub build (the offline JSON mapper is a no-op); the pure body-selection,
   argv, and hook logic above are what the offline harness checks.
+
+---
+
+# MCP prompts as slash commands, SessionStart/Notification hooks, git_push & approval-diff
+
+## 552. MCP prompt slash-command parsing (McpPromptHookGitPushTest)
+
+- **Run:** `./mvnw -Dtest=McpPromptHookGitPushTest test`.
+- **Observe:** the pure parsers are correct — `commandToken` extracts the leading `/name`, `argString`
+  returns the remainder, and `parsePromptArgs` turns `key=value` tokens into an arguments map (ignoring
+  tokens without `=`). With no `mcp.json`, `isPromptCommand` is false, `promptCommandHelp` is empty, and
+  `renderPromptCommand` returns null. A discovered prompt is invokable as `/mcp__<server>__<name>`
+  (listed in `/help`); the rendered prompt becomes the turn input.
+- **Honest note:** the live `prompts/get` round-trip (stdio/HTTP server) is CI/live-verified, not
+  exercised offline (the offline JSON mapper is a no-op); the slash parsing/dispatch logic is what the
+  offline harness checks.
+
+## 553. SessionStart & Notification hooks (McpPromptHookGitPushTest + shell harness)
+
+- **Observe:** `hasSessionStartHooks`/`hasNotificationHooks` are false without `hooks.json`;
+  `runSessionStart` returns "" with no hooks and (verified against a real `sh -c` hook) injects the
+  hook's stdout as `<session-context>` on the first turn of a session; `runNotification` is a no-op when
+  unconfigured and fires on an approval request otherwise. Wired in `AgentLoop` (sessionStart, once per
+  session) and `PermissionService.decideRemote` (notification, on approval).
+
+## 554. git_push (off by default) + staged diff in approval (McpPromptHookGitPushTest + real-repo harness)
+
+- **Observe:** `pushArgs` builds `git push [-u] [remote] [branch]` omitting blanks; `isValidRemoteName`
+  rejects flags/whitespace/empty; `git_push` is `mutating` and **disabled by default** (returns an ERROR
+  unless `git.allow-push=true`). Verified end-to-end: with the flag enabled, a real push lands the commit
+  on a bare remote. `PermissionService.decideRemote` adds `git diff --cached --stat` to the approval
+  payload for `git_commit`/`git_stage` so the staged diff shows in the UI.
