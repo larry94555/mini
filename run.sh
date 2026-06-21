@@ -4,6 +4,13 @@
 set -eu
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 
+# Dev subcommands (run before the launcher banner). The same gate CI runs, one command:
+#   ./run.sh check-docs            # validate docs references + links (exit 1 on breakage)
+#   WARN_ONLY=1 ./run.sh check-docs  # report only
+if [ "${1:-}" = "check-docs" ]; then
+  exec sh scripts/check-docs.sh
+fi
+
 echo "============================================"
 echo "  imini launcher"
 echo "============================================"

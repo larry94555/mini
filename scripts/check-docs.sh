@@ -57,6 +57,27 @@ scan 'cases? [0-9]+(-[0-9]+)?' | grep -oE '[0-9]+' | sort -nu | while IFS= read 
     || echo "TESTING.md case referenced but no '## $n.' heading exists: $n" >> "$broken"
 done
 
+# 4) Relative Markdown links: [text](TARGET) -> the target must exist, resolved relative to the file the
+#    link appears in. http(s):// / mailto: / pure #anchor links are ignored; a trailing-slash or directory
+#    target is checked as a directory; an #anchor and an optional "title" suffix are stripped first.
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  d="$(dirname "$f")"
+  grep -oE '\]\([^)]+\)' "$f" 2>/dev/null | sed -e 's/^](//' -e 's/)$//' | while IFS= read -r tgt; do
+    case "$tgt" in
+      http://*|https://*|mailto:*|\#*|"") continue ;;
+    esac
+    path="${tgt%%#*}"      # strip #anchor
+    path="${path%% *}"     # strip optional "title" suffix
+    [ -z "$path" ] && continue
+    resolved="$d/$path"
+    case "$path" in
+      */) [ -d "$resolved" ] || echo "broken link in $f -> $tgt (no dir $resolved)" >> "$broken" ;;
+      *)  [ -e "$resolved" ] || echo "broken link in $f -> $tgt (no file $resolved)" >> "$broken" ;;
+    esac
+  done
+done < "$doclist"
+
 count="$(wc -l < "$broken" | tr -d ' ')"
 scanned="$(wc -l < "$doclist" | tr -d ' ')"
 

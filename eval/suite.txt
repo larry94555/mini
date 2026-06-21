@@ -15,3 +15,9 @@ yesno      | contains | yes   | Is water wet? Answer yes or no.
 multiply   | contains | 56    | What is 7 times 8? Reply with just the number.
 spelling   | regex    | (?i)\bnecessary\b | Spell the word that means "needed": n-e-c-...? Reply with the single word.
 oneword    | equals   | blue  | What color is a clear daytime sky? Reply with exactly one lowercase word, no punctuation.
+
+# --- harness-behavior cases: these require the agent to USE A TOOL (read the file) before answering,
+# --- so they exercise the agent loop (tool dispatch + result incorporation), not just model recall.
+readfile-codename | contains | GRANITE | Use your file-reading tool to read eval/fixtures/note.txt, then reply with the project codename it states.
+readfile-number   | contains | 73      | Read the file eval/fixtures/note.txt with a tool and reply with just the lucky number it gives.
+listdir-eval      | regex    | (?i)note\.txt | List the files in the eval/fixtures directory using a tool, then name the text file you find there.
