@@ -5,6 +5,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +34,7 @@ public class EvalHarness {
     private static final Logger log = LoggerFactory.getLogger(EvalHarness.class);
 
     @Value("${eval.enabled:true}") private boolean enabled;
+    @Value("${eval.suite-file:eval/suite.txt}") private String suiteFile;
 
     private final AgentLoop loop;
     private final LlamaClient llama;
@@ -110,6 +114,62 @@ public class EvalHarness {
         cases.add(new Case("capital", "What is the capital of France? One word.", "paris", Match.CONTAINS));
         cases.add(new Case("yesno", "Is water wet? Answer yes or no.", "yes", Match.CONTAINS));
         return cases;
+    }
+
+    /**
+     * The cases to run: the curated suite file ({@code eval.suite-file}, default {@code eval/suite.txt}) if
+     * it exists and parses to at least one case, otherwise the built-in {@link #defaultCases()}. So shipping
+     * a richer suite is a matter of editing a text file — no recompile.
+     */
+    public List<Case> loadCases() {
+        try {
+            Path p = Path.of(suiteFile);
+            if (Files.isRegularFile(p)) {
+                List<Case> parsed = parseCases(Files.readString(p));
+                if (!parsed.isEmpty()) {
+                    log.info("[eval] loaded " + parsed.size() + " case(s) from " + suiteFile);
+                    return parsed;
+                }
+            }
+        } catch (IOException e) {
+            log.warn("[eval] could not read " + suiteFile + ": " + e.getMessage() + "; using built-in suite.");
+        }
+        return defaultCases();
+    }
+
+    /**
+     * Pure: parse the curated suite format — one case per line, {@code id | match | expected | prompt}, where
+     * {@code match} is contains/regex/equals (case-insensitive). Blank lines and {@code #} comments are
+     * skipped; malformed lines are ignored. The {@code prompt} may contain pipes (only the first three
+     * delimiters are significant). No external dependency, so it is unit-testable offline.
+     */
+    public static List<Case> parseCases(String text) {
+        List<Case> cases = new ArrayList<>();
+        if (text == null) return cases;
+        for (String raw : text.split("\\r?\\n")) {
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            String[] parts = line.split("\\|", 4);
+            if (parts.length < 4) continue;
+            String id = parts[0].trim();
+            Match match = parseMatch(parts[1].trim());
+            String expected = parts[2].trim();
+            String prompt = parts[3].trim();
+            if (id.isEmpty() || match == null || prompt.isEmpty()) continue;
+            cases.add(new Case(id, prompt, expected, match));
+        }
+        return cases;
+    }
+
+    /** Pure: map a suite-file match token to a {@link Match}; null if unrecognized. */
+    static Match parseMatch(String token) {
+        if (token == null) return null;
+        switch (token.trim().toLowerCase(Locale.ROOT)) {
+            case "contains": return Match.CONTAINS;
+            case "regex": return Match.REGEX;
+            case "equals": case "equals_normalized": case "normalized": return Match.EQUALS_NORMALIZED;
+            default: return null;
+        }
     }
 
     /**

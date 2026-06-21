@@ -4855,3 +4855,39 @@ Run any of them with `./mvnw -Dtest=<Name> test`.
 multi-server, access-control, delegation, CI, and docs work, so a reader coming to the repo cold gets the
 shape of recent changes without reading every roadmap entry; release-please still formalizes versioned
 entries from Conventional Commits on the next release.
+
+---
+
+# Docs reference-integrity check, eval suite seed, learning-path capstone
+
+## 575. Docs reference-integrity check (scripts/check-docs.sh + CI)
+
+- **Run:** `bash scripts/check-docs.sh` (or `WARN_ONLY=1 bash scripts/check-docs.sh` to report without
+  failing). Also runs in CI before the test suite (`.github/workflows/ci.yml`).
+- **What it does:** scans the living docs (README.md + docs/*.md, excluding the `docs/HISTORY.md` archive)
+  for backticked references to test classes (`` `FooTest` ``), Java source files (`` `Bar.java` ``), and
+  TESTING.md case numbers (`cases 549-568`), and exits non-zero if any referenced symbol/file/case does not
+  exist — so the cross-referenced teaching docs cannot silently rot when something is renamed, moved, or
+  deleted. Dependency-free (bash + grep + find).
+- **Verified offline:** green on the current repo (15 living docs); injecting a bogus `` `NonexistentFooTest` ``,
+  `` `MadeUpClass.java` ``, and `case 999` makes it report all three and exit 1; `WARN_ONLY=1` reports but
+  exits 0. (It also surfaced two genuinely stale references that live only in the `HISTORY.md` archive, which
+  is correctly out of scope.)
+
+## 576. Editable eval suite + parser (eval/suite.txt, EvalSuiteFileTest)
+
+- **Run:** `./mvnw -Dtest=EvalSuiteFileTest test`.
+- **Observe:** `EvalHarness.parseCases` parses the curated suite format (`id | match | expected | prompt`,
+  `#` comments and blank/malformed lines skipped; the prompt may contain `|`), and `EvalHarness.loadCases`
+  reads `eval/suite.txt` (path overridable via `eval.suite-file`), falling back to the built-in
+  `defaultCases()` when absent/empty. `/admin/eval` now runs `loadCases()`.
+- **Verified offline:** the pure parser + the shipped `eval/suite.txt` (7 cases) parse and score correctly
+  (6/6 in a throwaway harness); no model needed. The live suite run remains CI/live (needs a model) and
+  self-skips otherwise.
+
+## 577. Grand-tour capstone in the learning path (docs only)
+
+`docs/LEARNING_PATH.md` gains a **Capstone: the grand tour** section after Module 14 that points at
+`WORKFLOW_WALKTHROUGH.md` §4 and `TRACE_TOUR.md` with a "trace the tour against the tests" exercise (open
+each step's golden-trace test and find the backing assertion, then run them). Not a test; recorded so the
+doc cross-references stay auditable (and they are checked by case 575).

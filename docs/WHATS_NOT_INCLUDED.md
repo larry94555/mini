@@ -127,14 +127,16 @@ end-to-end scenarios, golden transcripts, scoring.
 deterministic **golden-trace** tests that drive the real agent loop end to end with a scripted model
 (`GoldenTraceWorkflowTest`, `RecoveryTraceTest`, `CapabilityScopingTraceTest`, `SubAgentHandoffTraceTest`),
 and an opt-in model-quality gate (`EvalHarness` + `POST /admin/eval` + the `eval-gate.yml` CI workflow that
-fails the build below a pass-rate threshold). What it does **not** have is a large curated task benchmark
-with model-graded scoring and variance handling — that needs a fixed model and curated tasks, which a
-teaching repo running a swappable local model does not pin down.
+fails the build below a pass-rate threshold), now seeded with a curated, editable suite at `eval/suite.txt`
+(`id | match | expected | prompt`, loaded by `EvalHarness.loadCases()`). What it does **not** have is a
+*large* benchmark with model-graded (rubric/LLM-judge) scoring and variance handling across runs — that
+needs a fixed model and a substantial curated dataset, which a teaching repo running a swappable local model
+does not pin down.
 
-**What adding it would involve.** A task dataset with expected outcomes, a runner that executes the full
-loop and scores results (exact-match, rubric-based, or model-graded), variance handling across runs, and a
-way to diff quality between harness versions. The deterministic-trace and eval-gate pieces exist; scaling to
-a curated, model-graded benchmark is the remaining gap.
+**What adding it would involve.** Growing the dataset, adding model-graded scoring (an LLM judge or rubric
+beyond contains/regex/equals), variance handling across runs, and a way to diff quality between harness
+versions. The deterministic traces, the eval-gate, and a seed suite exist; scaling to a large, model-graded
+benchmark is the remaining gap.
 
 ## Cost / token accounting and rate limiting
 
