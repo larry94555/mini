@@ -4965,3 +4965,37 @@ doc cross-references stay auditable (and they are checked by case 575).
   subcommand prints a hint to stderr and exits 2; `./run.sh` with no argument still builds and starts the
   app; `./run.sh check-docs` still runs the checker.
 - **Verified offline:** `sh -n run.sh` passes; all four paths behave as described.
+
+---
+
+# Anchor/slug regression guard, validated deep links, round-trip eval cases
+
+## 584. check-docs.sh anchor/slug self-test (scripts/check-docs-selftest.sh)
+
+- **Run:** `bash scripts/check-docs-selftest.sh` (also runs in CI after the docs check).
+- **What it does:** builds a throwaway repo layout, copies the **real** `scripts/check-docs.sh` into it, and
+  runs it against fixture docs whose headings use tricky punctuation (numbers, periods, parens, commas,
+  `v2.0`). The "known-good" anchors are **hard-coded literal slugs**, so if the slug algorithm drifts a
+  previously-valid anchor stops matching and the test fails — locking in the GitHub-style behavior. Asserts:
+  the broken scenario exits 1 with exactly the two bogus anchors flagged and the valid ones not; the
+  all-valid scenario exits 0 / prints OK; and `WARN_ONLY=1` downgrades the broken scenario to exit 0.
+- **Verified offline:** all 10 assertions pass; intentionally drifting the slug (removing the lowercase step)
+  makes 6 assertions fail, confirming it is a real guard and not a tautology. POSIX (`sh -n`/`dash -n` pass).
+
+## 585. Validated anchor deep links (docs only)
+
+Several by-name references to `WORKFLOW_WALKTHROUGH.md` §4 ("how each branch is proven") in
+`docs/LEARNING_PATH.md`, `docs/TRACE_TOUR.md`, and `docs/WORKFLOW_WALKTHROUGH.md` itself were converted into
+real `#anchor` deep links (`WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite`).
+These now navigate directly and are validated by `check-docs.sh`'s anchor check (case 582), so the anchor
+check guards real content and a future heading rename would fail the build. `bash scripts/check-docs.sh`
+stays green.
+
+## 586. Round-trip harness-behavior eval cases (eval/suite.txt)
+
+The suite (now 12 cases) gains two cases that exercise a **different tool path** than the read-only fixture
+cases: a write-then-read round trip (write `BANANA` to `scratch-eval.txt`, read it back, reply with the
+contents) and a write-append-read sequence (`notes-eval.txt` → `line1`/`line2`). They create their own
+scratch files at run time, so they add no fixture dependency (the fixture-coupling guard in case 581 is
+unaffected). **Verified offline:** all 12 cases parse and the new regex compiles + matches (4/4 in a
+throwaway harness); **passing** them needs the live agent + a capable model (they self-skip otherwise).

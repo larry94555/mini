@@ -38,7 +38,9 @@ deterministic so pass/fail reflects the agent, not prompt ambiguity.
 ### Harness-behavior cases
 
 The shipped suite also includes a few cases that require the agent to **use a tool** before answering — for
-example reading `fixtures/note.txt` or listing `fixtures/` — so the suite exercises the agent loop (tool
-dispatch + incorporating the tool result), not just the model's factual recall. The `fixtures/` directory
-holds the small committed files those cases read. These cases naturally need a capable-enough live model to
-actually call the tool; they still self-skip with the rest of the suite when no model is reachable.
+example reading `fixtures/note.txt` or listing `fixtures/`, and a **write-then-read round trip** (write a
+file, read it back, report the contents) that exercises the mutating + reading tools together — so the suite
+exercises the agent loop (tool dispatch + incorporating the tool result), not just the model's factual
+recall. The `fixtures/` directory holds the small committed files those read-only cases use; the round-trip
+cases create their own scratch files at run time. These cases naturally need a capable-enough live model to
+actually call the tools; they still self-skip with the rest of the suite when no model is reachable.

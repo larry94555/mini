@@ -4,7 +4,7 @@
 one realistic session whose model touches **several** workflow branches in sequence — an edit→commit with a
 hook firing, a delegation to a named subagent, and an MCP tool call — so you can see how the pieces compose
 in a single turn. Each step names the key files and the **golden-trace test** that proves it (see also
-[`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4, which maps every branch to its test).
+[`WORKFLOW_WALKTHROUGH.md` §4](WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite), which maps every branch to its test).
 
 This is a teaching narrative. The exact tool calls a real model emits will vary; the harness behavior —
 validation, the permission gate, hooks, delegation isolation, MCP fencing, the git-verified edit summary —
@@ -183,4 +183,4 @@ Key files: `SessionStore.java`, `CheckpointStore.java`, `RunRecorder.java`, `Dat
   verification, not narration.
 - Every branch above is backed by a deterministic, model-free golden trace (the `ScriptedAgent` fixture +
   the real `AgentEngine`), so the behavior in this narrative is continuously checked, not just described.
-  See `WORKFLOW_WALKTHROUGH.md` §4 and `TESTING.md` cases 557-571.
+  See [`WORKFLOW_WALKTHROUGH.md` §4](WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite) and `TESTING.md` cases 557-571.

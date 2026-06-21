@@ -31,6 +31,8 @@ jobs:
         run: chmod +x mvnw
       - name: Check docs reference integrity (test/class/file/case references resolve)
         run: bash scripts/check-docs.sh
+      - name: Self-test the docs checker's anchor/slug logic
+        run: bash scripts/check-docs-selftest.sh
       - name: Run the test suite
         run: ./mvnw -B -ntp test
 
