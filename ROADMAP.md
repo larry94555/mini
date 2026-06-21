@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Marker-faithful live trends + overview date-picker + window-ratio target line: the delivery-success trend now redraws its mute (square) / catch-up (diamond) markers on every auto-refresh via a JS trendSVG (previously markers were server-render only); the digest section gains a from/to date-picker that fetches the ranged history/audit and pauses the live poll while pinned; and the window-ratio trend overlays the SLO target reference line.
+
 - Full digest trends + date-range filtering + mute/catch-up trend markers: the overview charts three trends across recent digests (delivery-success, window ratio, budget remaining), with the delivery-success trend annotated by mute (square) and catch-up (diamond) markers; the digest history and digest-audit endpoints accept ?from/?to/?days date-range filters (audit still supports ?format=csv).
 
 - Structured digest history + trend chart + digest-audit CSV + catch-up audit: digest history rows are now versioned (v2) and carry structured metrics (window ratio, delivery-success, budget) so the overview charts a delivery-success trend across recent digests; the mute audit trail exports as CSV (GET /admin/alerts/digest-audit?format=csv); and a mute-expiry catch-up send records an alert_digest_catchup audit event. Legacy 4-field history rows still parse.
