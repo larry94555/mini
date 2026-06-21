@@ -4397,3 +4397,28 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** `digestTrendSvg(rowsOldestFirst, key, w, h)` marks a "muted" row with a grey square and a posted
   row immediately after a muted run (a catch-up) with a blue diamond; a clean run draws plain dots; an empty
   series shows "collecting". (Markers are server-rendered; the live poll redraws the base trend.)
+
+---
+
+# Marker-faithful live trends, overview date-picker, window-ratio target line
+
+## 531. Marker-faithful live trend (AlertDigestLiveMarkersRangeTargetTest + node)
+
+- **Run:** `./mvnw -Dtest=AlertDigestLiveMarkersRangeTargetTest test`.
+- **Observe:** the auto-refresh build defines a marker-aware `trendSVG(rd,key,W,H)` and uses it for the
+  delivery-success box, so muted (square) / catch-up (diamond) markers persist through live refresh — not just
+  the server-rendered first paint. The server render still carries markers (`<rect`, "catch-up after mute").
+
+## 532. Overview date-range picker (AlertDigestLiveMarkersRangeTargetTest)
+
+- **Observe:** the digest section renders `digest_from`/`digest_to` date inputs with Apply/Reset wired to
+  `applyDigestRange()`/`resetDigestRange()`, which fetch `/admin/alerts/slo-digest/history` and
+  `/admin/alerts/digest-audit` with the range. While a range is pinned, `window.digestRangeActive` guards the
+  poll (`if(!window.digestRangeActive)`) so the live refresh doesn't overwrite the pinned view; Reset resumes
+  live.
+
+## 533. Window-ratio trend target line (AlertDigestLiveMarkersRangeTargetTest)
+
+- **Observe:** with an SLO target present, the window-ratio trend draws the dashed reference line
+  (`stroke-dasharray`); the live rebuild keeps the target on the window-ratio trend
+  (`metricTrend(...,'window_ratio',true)`) but not on budget (`...,'budget_remaining',false`).

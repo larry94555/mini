@@ -124,10 +124,28 @@ public final class AlertsOverview {
             // delivery-success trend across recent digests (oldest -> newest), charted left to right
             // trends across recent digests (oldest -> newest); delivery-success carries mute/catch-up markers
             List<Map<String, Object>> rowsOld = digestRowsOldestFirst(recent);
+            sb.append("<div class=\"daterange\">Range: ")
+              .append("<input type=\"date\" id=\"digest_from\"> to <input type=\"date\" id=\"digest_to\"> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return applyDigestRange()\">Apply</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return resetDigestRange()\">Reset (live)</a>")
+              .append("<span id=\"digest_range_note\" class=\"muted\"></span></div>");
+            // date-range fetch handlers (always available; suppress the live poll while a range is pinned)
+            sb.append("<script>window.digestRangeActive=false;")
+              .append("function dEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}")
+              .append("function dRows(id,h){var e=document.getElementById(id);if(e)e.innerHTML=h;}")
+              .append("function applyDigestRange(){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
+              .append("var qs='?limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');")
+              .append("fetch('/admin/alerts/slo-digest/history'+qs).then(function(x){return x.json();}).then(function(hs){var h='';")
+              .append("hs.forEach(function(x){h+='<tr><td>'+dEsc(x.time)+'</td><td>'+(x.posted?'yes':'no')+'</td><td>'+dEsc(x.mode||'')+'</td><td>'+dEsc((x.summary||'').slice(0,120))+'</td></tr>';});dRows('digest_body',h);});")
+              .append("fetch('/admin/alerts/digest-audit'+qs).then(function(x){return x.json();}).then(function(as){var h='';")
+              .append("as.forEach(function(x){h+='<tr><td>'+dEsc(x.time)+'</td><td>'+dEsc(x.user||'')+'</td><td>'+dEsc(x.action||'')+'</td><td>'+dEsc((x.outcome||'').slice(0,80))+'</td></tr>';});dRows('digest_audit_body',h);});")
+              .append("window.digestRangeActive=true;var n=document.getElementById('digest_range_note');if(n)n.textContent=' showing '+(f||'\\u2026')+' to '+(t||'now')+' (live paused)';return false;}")
+              .append("function resetDigestRange(){document.getElementById('digest_from').value='';document.getElementById('digest_to').value='';")
+              .append("window.digestRangeActive=false;var n=document.getElementById('digest_range_note');if(n)n.textContent='';return false;}</script>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">delivery-success (\u25a0 muted, \u25c6 catch-up): </span>");
             sb.append("<span id=\"digest_trendbox\">").append(digestTrendSvg(rowsOld, "delivery_success", 160, 28)).append("</span></div>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">window SLO ratio: </span>");
-            sb.append("<span id=\"digest_wtrendbox\">").append(sparklineSvg(digestTrend(recent, "window_ratio"), Double.NaN, 0, 160, 28)).append("</span></div>");
+            sb.append("<span id=\"digest_wtrendbox\">").append(sparklineSvg(digestTrend(recent, "window_ratio"), sloTarget, windowDays, 160, 28)).append("</span></div>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">window budget remaining: </span>");
             sb.append("<span id=\"digest_btrendbox\">").append(sparklineSvg(digestTrend(recent, "budget_remaining"), Double.NaN, 0, 160, 28)).append("</span></div>");
             sb.append("<table><thead><tr><th>time</th><th>posted</th><th>mode</th><th>summary</th></tr></thead>");
@@ -246,6 +264,16 @@ public final class AlertsOverview {
             + "if(np<2)return '<span class=\"muted\">collecting\\u2026</span>';"
             + "var tl=(TGT>0&&TGT<1)?'<line x1=\"0\" y1=\"'+(Math.round((H-TGT*H)*10)/10)+'\" x2=\"'+W+'\" y2=\"'+(Math.round((H-TGT*H)*10)/10)+'\" stroke=\"#c33\" stroke-width=\"1\" stroke-dasharray=\"3,2\" opacity=\"0.7\"/>':'';"
             + "return '<svg width=\"'+W+'\" height=\"'+H+'\" viewBox=\"0 0 '+W+' '+H+'\" preserveAspectRatio=\"none\" class=\"sparksvg\">'+tl+'<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"'+pts+'\"/>'+dots+'</svg>';}"
+            + "function trendSVG(rd,key,W,H){var ro=(rd||[]).slice().reverse();var vals=[],marks=[],pm=false;"
+            + "for(var i=0;i<ro.length;i++){var r=ro[i];if(typeof r[key]!=='number'){if(r.mode==='muted')pm=true;continue;}"
+            + "var muted=r.mode==='muted',cu=(pm&&r.posted);vals.push(r[key]);marks.push(muted?'m':(cu?'c':''));pm=muted;}"
+            + "var n=vals.length,pts='',np=0,dots='';for(var i=0;i<n;i++){var v=vals[i];if(v<0)continue;var x=n<=1?0:(i/(n-1))*W,y=H-v*H;"
+            + "pts+=(pts?' ':'')+(Math.round(x*10)/10)+','+(Math.round(y*10)/10);var pc=(Math.round(v*1000)/10)+'%',mk=marks[i];"
+            + "if(mk==='m')dots+='<rect x=\"'+(Math.round((x-2)*10)/10)+'\" y=\"'+(Math.round((y-2)*10)/10)+'\" width=\"4\" height=\"4\" fill=\"#999\"><title>muted: '+pc+'</title></rect>';"
+            + "else if(mk==='c')dots+='<circle cx=\"'+(Math.round(x*10)/10)+'\" cy=\"'+(Math.round(y*10)/10)+'\" r=\"2.4\" fill=\"#36c\"><title>catch-up after mute: '+pc+'</title></circle>';"
+            + "else dots+='<circle cx=\"'+(Math.round(x*10)/10)+'\" cy=\"'+(Math.round(y*10)/10)+'\" r=\"1.6\" fill=\"#2a7\"><title>'+pc+'</title></circle>';np++;}"
+            + "if(np<2)return '<span class=\"muted\">collecting\\u2026</span>';"
+            + "return '<svg width=\"'+W+'\" height=\"'+H+'\" viewBox=\"0 0 '+W+' '+H+'\" preserveAspectRatio=\"none\" class=\"sparksvg\"><polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"'+pts+'\"/>'+dots+'</svg>';}"
             + "var sk=document.getElementById('sparkbox');if(sk){var g=sparkSVG(s.slo_window_series||[],160,28);if(g)sk.innerHTML=g;}"
             + "var rs=s.slo_window_series_by_route||{};"
             + "var br=s.by_route||{};"
@@ -263,13 +291,13 @@ public final class AlertsOverview {
             + "rows('tier_body',h);"
             + "var dg=d.digests||[];h='';dg.forEach(function(x){h+='<tr><td>'+esc(x.action)+'</td><td>'+esc(x.target)"
             + "+'</td><td class=\"num\">'+(x.suppressed||0)+'</td></tr>';});rows('sup_body',h);"
-            + "var rd=s.recent_digests||[];h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
+            + "var rd=s.recent_digests||[];if(!window.digestRangeActive){h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
             + "+'</td><td>'+esc(x.mode||'')+'</td><td>'+esc((x.summary||'').slice(0,120))+'</td></tr>';});rows('digest_body',h);"
-            + "var dtb=document.getElementById('digest_trendbox');if(dtb){var tr=[];rd.forEach(function(x){if(typeof x.delivery_success==='number')tr.push(x.delivery_success);});tr.reverse();var _t=TGT;TGT=-1;var tg=sparkSVG(tr,160,28);TGT=_t;if(tg)dtb.innerHTML=tg;}"
-            + "function metricTrend(box,key){var el=document.getElementById(box);if(!el)return;var tr=[];rd.forEach(function(x){if(typeof x[key]==='number')tr.push(x[key]);});tr.reverse();var _t=TGT;TGT=-1;var g=sparkSVG(tr,160,28);TGT=_t;if(g)el.innerHTML=g;}"
-            + "metricTrend('digest_wtrendbox','window_ratio');metricTrend('digest_btrendbox','budget_remaining');"
-            + "var da=s.digest_audit||[];h='';da.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+esc(x.user||'')"
-            + "+'</td><td>'+esc(x.action||'')+'</td><td>'+esc((x.outcome||'').slice(0,80))+'</td></tr>';});rows('digest_audit_body',h);"
+            + "var dtb=document.getElementById('digest_trendbox');if(dtb){var tg=trendSVG(rd,'delivery_success',160,28);if(tg)dtb.innerHTML=tg;}"
+            + "function metricTrend(box,key,keepTarget){var el=document.getElementById(box);if(!el)return;var tr=[];rd.forEach(function(x){if(typeof x[key]==='number')tr.push(x[key]);});tr.reverse();var _t=TGT;if(!keepTarget)TGT=-1;var g=sparkSVG(tr,160,28);TGT=_t;if(g)el.innerHTML=g;}"
+            + "metricTrend('digest_wtrendbox','window_ratio',true);metricTrend('digest_btrendbox','budget_remaining',false);}"
+            + "if(!window.digestRangeActive){var da=s.digest_audit||[];h='';da.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+esc(x.user||'')"
+            + "+'</td><td>'+esc(x.action||'')+'</td><td>'+esc((x.outcome||'').slice(0,80))+'</td></tr>';});rows('digest_audit_body',h);}"
             + "var mn=document.getElementById('digest_mute_note');if(mn){var mu=s.digest_muted_until||0,now=Date.now();"
             + "var rs2=s.digest_mute_reason||'';"
             + "mn.textContent=(mu>now)?('Digest muted for ~'+Math.max(1,Math.floor((mu-now)/60000))+' more minutes'+(rs2?(' ('+rs2+')'):'')+'.'):'Digest not muted.';}"
