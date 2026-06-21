@@ -4824,3 +4824,34 @@ recovery (`RecoveryTraceTest`), and delegation (`SubAgentHandoffTraceTest` + `Su
 traces as checkpoints alongside the write-workflow ones; `docs/CONCEPT_MAP.md` gains capability-scoping and
 per-tenant-rate-limiting rows plus "proven by golden traces" notes on the Permissions and Extensibility
 sections. Not tests; recorded for auditability.
+
+---
+
+# Grand-tour trace, trace-test scaffolding consolidation, CHANGELOG pass
+
+## 572. Grand-tour trace document (docs only)
+
+`docs/TRACE_TOUR.md` narrates one realistic session that chains several branches — an edit→commit with a
+hook firing, a delegation to a named subagent, and an MCP `read_resource` call — annotating each step the
+way `docs/TRACE_EDIT.md` does for a single edit, naming the key files, and cross-referencing the
+golden-trace test (and `WORKFLOW_WALKTHROUGH.md` §4) that proves it. It ends with a table of branches the
+tour did not take and the tests that cover them. Not a test; recorded so the doc/test cross-references stay
+auditable.
+
+## 573. Trace-test scaffolding consolidation
+
+The five trace tests (`GoldenTraceWorkflowTest`, `RecoveryTraceTest`, `CapabilityScopingTraceTest`,
+`SubAgentHandoffTraceTest`, `SubAgentFailureTraceTest`) previously each re-declared `prop`/`schema` helpers
+and their own sandbox→git→permissions→engine construction. These are now lifted into the shared
+`ScriptedAgent` fixture: `ScriptedAgent.prop` / `ScriptedAgent.schema`, and a `ScriptedAgent.Harness`
+(engine + recording permissions + git + sandbox + hooks) built by `ScriptedAgent.harness(model, dir)` /
+`harness(model, dir, caps, rate)`. The tests now call the fixture; behavior and assertions are unchanged
+(re-verified offline against the real engine: PLAN→`RECORD_PLAN` and capability denial reproduce exactly).
+Run any of them with `./mvnw -Dtest=<Name> test`.
+
+## 574. CHANGELOG "Unreleased" section (docs only)
+
+`CHANGELOG.md` gains a curated `## [Unreleased]` summary of the recent golden-trace, MCP streaming/
+multi-server, access-control, delegation, CI, and docs work, so a reader coming to the repo cold gets the
+shape of recent changes without reading every roadmap entry; release-please still formalizes versioned
+entries from Conventional Commits on the next release.

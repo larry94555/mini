@@ -36,13 +36,6 @@ class SubAgentHandoffTraceTest {
         AtomicInteger subToolRuns = new AtomicInteger();
         AtomicInteger parentToolRuns = new AtomicInteger();
 
-        // Build ONE real engine; the real SubAgent reuses it for the nested ("sub") run.
-        Sandbox sandbox = new Sandbox();
-        ScriptedAgent.setField(sandbox, Sandbox.class, "root", dir);
-        GitInspector git = new GitInspector(sandbox);
-        HookService hooks = new HookService();
-        ScriptedAgent.RecordingPermissions perms = new ScriptedAgent.RecordingPermissions(new Approvals(), git, hooks);
-
         // Two scripts on one model, routed by system-prompt marker.
         Map<String, List<Map<String, Object>>> scripts = new LinkedHashMap<>();
         scripts.put("PARENT-AGENT", new ArrayList<>(List.of(
@@ -53,18 +46,19 @@ class SubAgentHandoffTraceTest {
                 answer("SUB_RESULT: the magic number is 42 (per sub_lookup)."))));
         ScriptedAgent.RoutingScriptedLlama model = new ScriptedAgent.RoutingScriptedLlama(scripts);
 
-        AgentEngine engine = ScriptedAgent.buildEngine(model, perms, hooks, git);
+        // Build ONE real engine; the real SubAgent reuses it for the nested ("sub") run.
+        ScriptedAgent.Harness h = ScriptedAgent.harness(model, dir);
 
         // The real SubAgent wraps the same engine; BuiltinTools is only needed for its research overload.
         Database db = new Database();
-        BuiltinTools builtins = new BuiltinTools(new CheckpointStore(db), new TodoStore(), sandbox,
+        BuiltinTools builtins = new BuiltinTools(new CheckpointStore(db), new TodoStore(), h.sandbox,
                 new RetrievalService(db), new PreviewStore());
-        SubAgent subAgent = new SubAgent(engine, builtins);
+        SubAgent subAgent = new SubAgent(h.engine, builtins);
 
         // The subagent's scoped (read-only) tool set.
         Map<String, Tool> subTools = Map.of("sub_lookup",
                 new Tool("sub_lookup", "Look something up (sub, non-mutating).",
-                        schema(Map.of("q", prop("string")), "q"), false, a -> {
+                        ScriptedAgent.schema(Map.of("q", ScriptedAgent.prop("string")), "q"), false, a -> {
                     subToolRuns.incrementAndGet();
                     return "lookup hit for " + a.get("q");
                 }));
@@ -72,7 +66,7 @@ class SubAgentHandoffTraceTest {
         // The parent's delegate tool: hands the task to the real SubAgent, returns ONLY its final answer.
         Tool delegate = new Tool("delegate_agent",
                 "Delegate a task to a named subagent that runs in its own loop and returns its final answer.",
-                schema(Map.of("name", prop("string"), "task", prop("string")), "name", "task"),
+                ScriptedAgent.schema(Map.of("name", ScriptedAgent.prop("string"), "task", ScriptedAgent.prop("string")), "name", "task"),
                 false, a -> {
             try {
                 return subAgent.run("sub-session", SUB_SYS, String.valueOf(a.get("task")), subTools, RunSink.NOOP);
@@ -82,7 +76,7 @@ class SubAgentHandoffTraceTest {
         });
         // A parent-only marker tool, to show parent tools are distinct from the sub's.
         Tool parentNote = new Tool("parent_note", "Record a parent note (non-mutating).",
-                schema(Map.of("text", prop("string")), "text"), false, a -> {
+                ScriptedAgent.schema(Map.of("text", ScriptedAgent.prop("string")), "text"), false, a -> {
             parentToolRuns.incrementAndGet();
             return "noted";
         });
@@ -90,7 +84,7 @@ class SubAgentHandoffTraceTest {
         parentTools.put("delegate_agent", delegate);
         parentTools.put("parent_note", parentNote);
 
-        String answerText = engine.run(PARENT_SYS, "Find the magic number and tell me.",
+        String answerText = h.engine.run(PARENT_SYS, "Find the magic number and tell me.",
                 parentTools, PermissionService.Mode.AUTO, "main", "parent-session", RunSink.NOOP);
 
         // 1) the subagent's own tool actually ran inside the nested loop
@@ -110,13 +104,4 @@ class SubAgentHandoffTraceTest {
         assertTrue(answerText.length() > 0);
     }
 
-    private static Map<String, Object> prop(String type) { return Map.of("type", type); }
-
-    private static Map<String, Object> schema(Map<String, Object> properties, String... required) {
-        Map<String, Object> s = new LinkedHashMap<>();
-        s.put("type", "object");
-        s.put("properties", properties);
-        s.put("required", List.of(required));
-        return s;
-    }
 }
