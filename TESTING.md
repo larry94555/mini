@@ -4931,3 +4931,37 @@ doc cross-references stay auditable (and they are checked by case 575).
   compiles and matches a sample (4/4 in a throwaway harness). **Passing** these requires the live agent +
   a capable-enough model (they exercise tool dispatch); like the rest of the suite they self-skip when no
   model is reachable. No code change — `EvalHarness.loadCases()` already reads the file.
+
+---
+
+# Fixture/case coupling test, intra-repo anchor-link validation, run.sh help
+
+## 581. Eval fixture/case coupling (EvalSuiteFileTest)
+
+- **Run:** `./mvnw -Dtest=EvalSuiteFileTest test`.
+- **Observe (`everyFixturePathNamedInTheSuiteExists`):** the test parses `eval/suite.txt`, extracts every
+  `eval/fixtures/...` path named in a case prompt (e.g. `eval/fixtures/note.txt`, and the `eval/fixtures`
+  directory), and asserts each exists in the repo. This pins the harness-behavior cases to their fixtures so
+  a rename/move fails the build offline — no live model required — the way `check-docs.sh` self-checks docs.
+- **Verified offline:** the two referenced paths (`eval/fixtures/note.txt`, `eval/fixtures`) resolve (3/3 in
+  a throwaway harness); deleting/renaming the fixture would fail the assertion.
+
+## 582. Intra-repo `#anchor` link validation (scripts/check-docs.sh)
+
+- **Run:** `bash scripts/check-docs.sh` / `./run.sh check-docs` (`WARN_ONLY=1` to report-only).
+- **What it adds:** the link check now also validates anchors — for `[text](OTHER.md#heading)` (cross-file)
+  and `[text](#heading)` (same-file), it computes a GitHub-style slug for every `#`..`######` heading in the
+  target `.md` and fails if no heading matches the anchor. `http(s)://`/`mailto:` links are still ignored.
+- **Verified offline (POSIX sh + dash):** green baseline (no anchor links yet, so nothing to flag);
+  injecting two valid anchors (one same-file, one cross-file to a real `TESTING.md` heading) and two bogus
+  anchors makes it flag exactly the two bogus ones and exit 1; `sh -n`/`dash -n` pass and the full
+  `for f in *.sh scripts/*.sh; do sh -n "$f"; done` guard passes. The slug is an approximation (lowercase,
+  drop punctuation, spaces→hyphens) sufficient for ordinary headings.
+
+## 583. `./run.sh help` + unknown-subcommand path (run.sh)
+
+- **Run:** `./run.sh help` (or `-h`/`--help`); `./run.sh <bogus>`.
+- **Observe:** `help` prints the usage list (default launch, `check-docs`, `help`) and exits 0; an unknown
+  subcommand prints a hint to stderr and exits 2; `./run.sh` with no argument still builds and starts the
+  app; `./run.sh check-docs` still runs the checker.
+- **Verified offline:** `sh -n run.sh` passes; all four paths behave as described.

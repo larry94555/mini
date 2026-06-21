@@ -4,12 +4,28 @@
 set -eu
 cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 
-# Dev subcommands (run before the launcher banner). The same gate CI runs, one command:
+# Dev subcommands (handled before the launcher banner). With no argument, run.sh builds and starts imini.
+#   ./run.sh                       # build + start the app (default)
 #   ./run.sh check-docs            # validate docs references + links (exit 1 on breakage)
 #   WARN_ONLY=1 ./run.sh check-docs  # report only
-if [ "${1:-}" = "check-docs" ]; then
-  exec sh scripts/check-docs.sh
-fi
+#   ./run.sh help                  # show this list
+case "${1:-}" in
+  "") : ;;  # no subcommand -> fall through to the launcher
+  check-docs) exec sh scripts/check-docs.sh ;;
+  help|-h|--help)
+    cat <<'USAGE'
+imini run.sh -- usage:
+  ./run.sh                build and start imini (default; needs Java, Maven/wrapper, optionally llama-server)
+  ./run.sh check-docs     validate that docs references and Markdown links resolve (the gate CI runs)
+                          set WARN_ONLY=1 to report problems without failing
+  ./run.sh help           show this message
+USAGE
+    exit 0 ;;
+  *)
+    echo "run.sh: unknown subcommand '$1'." >&2
+    echo "Try './run.sh help', './run.sh check-docs', or './run.sh' (no argument) to start the app." >&2
+    exit 2 ;;
+esac
 
 echo "============================================"
 echo "  imini launcher"
