@@ -232,6 +232,16 @@ public final class PromFormat {
                 help(sb, "alerts_digest_mute_until_seconds", "Unix time the SLO digest mute expires (0 = not muted)", "gauge");
                 line(sb, PREFIX + "alerts_digest_mute_until_seconds", null, muted ? until / 1000L : 0L);
             }
+            if (alerts.get("digest_snapshot") instanceof Map<?, ?> snap) {
+                postureGauge(sb, "alerts_digest_window_ratio",
+                        "Current rolling-window SLO success ratio from the latest digest snapshot", snap.get("window_success_ratio"));
+                postureGauge(sb, "alerts_digest_delivery_ratio",
+                        "Current delivery-success ratio from the latest digest snapshot", snap.get("delivery_success_ratio"));
+                postureGauge(sb, "alerts_digest_worst_route_ratio",
+                        "Worst per-route latency SLO ratio from the latest digest snapshot", snap.get("worst_route_ratio"));
+                postureGauge(sb, "alerts_digest_worst_success_route_ratio",
+                        "Worst per-route delivery-success ratio from the latest digest snapshot", snap.get("worst_success_route_ratio"));
+            }
         }
         return sb.toString();
     }
@@ -268,6 +278,15 @@ public final class PromFormat {
         if (!(v instanceof Number n)) return;
         help(sb, name, help, type);
         line(sb, PREFIX + name, "", n);
+    }
+
+    /** Emit a 0..1 ratio gauge from the digest snapshot, only when the value is a finite number. */
+    private static void postureGauge(StringBuilder sb, String name, String helpText, Object value) {
+        if (!(value instanceof Number n)) return;
+        double d = n.doubleValue();
+        if (Double.isNaN(d) || Double.isInfinite(d)) return;
+        help(sb, name, helpText, "gauge");
+        line(sb, PREFIX + name, null, d);
     }
 
     private static void line(StringBuilder sb, String metric, String labels, Object value) {

@@ -4516,3 +4516,25 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the overview offers Download report (CSV/JSON) and Copy report link (JSON/CSV);
   `downloadDigestReport(fmt)` and `copyDigestLink(fmt)` add `&format=csv` only for CSV (JSON is the endpoint
   default). (JS exercised with `node`.)
+
+---
+
+# Live posture row, structured-payload toggle, posture Prometheus gauges
+
+## 546. Live-refreshed posture row (AlertDigestLivePostureToggleGaugesTest + node)
+
+- **Run:** `./mvnw -Dtest=AlertDigestLivePostureToggleGaugesTest test`.
+- **Observe:** the auto-refresh build defines `postureHtml(sn)` and rebuilds `#digest_posture` from
+  `s.digest_snapshot` on each poll (mirrors the server pills), so the posture no longer goes stale until reload.
+  (JS exercised with `node`.) Live: `GET /admin/alerts/overview.html?refresh=5`.
+
+## 547. Structured-payload toggle (AlertDigestLivePostureToggleGaugesTest)
+
+- **Observe:** `digestPayloadJson(summary, digest, true)` includes the `digest` object;
+  `digestPayloadJson(summary, digest, false)` emits text-only `{"text":"..."}`. Wired to
+  `alerts.slo-digest-structured` (default true) and applied in `postSloDigest` for both send branches.
+
+## 548. Posture Prometheus gauges (AlertDigestLivePostureToggleGaugesTest)
+
+- **Observe:** `PromFormat` exports `imini_alerts_digest_window_ratio`, `_delivery_ratio`, `_worst_route_ratio`,
+  and `_worst_success_route_ratio` from the `digest_snapshot`; non-finite/absent values are skipped (no line).
