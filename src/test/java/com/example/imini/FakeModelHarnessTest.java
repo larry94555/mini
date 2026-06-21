@@ -1,192 +1,116 @@
 package com.example.imini;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import org.junit.jupiter.api.Test;
+
+import static com.example.imini.ScriptedAgent.answer;
+import static com.example.imini.ScriptedAgent.call;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tiny deterministic end-to-end harness tests that do not need a live llama-server.
+ * Deterministic end-to-end harness tests that need no live llama-server: a scripted model emits tool
+ * calls, the REAL {@link AgentEngine} validates and runs them, results go back into the transcript, and
+ * the model eventually answers.
  *
- * <p>These tests intentionally use a small scripted fake model instead of the full Spring wiring. The
- * educational point is the same: a model emits a tool call, the harness validates it, the tool runs,
- * the result goes back into the transcript, and the model eventually answers.
+ * <p>Now driven through the shared {@link ScriptedAgent} fixture (same scripted model + real engine the
+ * golden traces use), so there is one harness, not two. The educational point is unchanged: read → edit →
+ * answer, and a bad call becoming corrective feedback instead of executing.
  */
 class FakeModelHarnessTest {
 
-  @Test
-  void fakeModelCanReadThenEditThenAnswer() {
-    Map<String, String> files = new LinkedHashMap<>();
-    files.put("notes.txt", "status: draft\n");
+    @Test
+    void fakeModelCanReadThenEditThenAnswer() throws Exception {
+        Path dir = Files.createTempDirectory("imini-fake-");
+        Path notes = dir.resolve("notes.txt");
+        Files.writeString(notes, "status: draft\n");
 
-    Map<String, Tool> tools = new LinkedHashMap<>();
-    tools.put("read_file", readFileTool(files));
-    tools.put("edit_file", editFileTool(files));
+        Map<String, Tool> tools = new LinkedHashMap<>();
+        tools.put("read_file", readFileTool());
+        tools.put("edit_file", editFileTool());
 
-    FakeModel model = new FakeModel(
-        Step.call("read_file", Map.of("path", "notes.txt")),
-        Step.call(
-            "edit_file",
-            Map.of("path", "notes.txt", "old_str", "status: draft", "new_str", "status: final")),
-        Step.answer("Updated notes.txt and verified the target text."));
+        ScriptedAgent.ScriptedLlama model = new ScriptedAgent.ScriptedLlama(
+                call("read_file", Map.of("path", notes.toString())),
+                call("edit_file", Map.of("path", notes.toString(),
+                        "old_str", "status: draft", "new_str", "status: final")),
+                answer("Updated notes.txt and verified the target text."));
 
-    TinyHarness harness = new TinyHarness(model, tools);
-    String answer = harness.run("Change notes.txt from draft to final.");
+        String answer = run(model, tools, dir, "Change notes.txt from draft to final.");
 
-    assertEquals("status: final\n", files.get("notes.txt"));
-    assertTrue(answer.contains("Updated notes.txt"));
-    assertTrue(harness.transcript().stream().anyMatch(s -> s.contains("TOOL read_file -> status: draft")));
-    assertTrue(harness.transcript().stream().anyMatch(s -> s.contains("TOOL edit_file -> Edited notes.txt")));
-  }
+        assertEquals("status: final\n", Files.readString(notes));
+        assertTrue(answer.contains("Updated notes.txt"));
+        assertTrue(model.toolResults().stream().anyMatch(r -> r.contains("status: draft")), "read result fed back");
+        assertTrue(model.toolResults().stream().anyMatch(r -> r.startsWith("Edited")), "edit result fed back");
+    }
 
-  @Test
-  void invalidArgsBecomeFeedbackInsteadOfToolExecution() {
-    Map<String, String> files = new LinkedHashMap<>();
-    files.put("notes.txt", "status: draft\n");
+    @Test
+    void invalidArgsBecomeFeedbackInsteadOfToolExecution() throws Exception {
+        Path dir = Files.createTempDirectory("imini-fake-");
+        Path notes = dir.resolve("notes.txt");
+        Files.writeString(notes, "status: draft\n");
 
-    Map<String, Tool> tools = Map.of("read_file", readFileTool(files));
+        Map<String, Tool> tools = Map.of("read_file", readFileTool());
 
-    FakeModel model = new FakeModel(
-        Step.call("read_file", Map.of()),
-        Step.call("read_file", Map.of("path", "notes.txt")),
-        Step.answer("Recovered after the harness reported the missing path."));
+        ScriptedAgent.ScriptedLlama model = new ScriptedAgent.ScriptedLlama(
+                call("read_file", Map.of()),                          // invalid: missing path
+                call("read_file", Map.of("path", notes.toString())),  // valid retry
+                answer("Recovered after the harness reported the missing path."));
 
-    TinyHarness harness = new TinyHarness(model, tools);
-    String answer = harness.run("Read notes.txt, but first make a bad call.");
+        String answer = run(model, tools, dir, "Read notes.txt, but first make a bad call.");
 
-    assertTrue(answer.contains("Recovered"));
-    assertTrue(harness.transcript().stream().anyMatch(s -> s.contains("INVALID_ARGS")));
-    assertTrue(harness.transcript().stream().anyMatch(s -> s.contains("TOOL read_file -> status: draft")));
-  }
+        assertTrue(answer.contains("Recovered"));
+        assertTrue(model.toolResults().stream().anyMatch(r -> r.startsWith("INVALID_ARGS")), "INVALID_ARGS fed back");
+        assertTrue(model.toolResults().stream().anyMatch(r -> r.contains("status: draft")), "valid read result fed back");
+    }
 
-  private static Tool readFileTool(Map<String, String> files) {
-    return new Tool(
-        "read_file",
-        "Read a fake file.",
-        schema(Map.of("path", prop("string")), "path"),
-        false,
-        args -> files.getOrDefault(String.valueOf(args.get("path")), "ERROR: not found"));
-  }
+    // ---- tiny real Tools (read-only + a fake editor), scoped to the temp dir ----
 
-  private static Tool editFileTool(Map<String, String> files) {
-    return new Tool(
-        "edit_file",
-        "Replace text in a fake file.",
-        schema(
-            Map.of(
-                "path", prop("string"),
-                "old_str", prop("string"),
-                "new_str", prop("string")),
-            "path",
-            "old_str",
-            "new_str"),
-        true,
-        args -> {
-          String path = String.valueOf(args.get("path"));
-          String content = files.get(path);
-          if (content == null) {
-            return "ERROR: file not found";
-          }
-          String oldStr = String.valueOf(args.get("old_str"));
-          String newStr = String.valueOf(args.get("new_str"));
-          if (!content.contains(oldStr)) {
-            return "ERROR: old_str not found";
-          }
-          files.put(path, content.replace(oldStr, newStr));
-          return "Edited " + path;
+    private String run(LlamaClient model, Map<String, Tool> tools, Path dir, String prompt) throws Exception {
+        Sandbox sandbox = new Sandbox();
+        ScriptedAgent.setField(sandbox, Sandbox.class, "root", dir);
+        GitInspector git = new GitInspector(sandbox);
+        HookService hooks = new HookService();
+        ScriptedAgent.RecordingPermissions perms = new ScriptedAgent.RecordingPermissions(new Approvals(), git, hooks);
+        AgentEngine engine = ScriptedAgent.buildEngine(model, perms, hooks, git);
+        return engine.run(ScriptedAgent.systemPrompt(), prompt, tools, PermissionService.Mode.AUTO, "main", "fake-1", RunSink.NOOP);
+    }
+
+    private static Tool readFileTool() {
+        return new Tool("read_file", "Read a file.", schema(Map.of("path", prop("string")), "path"),
+                false, args -> {
+            try { return Files.readString(Path.of(String.valueOf(args.get("path")))); }
+            catch (Exception e) { return "ERROR: not found"; }
         });
-  }
-
-  private static Map<String, Object> prop(String type) {
-    return Map.of("type", type);
-  }
-
-  private static Map<String, Object> schema(Map<String, Object> properties, String... required) {
-    Map<String, Object> schema = new LinkedHashMap<>();
-    schema.put("type", "object");
-    schema.put("properties", properties);
-    schema.put("required", List.of(required));
-    return schema;
-  }
-
-  private record Step(String toolName, Map<String, Object> args, String answer) {
-    static Step call(String toolName, Map<String, Object> args) {
-      return new Step(toolName, args, null);
     }
 
-    static Step answer(String answer) {
-      return new Step(null, Map.of(), answer);
+    private static Tool editFileTool() {
+        return new Tool("edit_file", "Replace text in a file.",
+                schema(Map.of("path", prop("string"), "old_str", prop("string"), "new_str", prop("string")),
+                        "path", "old_str", "new_str"),
+                true, args -> {
+            try {
+                Path p = Path.of(String.valueOf(args.get("path")));
+                String content = Files.readString(p);
+                String oldStr = String.valueOf(args.get("old_str"));
+                if (!content.contains(oldStr)) return "ERROR: old_str not found";
+                Files.writeString(p, content.replace(oldStr, String.valueOf(args.get("new_str"))));
+                return "Edited " + p.getFileName();
+            } catch (Exception e) { return "ERROR: " + e.getMessage(); }
+        });
     }
 
-    boolean isAnswer() {
-      return answer != null;
+    private static Map<String, Object> prop(String type) { return Map.of("type", type); }
+
+    private static Map<String, Object> schema(Map<String, Object> properties, String... required) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", properties);
+        schema.put("required", List.of(required));
+        return schema;
     }
-  }
-
-  private static final class FakeModel {
-    private final List<Step> steps;
-    private int next;
-
-    FakeModel(Step... steps) {
-      this.steps = List.of(steps);
-    }
-
-    Step next() {
-      if (next >= steps.size()) {
-        return Step.answer("[no more scripted steps]");
-      }
-      return steps.get(next++);
-    }
-  }
-
-  private static final class TinyHarness {
-    private final FakeModel model;
-    private final Map<String, Tool> tools;
-    private final List<String> transcript = new ArrayList<>();
-
-    TinyHarness(FakeModel model, Map<String, Tool> tools) {
-      this.model = model;
-      this.tools = tools;
-    }
-
-    String run(String userMessage) {
-      transcript.add("USER " + userMessage);
-
-      for (int i = 0; i < 8; i++) {
-        Step step = model.next();
-        if (step.isAnswer()) {
-          transcript.add("ASSISTANT " + step.answer());
-          return step.answer();
-        }
-
-        Tool tool = tools.get(step.toolName());
-        if (tool == null) {
-          transcript.add("TOOL_ERROR unknown tool " + step.toolName());
-          continue;
-        }
-
-        String validationError = SchemaValidator.validate(tool.name, tool.parameters, step.args());
-        if (validationError != null) {
-          transcript.add(validationError);
-          continue;
-        }
-
-        Function<Map, String> executor = tool.executor;
-        String result = executor.apply(new LinkedHashMap<>(step.args()));
-        transcript.add("TOOL " + step.toolName() + " -> " + result.strip());
-      }
-
-      return "[stopped: fake model did not answer]";
-    }
-
-    List<String> transcript() {
-      return transcript;
-    }
-  }
 }
