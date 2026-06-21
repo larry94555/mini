@@ -4605,3 +4605,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   unless `git.allow-push=true`). Verified end-to-end: with the flag enabled, a real push lands the commit
   on a bare remote. `PermissionService.decideRemote` adds `git diff --cached --stat` to the approval
   payload for `git_commit`/`git_stage` so the staged diff shows in the UI.
+
+---
+
+# Live MCP integration test, git-commit approval flow, workflow walkthrough doc
+
+## 555. Live MCP integration over stdio + HTTP (McpLiveIntegrationTest)
+
+- **Run:** `./mvnw -Dtest=McpLiveIntegrationTest test`.
+- **Observe:** `McpManager.connect` is driven against a real stub server over **both** transports — a node
+  child process running `src/test/resources/mcp/stub-server.js` over stdio, and a JDK `HttpServer` over
+  HTTP. Each case asserts: the `<server>_echo` tool and the `<server>_read_resource` tool are registered;
+  the `mem://greeting` resource is discovered; `/mcp__<server>__review` is recognized as a prompt slash
+  command; `read_resource` returns the server's text; `tools/call` returns `echo:ping`; and the slash
+  command renders the prompt with arguments substituted (`review A.java`). The **stdio** case self-skips
+  when `node` is not on `PATH`; the **HTTP** case always runs (JDK-only).
+- **Offline note:** the JSON-RPC round-trip needs real Jackson, so this runs in CI / locally, not in the
+  offline stub build. The node stub and the HTTP handler's request parsing were exercised independently
+  offline; the round-trip itself is what this test automates.
+
+## 556. End-to-end git-commit approval flow (GitCommitApprovalFlowTest)
+
+- **Run:** `./mvnw -Dtest=GitCommitApprovalFlowTest test`.
+- **Observe:** a real temp repo with a **staged** change is driven through `PermissionService` in "remote"
+  prompt mode on a background thread. The test reads the parked approval from `Approvals.list` and asserts
+  the payload carries `_staged_diff`, names the changed file (`hello.txt`), and keeps the commit message;
+  then `resolve(id, "allow")` makes `decide(...)` return `ALLOW`, and the `git_commit` tool actually
+  commits (HEAD shows the new subject). Self-skips when git is unavailable.
+- **Offline note:** the `_staged_diff` enrichment is serialized with Jackson, so the payload-content
+  assertion runs in CI; the `Approvals` park → list → resolve cycle and `GitInspector.diffCachedStat` were
+  verified offline.
+
+## (doc) Workflow walkthrough
+
+`docs/WORKFLOW_WALKTHROUGH.md` is an educational tour of the edit→verify→commit loop, the six-event hook
+lifecycle, and the MCP server lifecycle, with mermaid diagrams that map to the methods above. Not a test;
+listed here so the docs and tests stay cross-referenced.

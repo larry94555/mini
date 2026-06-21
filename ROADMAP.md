@@ -37,14 +37,20 @@ hooks**, and **`git_push` (off by default) + the staged diff in the approval UI*
 
 With those done, mini represents the high-value, frequently-used Claude Code **workflow** features end to
 end, and the supporting surfaces (hooks, MCP, git) are complete. **There is no remaining high-frequency
-workflow gap.** Prefer **educational depth** over new surface:
+workflow gap.** The most recent work added the **test + educational depth** that was queued here: a
+live-server **MCP integration test** (node stdio stub + JDK HttpServer stub, both transports), an
+**end-to-end git-commit approval-flow test** (asserting the staged diff rides the approval payload), and a
+**workflow walkthrough doc** with edit→verify→commit / hook / MCP lifecycle diagrams (see Recently completed).
 
-1. **Educational depth** — more trace walkthroughs, loop/approval/MCP/hook diagrams, and deterministic
-   eval scenarios that exercise the new git/hook/MCP paths.
-2. **Test depth** — a live-server integration test for the MCP stdio/HTTP round-trip (resources/prompts),
-   and an end-to-end git-commit approval-flow test.
-3. **Only if a real need appears** — SSE *streaming* MCP (current HTTP transport handles single-response
-   JSON/SSE), or additional `Notification` trigger points.
+Remaining candidates are genuinely optional — pursue only if a concrete need appears:
+
+1. **More eval/test depth** — golden-trace eval scenarios that drive the git/hook/MCP paths through the
+   full agent loop (not just unit/integration seams), and a live stdio+HTTP test matrix on CI runners that
+   have `node`.
+2. **SSE *streaming* MCP** — the HTTP transport handles single-response JSON/SSE; long-lived
+   server-initiated streams are still out of scope.
+3. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
+   if real usage shows a need.
 
 If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
 **done** — prefer educational depth (docs, diagrams, eval scenarios) over inventing new surface.
@@ -150,6 +156,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Live MCP integration test + git-commit approval-flow test + workflow walkthrough doc: `McpLiveIntegrationTest` connects `McpManager` to a stub server over both transports (a node child process over stdio + a JDK `HttpServer` over HTTP) and asserts tools/resources/prompts discovery plus `read_resource` and the `/mcp__server__prompt` slash command returning rendered content (stdio half self-skips without node); `GitCommitApprovalFlowTest` drives a real repo through stage → approval → commit, asserting the staged diff is attached to the approval payload; and `docs/WORKFLOW_WALKTHROUGH.md` documents the edit→verify→commit loop, the six-event hook lifecycle, and the MCP lifecycle with mermaid diagrams. A small package-private `McpManager.connect()` test seam was added.
 
 - MCP prompts as slash commands + SessionStart/Notification hooks + git_push & approval-diff: discovered MCP prompts are now invokable as `/mcp__<server>__<name>` slash commands (listed in `/help`, `key=value` args parsed, rendered prompt becomes the turn input); `HookService` gains `sessionStart` (first-turn context injection) and `notification` (fires when the agent requests approval) events; and a capability-gated, off-by-default `git_push` tool (`git.allow-push`) plus the staged diff (`git diff --cached --stat`) surfaced in the commit approval prompt complete the git workflow.
 
