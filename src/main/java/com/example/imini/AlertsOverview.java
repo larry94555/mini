@@ -126,8 +126,13 @@ public final class AlertsOverview {
             List<Map<String, Object>> rowsOld = digestRowsOldestFirst(recent);
             sb.append("<div class=\"daterange\">Range: ")
               .append("<input type=\"date\" id=\"digest_from\"> to <input type=\"date\" id=\"digest_to\"> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return quickRange(1)\">24h</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return quickRange(7)\">7d</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return quickRange(30)\">30d</a> ")
               .append("<a class=\"nav\" href=\"#\" onclick=\"return applyDigestRange()\">Apply</a> ")
-              .append("<a class=\"nav\" href=\"#\" onclick=\"return resetDigestRange()\">Reset (live)</a>")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return resetDigestRange()\">Reset (live)</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('history')\">History CSV</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('audit')\">Audit CSV</a>")
               .append("<span id=\"digest_range_note\" class=\"muted\"></span></div>");
             // date-range fetch handlers (always available; suppress the live poll while a range is pinned)
             sb.append("<script>window.digestRangeActive=false;")
@@ -141,7 +146,13 @@ public final class AlertsOverview {
               .append("as.forEach(function(x){h+='<tr><td>'+dEsc(x.time)+'</td><td>'+dEsc(x.user||'')+'</td><td>'+dEsc(x.action||'')+'</td><td>'+dEsc((x.outcome||'').slice(0,80))+'</td></tr>';});dRows('digest_audit_body',h);});")
               .append("window.digestRangeActive=true;var n=document.getElementById('digest_range_note');if(n)n.textContent=' showing '+(f||'\\u2026')+' to '+(t||'now')+' (live paused)';return false;}")
               .append("function resetDigestRange(){document.getElementById('digest_from').value='';document.getElementById('digest_to').value='';")
-              .append("window.digestRangeActive=false;var n=document.getElementById('digest_range_note');if(n)n.textContent='';return false;}</script>");
+              .append("window.digestRangeActive=false;var n=document.getElementById('digest_range_note');if(n)n.textContent='';return false;}")
+              .append("function quickRange(days){var to=new Date(),from=new Date(to.getTime()-days*86400000);")
+              .append("function iso(d){return d.toISOString().slice(0,10);}")
+              .append("document.getElementById('digest_from').value=iso(from);document.getElementById('digest_to').value=iso(to);return applyDigestRange();}")
+              .append("function downloadDigestCsv(kind){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
+              .append("var path=(kind==='audit')?'/admin/alerts/digest-audit':'/admin/alerts/slo-digest/history';")
+              .append("var qs='?format=csv&limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');window.location.href=path+qs;return false;}</script>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">delivery-success (\u25a0 muted, \u25c6 catch-up): </span>");
             sb.append("<span id=\"digest_trendbox\">").append(digestTrendSvg(rowsOld, "delivery_success", 160, 28)).append("</span></div>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">window SLO ratio: </span>");
