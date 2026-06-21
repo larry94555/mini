@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Overview posture row + structured webhook payload + report format choice: the digest section opens with a compact current-posture row (window/delivery vs targets, worst routes, mute/catch-up) from the live sloDigest() snapshot (now also in stats()); the scheduled webhook digest payload includes the snapshot as a structured digest object alongside the back-compat text field; and the report link/download lets the reviewer pick JSON or CSV.
+
 - Report bundle snapshot + download link + picker validation feedback: the digest-report bundle now includes the latest sloDigest() snapshot (JSON snapshot field + a # snapshot CSV section); the overview gains a Download report bundle link (digest-report CSV for the current range); and the date-picker surfaces the server-side range validation error inline (without pinning the view) instead of failing silently.
 
 - Combined digest report bundle + copy-link + range validation: GET /admin/alerts/digest-report returns mute state + history + audit for a date range (JSON or one sectioned CSV); the overview gains a Copy report link button that copies the bundle URL for the current range; and the history/audit/report endpoints reject malformed or inverted date ranges with HTTP 400 + a clear message (pure rangeError).

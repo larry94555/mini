@@ -58,9 +58,9 @@ class AlertDigestReportSnapshotDownloadValidationTest {
     @Test
     void overviewHasDownloadReportBundleLink() {
         String html = AlertsOverview.render(statsWithDigests(), List.of());
-        assertTrue(html.contains("Download report bundle"));
-        assertTrue(html.contains("downloadDigestCsv('report')"));
-        // the report kind resolves to the digest-report endpoint in the JS
+        assertTrue(html.contains("Download report"));
+        assertTrue(html.contains("downloadDigestReport("));
+        // the report download resolves to the digest-report endpoint in the JS
         assertTrue(html.contains("/admin/alerts/digest-report"));
     }
 
