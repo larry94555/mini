@@ -68,6 +68,7 @@ public class AlertSink {
     @Value("${alerts.slo-digest-url:}") private String sloDigestUrl;
     @Value("${alerts.slo-digest-template:}") private String sloDigestTemplate;
     @Value("${alerts.slo-digest-via-pipeline:false}") private boolean sloDigestViaPipeline;
+    @Value("${alerts.slo-digest-structured:true}") private boolean sloDigestStructured = true;
     @Value("${alerts.slo-digest-history-max:50}") private int sloDigestHistoryMax;
     @Value("${alerts.slo-digest-mute-max-hours:72}") private double sloDigestMuteMaxHours;
     @Value("${alerts.slo-digest-reason-required-hours:8}") private double sloDigestReasonRequiredHours;
@@ -1915,6 +1916,11 @@ public class AlertSink {
         return b.toString();
     }
 
+    /** Pure: as {@link #digestPayloadJson(String, Map)} but omits the structured object entirely when {@code structured} is false. */
+    static String digestPayloadJson(String summary, Map<String, Object> digest, boolean structured) {
+        return digestPayloadJson(summary, structured ? digest : null);
+    }
+
     /** Pure: render a value as a JSON scalar — numbers/booleans bare, everything else a quoted string. */
     private static String jsonValue(Object v) {
         if (v == null) return "null";
@@ -1957,7 +1963,7 @@ public class AlertSink {
             recordDigestHistory(false, "no-url", summary, digest);
             return Map.of("posted", false, "reason", "no digest/webhook URL", "summary", summary);
         }
-        String payload = digestPayloadJson(summary, digest);
+        String payload = digestPayloadJson(summary, digest, sloDigestStructured);
         if (sloDigestViaPipeline) {
             enqueue(payload, url, null, "slo_digest"); // retry + dead-letter via the normal pipeline
             markDigestBaseline(digest);

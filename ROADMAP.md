@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Live posture row + structured-payload toggle + posture Prometheus gauges: the overview current-posture row is rebuilt from overview.json on each poll (no longer stale until reload); alerts.slo-digest-structured (default true) lets receivers opt out of the digest object in the webhook payload; and the snapshot posture is exported as imini_alerts_digest_window_ratio/_delivery_ratio/_worst_route_ratio/_worst_success_route_ratio gauges.
+
 - Overview posture row + structured webhook payload + report format choice: the digest section opens with a compact current-posture row (window/delivery vs targets, worst routes, mute/catch-up) from the live sloDigest() snapshot (now also in stats()); the scheduled webhook digest payload includes the snapshot as a structured digest object alongside the back-compat text field; and the report link/download lets the reviewer pick JSON or CSV.
 
 - Report bundle snapshot + download link + picker validation feedback: the digest-report bundle now includes the latest sloDigest() snapshot (JSON snapshot field + a # snapshot CSV section); the overview gains a Download report bundle link (digest-report CSV for the current range); and the date-picker surfaces the server-side range validation error inline (without pinning the view) instead of failing silently.
