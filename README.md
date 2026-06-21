@@ -60,14 +60,14 @@ No cloud API key is required.
 | Agent loop | Think -> act -> observe loop with streaming, deadlines, duplicate-call guards, and interrupts |
 | File tools | `read_file`, `view`, `list_dir`, `write_file`, `edit_file`, `apply_patch` |
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol`, `find_references` |
-| Git awareness | `git_status`, `git_diff`, `git_log`, `git_blame` |
+| Git awareness | read: `git_status`, `git_diff`, `git_log`, `git_blame`; **write: `git_stage`, `git_commit`, `git_branch`** (mutating, approval-gated) |
 | Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
 | Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), persist/resume, and per-session history, coding profile guidance |
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
 | Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted global + per-session overrides), and member skill proposals (admin-reviewed, with a "my requests" view) |
-| Extensibility | MCP client, research sub-agent, hooks, slash commands |
+| Extensibility | MCP client (stdio + HTTP; tools, **resources & prompts**), research sub-agent, hooks (`PreToolUse`/`PostToolUse`/**`UserPromptSubmit`/`Stop`**), slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides + sharing, skills toggles + proposals, filterable activity log w/ CSV/JSON export, per-session activity), remote approvals |
 | Ops | API-key auth, rate limiting, per-user RBAC, per-resource ownership with session sharing + ownership transfer, audit log (incl. tool-call level), `/metrics`, structured logging, Docker, CI |
 
@@ -654,6 +654,43 @@ checklist and continues from the FIRST not-completed step -- completed steps are
 > Plan runs are goal-oriented one-shots and do not append to the conversational `/chat` history.
 
 ## Edit trust
+
+**Committing your work (`git_stage` / `git_commit` / `git_branch`).** The edit → verify → **commit** loop
+is now complete. On top of the read-only `git_status`/`git_diff`/`git_log`/`git_blame` navigation tools,
+three **mutating** git tools let the agent finish the job: `git_stage` (add specific `paths` or
+everything), `git_commit` (with a `message` — draft it with the bundled `commit-message` skill — and an
+optional `all=true` to stage tracked changes first), and `git_branch` (list, switch, or `create=true` to
+branch and switch). Because they are `mutating`, every one goes through the **same ASK/AUTO/PLAN approval
+and capability gate as `write_file` and `run_command`** — nothing is committed without the gate. The
+recommended flow is: make edits, review with `git_diff staged=true`, draft a message with the
+`commit-message` skill, then `git_commit`. `git_commit` refuses with a clear error when nothing is staged
+(unless `all=true`), and `git_branch` rejects unsafe names (flags, whitespace, `..`, shell metacharacters).
+
+**Hook lifecycle (`hooks.json`).** Beyond the `PreToolUse`/`PostToolUse` tool hooks, two turn-level events
+are now supported. A **`userPromptSubmit`** hook runs before a turn: a non-zero exit **blocks** the turn
+(its output is returned to the user), and stdout on a zero exit is **injected** as extra context ahead of
+the prompt (env `IMINI_PROMPT`). A **`stop`** hook runs when a turn finishes; its stdout is appended to the
+final answer (env `IMINI_PROMPT`, `IMINI_ANSWER`) — handy for notifications or a final lint. Example:
+
+```json
+{ "userPromptSubmit": [ { "command": "./scripts/inject-ticket-context.sh" } ],
+  "stop":             [ { "command": "notify-send 'imini finished'" } ] }
+```
+
+As before, hooks are off entirely when `hooks.json` is absent, and a hook failure never bricks the turn.
+
+**MCP resources, prompts, and an HTTP transport.** The MCP client now discovers more than tools. If a
+server advertises **resources**, imini registers a `<server>_read_resource` tool (call it with no args to
+list, or a `uri` to read). If a server advertises **prompts**, each is exposed as a callable
+`<server>_prompt_<name>` tool that runs `prompts/get` and returns the rendered messages. Servers can also
+be reached over **HTTP** instead of stdio: in `mcp.json`, set `"transport": "http"` and a `"url"` (a
+streamable-HTTP JSON-RPC endpoint; plain-JSON and single-event SSE responses are supported):
+
+```json
+{ "mcpServers": {
+    "local":  { "command": "npx", "args": ["-y", "@scope/server"] },
+    "remote": { "transport": "http", "url": "https://mcp.internal/rpc" } } }
+```
 
 A coding answer is easy to overstate, so after any run that changed files `imini` appends a
 **git-verified summary** of the edits to the final answer:

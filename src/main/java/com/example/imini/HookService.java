@@ -16,12 +16,18 @@ import java.util.Map;
  * optional hooks.json:
  *
  *   { "preToolUse":  [ { "match": "run_command", "command": "..." } ],
- *     "postToolUse": [ { "match": "edit_file",   "command": "..." } ] }
+ *     "postToolUse": [ { "match": "edit_file",   "command": "..." } ],
+ *     "userPromptSubmit": [ { "command": "..." } ],
+ *     "stop":             [ { "command": "..." } ] }
  *
- *   - "match" is a tool name or "*".
+ *   - "match" is a tool name or "*" (preToolUse/postToolUse only; prompt/stop hooks always run).
  *   - A preToolUse hook that exits NON-ZERO blocks the tool (its output becomes the tool result).
+ *   - A userPromptSubmit hook that exits NON-ZERO blocks the whole turn (its output is returned to the
+ *     user instead of running the model); its stdout on a zero exit is injected as extra context.
  *   - postToolUse stdout is appended to the tool result (e.g. run a linter/formatter and show output).
- *   - Hooks receive context via env: IMINI_TOOL, IMINI_ARGS (JSON), IMINI_RESULT (post only).
+ *   - stop hooks fire when a turn finishes; their stdout is appended to the final answer (e.g. notify).
+ *   - Hooks receive context via env: IMINI_TOOL, IMINI_ARGS (JSON), IMINI_RESULT (post only),
+ *     IMINI_PROMPT (userPromptSubmit), IMINI_ANSWER (stop).
  *
  * Off entirely if hooks.json is absent. Hook failures are logged and do NOT block (so a broken hook
  * can't brick the agent).
@@ -38,6 +44,8 @@ public class HookService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<Hook> pre = new ArrayList<>();
     private final List<Hook> post = new ArrayList<>();
+    private final List<Hook> userPromptSubmit = new ArrayList<>();
+    private final List<Hook> stop = new ArrayList<>();
 
     @PostConstruct
     @SuppressWarnings("unchecked")
@@ -50,7 +58,10 @@ public class HookService {
             Map<String, Object> cfg = mapper.readValue(Files.readAllBytes(CONFIG), Map.class);
             addHooks(pre, cfg.get("preToolUse"));
             addHooks(post, cfg.get("postToolUse"));
-            log.info("[hooks] loaded " + pre.size() + " pre / " + post.size() + " post hook(s).");
+            addHooks(userPromptSubmit, cfg.get("userPromptSubmit"));
+            addHooks(stop, cfg.get("stop"));
+            log.info("[hooks] loaded " + pre.size() + " pre / " + post.size() + " post / "
+                    + userPromptSubmit.size() + " userPromptSubmit / " + stop.size() + " stop hook(s).");
         } catch (Exception e) {
             log.warn("[hooks] could not read hooks.json: " + e.getMessage());
         }
@@ -92,6 +103,43 @@ public class HookService {
         return sb.toString().trim();
     }
 
+    /** The outcome of the userPromptSubmit hooks: either blocked (with a message) or allowed (with optional injected context). */
+    public record PromptResult(boolean blocked, String message, String injectedContext) {}
+
+    /**
+     * Fires userPromptSubmit hooks before a turn runs. A non-zero exit BLOCKS the turn (its output is the
+     * message returned to the user). On a zero exit, any stdout is collected as extra context to inject
+     * ahead of the user's prompt. No hooks configured -> allowed with no injection.
+     */
+    public PromptResult runUserPromptSubmit(String prompt) {
+        StringBuilder injected = new StringBuilder();
+        for (Hook h : userPromptSubmit) {
+            Run r = exec(h.command(), promptEnv(prompt));
+            if (r == null) continue; // hook failure never blocks
+            if (r.exit != 0) {
+                return new PromptResult(true, "BLOCKED by userPromptSubmit hook (exit " + r.exit + "): " + r.out.trim(), "");
+            }
+            if (!r.out.isBlank()) injected.append(r.out.trim()).append("\n");
+        }
+        return new PromptResult(false, null, injected.toString().trim());
+    }
+
+    /** Fires stop hooks when a turn finishes; returns combined stdout to append to the final answer (may be empty). */
+    public String runStop(String prompt, String answer) {
+        StringBuilder sb = new StringBuilder();
+        for (Hook h : stop) {
+            Run r = exec(h.command(), stopEnv(prompt, answer));
+            if (r != null && !r.out.isBlank()) sb.append(r.out.trim()).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    /** True if any userPromptSubmit hooks are configured (lets callers skip the wiring entirely when off). */
+    public boolean hasPromptHooks() { return !userPromptSubmit.isEmpty(); }
+
+    /** True if any stop hooks are configured. */
+    public boolean hasStopHooks() { return !stop.isEmpty(); }
+
     private boolean matches(String match, String tool) {
         return "*".equals(match) || match.equals(tool);
     }
@@ -107,6 +155,19 @@ public class HookService {
         if (result != null) {
             e.put("IMINI_RESULT", result.length() > 2000 ? result.substring(0, 2000) : result);
         }
+        return e;
+    }
+
+    private Map<String, String> promptEnv(String prompt) {
+        Map<String, String> e = new HashMap<>();
+        if (prompt != null) e.put("IMINI_PROMPT", prompt.length() > 4000 ? prompt.substring(0, 4000) : prompt);
+        return e;
+    }
+
+    private Map<String, String> stopEnv(String prompt, String answer) {
+        Map<String, String> e = new HashMap<>();
+        if (prompt != null) e.put("IMINI_PROMPT", prompt.length() > 4000 ? prompt.substring(0, 4000) : prompt);
+        if (answer != null) e.put("IMINI_ANSWER", answer.length() > 4000 ? answer.substring(0, 4000) : answer);
         return e;
     }
 

@@ -4538,3 +4538,38 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 
 - **Observe:** `PromFormat` exports `imini_alerts_digest_window_ratio`, `_delivery_ratio`, `_worst_route_ratio`,
   and `_worst_success_route_ratio` from the `digest_snapshot`; non-finite/absent values are skipped (no line).
+
+---
+
+# Git write workflow, hook breadth, MCP resources/prompts/HTTP transport
+
+## 549. Git write tools (GitHookMcpWorkflowTest + real-repo harness)
+
+- **Run:** `./mvnw -Dtest=GitHookMcpWorkflowTest test`.
+- **Observe:** the pure argv builders are correct — `stageArgs` (empty/`["."]` → `git add -A`; else
+  `git add -- <paths>`), `commitArgs` (`commit [-a] -m <msg>`), `branchArgs` (`checkout [-b] <name>`) —
+  and `isValidBranchName` rejects flags/whitespace/`..`/shell metacharacters. All three tools are
+  `mutating` (so they go through the approval/capability gate). Verified end-to-end against a real
+  throwaway repo: `git_commit` refuses when nothing is staged, `git_stage` then `git_commit` produces a
+  commit and reports the new HEAD, and `git_branch create=true` switches to the new branch.
+- **Manual:** in a workspace git repo, ask the agent to edit a file, then `git_stage`, review with
+  `git_diff staged=true`, draft a message with the `commit-message` skill, and `git_commit` — each
+  mutation prompts for approval in ASK mode.
+
+## 550. Hook breadth — userPromptSubmit / stop (GitHookMcpWorkflowTest + shell harness)
+
+- **Observe:** `HookService.PromptResult` carries block + injected-context. Verified against real
+  `sh -c` hooks: a zero-exit `userPromptSubmit` hook injects its stdout as `<hook-context>` ahead of the
+  prompt; a non-zero exit blocks the turn with the hook's output; a `stop` hook's stdout is appended to
+  the answer; with no hooks configured all paths are no-ops. Wired into the main turn in `AgentEngine`.
+- **Manual:** add `userPromptSubmit`/`stop` entries to `hooks.json` (see README) and run a turn.
+
+## 551. MCP resources, prompts & HTTP transport (GitHookMcpWorkflowTest)
+
+- **Observe:** `McpManager.jsonFromHttpBody` selects the JSON-RPC payload from an HTTP MCP response —
+  a plain JSON object passes through, an SSE body yields its first `data:` JSON line, junk/empty → null.
+  Discovery of `resources/list`/`prompts/list` registers a `<server>_read_resource` tool and per-prompt
+  `<server>_prompt_<name>` tools; `mcp.json` `transport:"http"` + `url` selects the HTTP transport.
+- **Honest note:** the JSON-RPC round-trip (stdio child process / live HTTP server) is CI/live-verified,
+  not exercised in the offline stub build (the offline JSON mapper is a no-op); the pure body-selection,
+  argv, and hook logic above are what the offline harness checks.

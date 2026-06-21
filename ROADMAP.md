@@ -30,17 +30,23 @@ request is explicitly about trust, security, or operations.
 
 ### Build next (ranked; re-verify against README + source before starting)
 
-1. **Git write workflow** — staging + `git_commit` (reuse the existing `commit-message`
-   skill to generate the message) + `git_branch` + show the staged diff before committing.
-   This completes the edit → verify → **commit** loop. `GitInspector` is **read-only** today
-   (`git status` / `git diff --stat`), so the agent can change files but cannot commit them —
-   the single highest-frequency missing action.
-2. **Hook lifecycle breadth** — add `UserPromptSubmit` and `Stop` / session-end events to
-   `HookService` (`PreToolUse` / `PostToolUse` already exist), completing the automation story.
-3. **MCP resources + prompts (+ a second transport)** — the MCP client speaks `tools/list` /
-   `tools/call` over stdio only; add `resources/list` + `resources/read`, expose MCP **prompts**
-   as slash commands, and add an SSE/HTTP transport. (The roadmap has long flagged "MCP resource
-   references later" as the one unfinished MCP piece.)
+The three previous "Build next" workflow gaps — **git write workflow**, **hook lifecycle breadth**, and
+**MCP resources + prompts + HTTP transport** — are now **complete** (see Recently completed). With those
+done, mini represents the high-value, frequently-used Claude Code **workflow** features end to end.
+
+The remaining candidates are smaller completeness/quality items, not new high-frequency workflows. In
+rough priority:
+
+1. **Surface MCP prompts as real `/`-slash-commands** — they are currently exposed as callable
+   `<server>_prompt_<name>` *tools*; wiring them into the slash-command dispatcher (like Claude Code's
+   `/mcp__server__prompt`) is the remaining UX step.
+2. **Hook event completeness** — add `SessionStart` / `Notification` events to round out the hook
+   lifecycle (the high-value `PreToolUse`/`PostToolUse`/`UserPromptSubmit`/`Stop` set is done).
+3. **Git workflow polish** — `git_push` (capability-gated, off by default) and surfacing the staged diff
+   in the approval UI rather than only in the tool result.
+
+If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
+**done** — prefer educational depth (docs, diagrams, eval scenarios) over inventing new surface.
 
 ### Do NOT build next
 
@@ -85,12 +91,15 @@ The repository already represents most high-value Claude Code workflow features:
 - layered project memory (`CLAUDE.md` + `/init` + `/memory`), `@file`/`@directory` references;
 - skills (`/skills`, `/skill-name`, frontmatter, `context: fork`); a custom subagent registry;
   plan mode; slash commands; plugins;
-- an MCP **client** (stdio JSON-RPC, `tools/*`); `PreToolUse`/`PostToolUse` hooks;
+- an MCP **client** (stdio + HTTP JSON-RPC; tools, resources, prompts);
+  hooks (`PreToolUse`/`PostToolUse`/`UserPromptSubmit`/`Stop`);
+- read + **write** git tools (`git_status`/`git_diff`/`git_log`/`git_blame`;
+  `git_stage`/`git_commit`/`git_branch`, approval-gated);
 - sessions/checkpoints, scheduled tasks, image input; retrieval and durable memory;
 - RBAC, auth, rate limits, metrics, a full alerting/observability stack, Docker, and CI.
 
-**Known high-frequency gaps** (see the decision procedure above): git is **read-only** (no
-commit/branch); hooks cover only the tool-use pair; MCP exposes tools but not resources/prompts.
+**Status:** the high-value, high-frequency Claude Code **workflow** features are now represented end to
+end. Remaining items (see "Build next") are completeness/quality polish, not new high-frequency workflows.
 
 ## High-value Claude Code feature coverage (status)
 
@@ -140,6 +149,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Git write workflow + hook breadth + MCP resources/prompts/HTTP transport: new mutating `git_stage`/`git_commit`/`git_branch` tools (approval-gated, message via the `commit-message` skill) complete the edit→verify→commit loop; `HookService` gains `userPromptSubmit` (block-or-inject) and `stop` (append) turn-level events alongside the existing tool hooks; and the MCP client discovers `resources/list`+`resources/read` (a `<server>_read_resource` tool) and `prompts/list`+`prompts/get` (per-prompt tools) and can reach servers over an HTTP transport (`mcp.json` `transport:"http"`, plain-JSON or single-event SSE) as well as stdio.
 
 - Live posture row + structured-payload toggle + posture Prometheus gauges: the overview current-posture row is rebuilt from overview.json on each poll (no longer stale until reload); alerts.slo-digest-structured (default true) lets receivers opt out of the digest object in the webhook payload; and the snapshot posture is exported as imini_alerts_digest_window_ratio/_delivery_ratio/_worst_route_ratio/_worst_success_route_ratio gauges.
 
