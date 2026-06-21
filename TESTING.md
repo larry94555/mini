@@ -4492,3 +4492,27 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
   and on failure shows it in the picker note while leaving `window.digestRangeActive=false` (view not pinned).
   Quick-range buttons inherit this via `applyDigestRange`. (JS exercised with `node`: good range pins; an
   inverted range surfaces "'from' must not be after 'to'".)
+
+---
+
+# Overview posture row, structured webhook payload, report format choice
+
+## 543. Structured webhook payload (AlertDigestPostureStructuredPayloadFormatTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestPostureStructuredPayloadFormatTest test`.
+- **Observe:** `digestPayloadJson(summary, digest)` keeps the back-compat `text` field and adds a structured
+  `digest` object (numbers/booleans bare, strings quoted, NaN -> null); with no digest it is text-only. Used by
+  `postSloDigest` for both the pipeline and probe sends.
+
+## 544. Current-posture row (AlertDigestPostureStructuredPayloadFormatTest)
+
+- **Observe:** `postureRow(stats)` renders a compact row (id `digest_posture`) from `digest_snapshot` — window &
+  delivery ratios vs targets, worst routes, and mute/catch-up pills; empty when no snapshot. `stats()` now
+  includes `digest_snapshot`, and the overview shows the row at the top of the digest section. Live:
+  `GET /admin/alerts/overview.html`.
+
+## 545. JSON/CSV report choice (AlertDigestPostureStructuredPayloadFormatTest + node)
+
+- **Observe:** the overview offers Download report (CSV/JSON) and Copy report link (JSON/CSV);
+  `downloadDigestReport(fmt)` and `copyDigestLink(fmt)` add `&format=csv` only for CSV (JSON is the endpoint
+  default). (JS exercised with `node`.)

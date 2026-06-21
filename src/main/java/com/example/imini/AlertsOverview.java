@@ -116,8 +116,9 @@ public final class AlertsOverview {
 
         // recent SLO digests (from persisted history) + mute status
         List<Map<String, Object>> recent = recentDigests(stats);
-        if (live || !recent.isEmpty()) {
+        if (live || !recent.isEmpty() || stats.get("digest_snapshot") instanceof Map) {
             sb.append("<h2>Recent SLO digests</h2>");
+            sb.append(postureRow(stats));
             long mu = num(stats, "digest_muted_until");
             String reason = String.valueOf(stats.getOrDefault("digest_mute_reason", ""));
             sb.append("<p class=\"muted\" id=\"digest_mute_note\">").append(muteNote(mu, System.currentTimeMillis(), reason)).append("</p>");
@@ -133,8 +134,10 @@ public final class AlertsOverview {
               .append("<a class=\"nav\" href=\"#\" onclick=\"return resetDigestRange()\">Reset (live)</a> ")
               .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('history')\">History CSV</a> ")
               .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('audit')\">Audit CSV</a> ")
-              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('report')\">Download report bundle</a> ")
-              .append("<a class=\"nav\" href=\"#\" onclick=\"return copyDigestLink()\">Copy report link</a>")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestReport('csv')\">Download report (CSV)</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestReport('json')\">Download report (JSON)</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return copyDigestLink('json')\">Copy report link (JSON)</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return copyDigestLink('csv')\">Copy report link (CSV)</a>")
               .append("<span id=\"digest_range_note\" class=\"muted\"></span></div>");
             // date-range fetch handlers (always available; suppress the live poll while a range is pinned)
             sb.append("<script>window.digestRangeActive=false;")
@@ -154,8 +157,10 @@ public final class AlertsOverview {
               .append("function downloadDigestCsv(kind){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
               .append("var path=(kind==='audit')?'/admin/alerts/digest-audit':((kind==='report')?'/admin/alerts/digest-report':'/admin/alerts/slo-digest/history');")
               .append("var qs='?format=csv&limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');window.location.href=path+qs;return false;}")
-              .append("function copyDigestLink(){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
-              .append("var qs='?limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');var url=window.location.origin+'/admin/alerts/digest-report'+qs;")
+              .append("function downloadDigestReport(fmt){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
+              .append("var qs='?limit=200'+(fmt==='csv'?'&format=csv':'')+(f?('&from='+f):'')+(t?('&to='+t):'');window.location.href='/admin/alerts/digest-report'+qs;return false;}")
+              .append("function copyDigestLink(fmt){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
+              .append("var qs='?limit=200'+(fmt==='csv'?'&format=csv':'')+(f?('&from='+f):'')+(t?('&to='+t):'');var url=window.location.origin+'/admin/alerts/digest-report'+qs;")
               .append("var n=document.getElementById('digest_range_note');")
               .append("function done(){if(n)n.textContent=' report link copied';}")
               .append("if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(done,function(){if(n)n.textContent=' '+url;});}else{if(n)n.textContent=' '+url;}return false;}</script>");
@@ -341,6 +346,43 @@ public final class AlertsOverview {
     }
 
     /** Format a ratio as a percentage string (no trailing .0 for whole numbers); "—" for NaN. */
+    /**
+     * Compact "current posture" summary row from the live {@code digest_snapshot}: window & delivery ratios vs
+     * targets, worst routes, and mute/catch-up state. Returns empty string when no snapshot is present.
+     */
+    @SuppressWarnings("unchecked")
+    static String postureRow(Map<String, Object> stats) {
+        Object snapObj = stats.get("digest_snapshot");
+        if (!(snapObj instanceof Map)) return "";
+        Map<String, Object> d = (Map<String, Object>) snapObj;
+        double wr = dnum(d, "window_success_ratio"), wt = dnum(d, "slo_target");
+        double ds = dnum(d, "delivery_success_ratio"), st = dnum(d, "success_target");
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div class=\"posture\" id=\"digest_posture\">");
+        sb.append("<span class=\"pill\">window ").append(pct(wr));
+        if (!Double.isNaN(wt) && wt > 0) sb.append(" / ").append(pct(wt));
+        sb.append("</span>");
+        sb.append("<span class=\"pill\">delivery ").append(pct(ds));
+        if (!Double.isNaN(st) && st > 0) sb.append(" / ").append(pct(st));
+        sb.append("</span>");
+        String wRoute = String.valueOf(d.getOrDefault("worst_route", ""));
+        if (!wRoute.isEmpty()) sb.append("<span class=\"pill\">worst latency: ").append(esc(wRoute))
+              .append(" ").append(pct(dnum(d, "worst_route_ratio"))).append("</span>");
+        String wsRoute = String.valueOf(d.getOrDefault("worst_success_route", ""));
+        if (!wsRoute.isEmpty()) sb.append("<span class=\"pill\">worst delivery: ").append(esc(wsRoute))
+              .append(" ").append(pct(dnum(d, "worst_success_route_ratio"))).append("</span>");
+        if (Boolean.TRUE.equals(d.get("muted"))) sb.append("<span class=\"pill muted\">muted</span>");
+        if (Boolean.TRUE.equals(d.get("catchup"))) sb.append("<span class=\"pill\">catch-up pending</span>");
+        sb.append("</div>");
+        return sb.toString();
+    }
+
+    /** Read a double-valued stat (NaN when absent/non-numeric). */
+    private static double dnum(Map<String, Object> m, String k) {
+        Object v = m.get(k);
+        return (v instanceof Number) ? ((Number) v).doubleValue() : Double.NaN;
+    }
+
     static String pct(double r) {
         if (Double.isNaN(r)) return "\u2014";
         double p = Math.round(r * 1000.0) / 10.0;

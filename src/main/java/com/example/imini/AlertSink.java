@@ -1348,6 +1348,7 @@ public class AlertSink {
         m.put("slo_window_series_by_route", sloWindowSeriesByRoute());
         m.put("delivery_success_slo", deliverySuccessSlo());
         m.put("recent_digests", sloDigestHistory(5));
+        m.put("digest_snapshot", sloDigest());
         m.put("digest_muted_until", digestMuteUntil);
         m.put("digest_mute_reason", digestMuteReason);
         m.put("digest_audit", digestAuditTrail(10));
@@ -1894,6 +1895,39 @@ public class AlertSink {
     }
 
     /**
+     * Pure: build the webhook JSON body. Keeps {@code text} (the rendered summary) for back-compat with existing
+     * receivers, and adds a structured {@code digest} object with the machine-readable snapshot fields.
+     */
+    static String digestPayloadJson(String summary, Map<String, Object> digest) {
+        StringBuilder b = new StringBuilder();
+        b.append("{\"text\":\"").append(jsonEscape(summary)).append("\"");
+        if (digest != null && !digest.isEmpty()) {
+            b.append(",\"digest\":{");
+            boolean first = true;
+            for (Map.Entry<String, Object> e : digest.entrySet()) {
+                if (!first) b.append(',');
+                first = false;
+                b.append('"').append(jsonEscape(e.getKey())).append("\":").append(jsonValue(e.getValue()));
+            }
+            b.append('}');
+        }
+        b.append('}');
+        return b.toString();
+    }
+
+    /** Pure: render a value as a JSON scalar — numbers/booleans bare, everything else a quoted string. */
+    private static String jsonValue(Object v) {
+        if (v == null) return "null";
+        if (v instanceof Number) {
+            double d = ((Number) v).doubleValue();
+            if (Double.isNaN(d) || Double.isInfinite(d)) return "null";
+            return v.toString();
+        }
+        if (v instanceof Boolean) return v.toString();
+        return "\"" + jsonEscape(String.valueOf(v)) + "\"";
+    }
+
+    /**
      * POST a JSON SLO digest to {@link #digestUrl()} (synchronous, no retry — it's a periodic summary, not a
      * critical alert). Returns a small result map; no-op result when no URL is configured.
      */
@@ -1923,7 +1957,7 @@ public class AlertSink {
             recordDigestHistory(false, "no-url", summary, digest);
             return Map.of("posted", false, "reason", "no digest/webhook URL", "summary", summary);
         }
-        String payload = "{\"text\":\"" + jsonEscape(summary) + "\"}";
+        String payload = digestPayloadJson(summary, digest);
         if (sloDigestViaPipeline) {
             enqueue(payload, url, null, "slo_digest"); // retry + dead-letter via the normal pipeline
             markDigestBaseline(digest);
