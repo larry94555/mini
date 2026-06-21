@@ -82,6 +82,21 @@ same as "model quality"?
 
 **Checkpoint:** You can walk the trace from user prompt to final answer and name each stage.
 
+## Lab 6 — The write workflow, end to end (20 min)
+
+**Read:** [`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) — the edit → verify → commit loop, the six
+hook events, and the MCP server lifecycle, each with a diagram.
+
+**Do:** run the three golden/integration tests and read their assertions as the executable version of the
+diagrams.
+
+**Discuss:** Where does the permission gate sit in the loop? What does a hook see at each event? How does an
+MCP prompt become a `/`-slash-command, and what reaches the model when you invoke it?
+
+**Checkpoint (test):** `mvn test -Dtest=GoldenTraceWorkflowTest,McpLiveIntegrationTest,GitCommitApprovalFlowTest`
+— the golden trace drives the real agent loop (edit→stage→commit) with a scripted model; the MCP test
+exercises stdio + HTTP (incl. streaming SSE); the approval test shows the staged diff on the approval payload.
+
 ## Wrap-up (5 min)
 
 Read [`CONCEPT_MAP.md`](CONCEPT_MAP.md) together: each imini piece maps to a Claude Code category (context,

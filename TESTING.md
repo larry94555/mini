@@ -4641,3 +4641,39 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 `docs/WORKFLOW_WALKTHROUGH.md` is an educational tour of the edit→verify→commit loop, the six-event hook
 lifecycle, and the MCP server lifecycle, with mermaid diagrams that map to the methods above. Not a test;
 listed here so the docs and tests stay cross-referenced.
+
+---
+
+# Golden-trace workflow test, streaming SSE MCP, learning-path/workshop modules
+
+## 557. Golden-trace: real agent loop, edit → stage → commit (GoldenTraceWorkflowTest)
+
+- **Run:** `./mvnw -Dtest=GoldenTraceWorkflowTest test`.
+- **Observe (`editStageCommitTrace`):** a scripted, model-free `LlamaClient` drives the **real**
+  `AgentEngine.run` against a real temp git repo through `edit_file` → `git_stage` → `git_commit`. The test
+  asserts the whole chain: the file is actually edited and the commit lands on HEAD (tool dispatch); a
+  recording `PermissionService` shows `ALLOW` for each mutating tool (the permission decision); a
+  `preToolUse` hook marker file is created and the `stop` hook output is appended to the answer (hook
+  firing); and `EditSummary.format(git.status(), git.diffStat(), ...)` names the changed file (the
+  git-verified edit-trust summary, assembled the way `AgentLoop` does).
+- **Observe (`mcpPromptSlashCommandTrace`):** connects `McpManager` to the node stub, renders
+  `/mcp__stub__review file=A.java`, and feeds the rendered prompt into the real engine, asserting the MCP
+  prompt text reached the model as the user turn. Self-skips without `node` (and offline, where the
+  Jackson-dependent discovery yields nothing).
+- **Note:** this constructs the real engine + permission/hook/git components rather than booting Spring;
+  the scripted model removes the only piece needing a live server, so the trace runs fully offline.
+
+## 558. Streaming (multi-event) SSE MCP transport (McpLiveIntegrationTest)
+
+- **Observe:** `discoversAndInvokesOverStreamingSse` points `McpManager` at a JDK `HttpServer` that emits a
+  `text/event-stream` with an interim `notifications/progress` event **before** the real response event;
+  discovery + invocation still succeed because the client skips interim events and picks the response.
+  `sseSelectorPicksResponseAmongMultipleEvents` unit-checks the pure selector: among multiple `data:`
+  events it returns the one with `"result"`/`"error"`, with plain-JSON passthrough, single-event, and
+  no-response fallback all preserved (verified offline; back-compatible with the prior single-event SSE).
+
+## 559. Learning-path & workshop modules
+
+`docs/LEARNING_PATH.md` gains **Module 13.5** (walk the write workflow end to end) and `docs/WORKSHOP.md`
+gains **Lab 6**, both pointing at `docs/WORKFLOW_WALKTHROUGH.md` and using the three tests above as
+checkpoints. Not tests themselves; listed so docs and tests stay cross-referenced.

@@ -304,6 +304,30 @@ Concept:
 - The most important educational artifact is a complete trace from user prompt to final answer.
 - Once you can follow the trace, you understand the harness.
 
+## Module 13.5: Walk the write workflow end to end
+
+Read:
+
+- `docs/WORKFLOW_WALKTHROUGH.md`
+
+Concept:
+
+- The edit → verify → **commit** loop, the six hook events, and the MCP server lifecycle, each with a
+  diagram that maps to the methods that implement it.
+- This ties Modules 4 (edit safely), 9 (hooks and slash commands), and 10 (MCP) together into one
+  picture of a complete coding turn.
+
+Test checkpoints (run these and read the assertions — they are the executable version of the diagrams):
+
+- `./mvnw -Dtest=GoldenTraceWorkflowTest test` — drives the real agent loop through edit → stage → commit
+  with a scripted model, asserting tool dispatch, the permission decision, hook firing, and the
+  git-verified edit-trust summary.
+- `./mvnw -Dtest=McpLiveIntegrationTest test` — connects to a stub MCP server over stdio and HTTP
+  (including a streaming multi-event SSE response) and exercises tools, resources, and the
+  `/mcp__server__prompt` slash command.
+- `./mvnw -Dtest=GitCommitApprovalFlowTest test` — drives a real commit through the approval flow and shows
+  the staged diff riding the approval payload.
+
 ## Module 14: Compare to Claude Code concepts
 
 Read:
@@ -326,6 +350,7 @@ You have completed this learning path when you can explain:
 - how sessions, checkpoints, and retrieval persist state,
 - why codebase navigation tools matter,
 - how prompt-injection fencing works,
+- how the edit → verify → commit loop, hooks, and MCP fit together in one turn (see Module 13.5),
 - and what would be required to make this production-grade.
 
 For that last point in depth — the popular harness topics imini omits on purpose (Recursive Language
