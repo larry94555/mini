@@ -631,9 +631,25 @@ public class AgentController {
     /** Recent SLO digests (newest-first), from the persisted history. Admin only. */
     @GetMapping("/admin/alerts/slo-digest/history")
     public List<Map<String, Object>> adminAlertsSloDigestHistory(
-            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+            @RequestParam(name = "limit", defaultValue = "20") int limit,
+            @RequestParam(name = "from", defaultValue = "") String from,
+            @RequestParam(name = "to", defaultValue = "") String to,
+            @RequestParam(name = "days", defaultValue = "0") int days) {
         requireAdmin();
-        return alertSink.sloDigestHistory(Math.max(1, Math.min(200, limit)));
+        long[] r = dateRangeMs(from, to, days);
+        return alertSink.sloDigestHistory(Math.max(1, Math.min(200, limit)), r[0], r[1]);
+    }
+
+    /** Resolve from/to (ISO yyyy-MM-dd) or a trailing days window into [fromMs, toMs] epoch-ms bounds. */
+    private static long[] dateRangeMs(String from, String to, int days) {
+        long fromMs = Long.MIN_VALUE, toMs = Long.MAX_VALUE;
+        if (days > 0) {
+            fromMs = System.currentTimeMillis() - (long) days * 86_400_000L;
+        } else {
+            if (!from.isBlank()) try { fromMs = java.time.LocalDate.parse(from.trim()).toEpochDay() * 86_400_000L; } catch (Exception ignore) {}
+            if (!to.isBlank()) try { toMs = (java.time.LocalDate.parse(to.trim()).toEpochDay() + 1) * 86_400_000L - 1; } catch (Exception ignore) {}
+        }
+        return new long[]{fromMs, toMs};
     }
 
     /** Mute scheduled SLO digests for {@code hours} (so a known-degraded period doesn't keep paging). CSRF. */
@@ -657,9 +673,13 @@ public class AgentController {
     @GetMapping("/admin/alerts/digest-audit")
     public ResponseEntity<?> adminAlertsDigestAudit(
             @RequestParam(name = "limit", defaultValue = "20") int limit,
-            @RequestParam(name = "format", defaultValue = "json") String format) {
+            @RequestParam(name = "format", defaultValue = "json") String format,
+            @RequestParam(name = "from", defaultValue = "") String from,
+            @RequestParam(name = "to", defaultValue = "") String to,
+            @RequestParam(name = "days", defaultValue = "0") int days) {
         requireAdmin();
-        List<Map<String, Object>> rows = alertSink.digestAuditTrail(Math.max(1, Math.min(200, limit)));
+        long[] r = dateRangeMs(from, to, days);
+        List<Map<String, Object>> rows = alertSink.digestAuditTrail(Math.max(1, Math.min(200, limit)), r[0], r[1]);
         if ("csv".equalsIgnoreCase(format)) {
             return ResponseEntity.ok()
                     .header("Content-Type", "text/csv")

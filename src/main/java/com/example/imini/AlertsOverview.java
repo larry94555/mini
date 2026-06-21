@@ -122,9 +122,14 @@ public final class AlertsOverview {
             String reason = String.valueOf(stats.getOrDefault("digest_mute_reason", ""));
             sb.append("<p class=\"muted\" id=\"digest_mute_note\">").append(muteNote(mu, System.currentTimeMillis(), reason)).append("</p>");
             // delivery-success trend across recent digests (oldest -> newest), charted left to right
-            List<Double> trend = digestTrend(recent);
-            sb.append("<div class=\"spark\"><span class=\"sparklabel\">delivery-success across recent digests: </span>");
-            sb.append("<span id=\"digest_trendbox\">").append(sparklineSvg(trend, Double.NaN, 0, 160, 28)).append("</span></div>");
+            // trends across recent digests (oldest -> newest); delivery-success carries mute/catch-up markers
+            List<Map<String, Object>> rowsOld = digestRowsOldestFirst(recent);
+            sb.append("<div class=\"spark\"><span class=\"sparklabel\">delivery-success (\u25a0 muted, \u25c6 catch-up): </span>");
+            sb.append("<span id=\"digest_trendbox\">").append(digestTrendSvg(rowsOld, "delivery_success", 160, 28)).append("</span></div>");
+            sb.append("<div class=\"spark\"><span class=\"sparklabel\">window SLO ratio: </span>");
+            sb.append("<span id=\"digest_wtrendbox\">").append(sparklineSvg(digestTrend(recent, "window_ratio"), Double.NaN, 0, 160, 28)).append("</span></div>");
+            sb.append("<div class=\"spark\"><span class=\"sparklabel\">window budget remaining: </span>");
+            sb.append("<span id=\"digest_btrendbox\">").append(sparklineSvg(digestTrend(recent, "budget_remaining"), Double.NaN, 0, 160, 28)).append("</span></div>");
             sb.append("<table><thead><tr><th>time</th><th>posted</th><th>mode</th><th>summary</th></tr></thead>");
             sb.append("<tbody id=\"digest_body\">");
             for (Map<String, Object> r : recent) sb.append(digestRow(r));
@@ -260,7 +265,9 @@ public final class AlertsOverview {
             + "+'</td><td class=\"num\">'+(x.suppressed||0)+'</td></tr>';});rows('sup_body',h);"
             + "var rd=s.recent_digests||[];h='';rd.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+(x.posted?'yes':'no')"
             + "+'</td><td>'+esc(x.mode||'')+'</td><td>'+esc((x.summary||'').slice(0,120))+'</td></tr>';});rows('digest_body',h);"
-            + "var dtb=document.getElementById('digest_trendbox');if(dtb){var tr=[];rd.forEach(function(x){if(typeof x.delivery_success==='number')tr.push(x.delivery_success);});tr.reverse();var tg=sparkSVG(tr,160,28);if(tg)dtb.innerHTML=tg;}"
+            + "var dtb=document.getElementById('digest_trendbox');if(dtb){var tr=[];rd.forEach(function(x){if(typeof x.delivery_success==='number')tr.push(x.delivery_success);});tr.reverse();var _t=TGT;TGT=-1;var tg=sparkSVG(tr,160,28);TGT=_t;if(tg)dtb.innerHTML=tg;}"
+            + "function metricTrend(box,key){var el=document.getElementById(box);if(!el)return;var tr=[];rd.forEach(function(x){if(typeof x[key]==='number')tr.push(x[key]);});tr.reverse();var _t=TGT;TGT=-1;var g=sparkSVG(tr,160,28);TGT=_t;if(g)el.innerHTML=g;}"
+            + "metricTrend('digest_wtrendbox','window_ratio');metricTrend('digest_btrendbox','budget_remaining');"
             + "var da=s.digest_audit||[];h='';da.forEach(function(x){h+='<tr><td>'+esc(x.time)+'</td><td>'+esc(x.user||'')"
             + "+'</td><td>'+esc(x.action||'')+'</td><td>'+esc((x.outcome||'').slice(0,80))+'</td></tr>';});rows('digest_audit_body',h);"
             + "var mn=document.getElementById('digest_mute_note');if(mn){var mu=s.digest_muted_until||0,now=Date.now();"
@@ -412,15 +419,73 @@ public final class AlertsOverview {
         return (r instanceof List) ? (List<Map<String, Object>>) r : List.of();
     }
 
-    /** delivery-success values from recent digests (which arrive newest-first), reversed to oldest-&gt;newest. */
-    private static List<Double> digestTrend(List<Map<String, Object>> recent) {
+    /** Metric values (by key) from recent digests (newest-first input), reversed to oldest-&gt;newest. */
+    private static List<Double> digestTrend(List<Map<String, Object>> recent, String key) {
         List<Double> out = new java.util.ArrayList<>();
         if (recent != null) for (Map<String, Object> r : recent) {
-            Object v = r.get("delivery_success");
+            Object v = r.get(key);
             if (v instanceof Number n) out.add(n.doubleValue());
         }
         java.util.Collections.reverse(out); // newest-first input -> chart oldest on the left
         return out;
+    }
+
+    /** Recent digest rows (newest-first input) reversed to oldest-&gt;newest, for annotated trend rendering. */
+    private static List<Map<String, Object>> digestRowsOldestFirst(List<Map<String, Object>> recent) {
+        List<Map<String, Object>> rows = new java.util.ArrayList<>(recent == null ? List.of() : recent);
+        java.util.Collections.reverse(rows);
+        return rows;
+    }
+
+    /**
+     * A trend sparkline for a digest metric with mute/catch-up markers: a "muted" row is drawn as a grey square,
+     * and a posted row immediately following a muted run (a catch-up) as a blue diamond. Rows lacking the metric
+     * are skipped. Input is oldest-&gt;newest.
+     */
+    static String digestTrendSvg(List<Map<String, Object>> rowsOldestFirst, String key, int w, int h) {
+        List<Double> vals = new java.util.ArrayList<>();
+        List<String> marks = new java.util.ArrayList<>(); // "", "muted", "catchup"
+        boolean prevMuted = false;
+        for (Map<String, Object> r : rowsOldestFirst) {
+            Object v = r.get(key);
+            if (!(v instanceof Number n)) { // still track mute state across gaps
+                if ("muted".equals(r.get("mode"))) prevMuted = true;
+                continue;
+            }
+            String mode = String.valueOf(r.get("mode"));
+            boolean muted = "muted".equals(mode);
+            boolean posted = Boolean.TRUE.equals(r.get("posted"));
+            String mark = muted ? "muted" : (prevMuted && posted ? "catchup" : "");
+            vals.add(n.doubleValue());
+            marks.add(mark);
+            prevMuted = muted; // a sent row clears the muted run
+        }
+        String points = sparklinePoints(vals, w, h);
+        if (points.isEmpty()) return "<span class=\"muted\">collecting\u2026</span>";
+        int nn = vals.size();
+        StringBuilder sb = new StringBuilder();
+        sb.append("<svg width=\"").append(w).append("\" height=\"").append(h).append("\" viewBox=\"0 0 ")
+          .append(w).append(' ').append(h).append("\" preserveAspectRatio=\"none\" class=\"sparksvg\">");
+        sb.append("<polyline fill=\"none\" stroke=\"#2a7\" stroke-width=\"1.5\" points=\"").append(points).append("\"/>");
+        for (int i = 0; i < nn; i++) {
+            double val = vals.get(i);
+            if (val < 0) continue;
+            double x = nn == 1 ? 0 : (double) i / (nn - 1) * w;
+            double y = h - val * h;
+            String mark = marks.get(i);
+            if ("muted".equals(mark)) {
+                sb.append("<rect x=\"").append(round1(x - 2)).append("\" y=\"").append(round1(y - 2))
+                  .append("\" width=\"4\" height=\"4\" fill=\"#999\"><title>muted: ").append(pct(val)).append("</title></rect>");
+            } else if ("catchup".equals(mark)) {
+                sb.append("<circle cx=\"").append(round1(x)).append("\" cy=\"").append(round1(y))
+                  .append("\" r=\"2.4\" fill=\"#36c\"><title>catch-up after mute: ").append(pct(val)).append("</title></circle>");
+            } else {
+                sb.append("<circle cx=\"").append(round1(x)).append("\" cy=\"").append(round1(y))
+                  .append("\" r=\"1.6\" fill=\"#2a7\"><title>").append(pct(val)).append("</title></circle>");
+            }
+        }
+        sb.append("</svg>");
+        return sb.toString();
     }
 
     /** A digest history table row. */
