@@ -714,7 +714,11 @@ The stdio half self-skips if `node` isn't on `PATH`; the HTTP half always runs (
 multi-event SSE response). See [`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md) for the
 lifecycle diagrams. The whole edit → verify → commit turn is also covered by `GoldenTraceWorkflowTest`,
 which drives the **real agent loop** with a scripted (model-free) client and asserts tool dispatch, the
-permission decision, hook firing, and the git-verified edit-trust summary in one trace.
+permission decision, hook firing, and the git-verified edit-trust summary in one trace. The non-happy-path
+branches — a mutation denied in PLAN mode, an invalid-args call that recovers, and the duplicate-call guard
+— are covered the same way by `RecoveryTraceTest`. Both share the `ScriptedAgent` test fixture (scripted
+model + real-engine builder), which `FakeModelHarnessTest` also uses. CI installs Node so the stdio MCP
+integration tests run rather than self-skip.
 
 A coding answer is easy to overstate, so after any run that changed files `imini` appends a
 **git-verified summary** of the edits to the final answer:

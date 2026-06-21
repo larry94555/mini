@@ -44,13 +44,10 @@ live-server **MCP integration test** (node stdio stub + JDK HttpServer stub, bot
 
 Remaining candidates are genuinely optional — pursue only if a concrete need appears:
 
-1. **Live CI test matrix** — run the stdio MCP + node-dependent tests on CI runners that have `node`
-   installed (today the stdio half self-skips when `node` is absent), so the full transport matrix is
-   exercised in CI, not just locally.
-2. **True long-lived SSE streaming** — the HTTP transport now consumes a *terminating* multi-event
+1. **True long-lived SSE streaming** — the HTTP transport now consumes a *terminating* multi-event
    `text/event-stream` (it skips interim progress events and picks the response); genuinely unbounded,
    server-initiated streams (keep-alive, server push) remain out of scope.
-3. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
+2. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
    if real usage shows a need.
 
 If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
@@ -157,6 +154,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Recovery golden traces + shared scripted-agent fixture + node in CI: `RecoveryTraceTest` drives the real `AgentEngine` through its non-happy-path branches — a mutation denied in PLAN mode (`RECORD_PLAN`, nothing executed), an invalid-args call that becomes corrective feedback then a successful retry, and a repeated identical mutating call that trips the duplicate-call guard (execution capped, run stopped) — asserting the permission decision, the validation/guard messages, and the final answer for each; a shared `ScriptedAgent` test fixture (scripted `LlamaClient` + real-engine `buildEngine` + decision-recording permissions) now backs `GoldenTraceWorkflowTest`, `RecoveryTraceTest`, and `FakeModelHarnessTest` (the last upgraded to drive the real engine), removing the parallel harness; and `ci.yml` installs Node so the stdio MCP integration tests run in CI instead of self-skipping.
 
 - Golden-trace workflow test + streaming SSE MCP + learning-path/workshop modules: `GoldenTraceWorkflowTest` drives the real `AgentEngine` loop with a scripted (model-free) `LlamaClient` through edit→stage→commit, asserting tool dispatch, the permission decision, hook firing, and the git-verified edit-trust summary in one trace (plus an MCP-prompt-slash-command trace); the HTTP MCP transport now consumes a terminating multi-event `text/event-stream`, skipping interim progress events to pick the JSON-RPC response (`McpManager.jsonFromHttpBody`), covered by a streaming-SSE integration test + a pure selector test; and `docs/WORKFLOW_WALKTHROUGH.md` is wired into `docs/LEARNING_PATH.md` (Module 13.5) and `docs/WORKSHOP.md` (Lab 6) with the new tests as checkpoints.
 

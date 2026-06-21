@@ -4677,3 +4677,39 @@ listed here so the docs and tests stay cross-referenced.
 `docs/LEARNING_PATH.md` gains **Module 13.5** (walk the write workflow end to end) and `docs/WORKSHOP.md`
 gains **Lab 6**, both pointing at `docs/WORKFLOW_WALKTHROUGH.md` and using the three tests above as
 checkpoints. Not tests themselves; listed so docs and tests stay cross-referenced.
+
+---
+
+# Recovery golden traces, shared scripted-agent fixture, node in CI
+
+## 560. Recovery golden traces — PLAN / invalid-args / duplicate guard (RecoveryTraceTest)
+
+- **Run:** `./mvnw -Dtest=RecoveryTraceTest test`.
+- **Observe (`planModeRecordsButDoesNotExecute`):** a mutating `write_marker` call in `Mode.PLAN` is gated
+  to `RECORD_PLAN` — the tool never executes (an execution counter stays 0 and no file is written), the
+  fed-back tool result says `[plan mode] Recorded (not executed)`, and the final answer carries the
+  `PLAN MODE - nothing was executed` suffix listing the proposed call.
+- **Observe (`invalidArgsBecomeFeedbackThenRecover`):** a first call missing a required field yields
+  `INVALID_ARGS ... missing required field 'text'` (fed back, not executed); the scripted model retries
+  with valid args and succeeds — exactly one execution, the file holds the recovered value, and the run
+  ends on the recovery answer.
+- **Observe (`duplicateCallGuardStopsRepetition`):** the same mutating call repeated trips the guard — the
+  `you already called 'write_marker'` NOTE is fed back, execution is capped at the first two identical
+  calls, and the run stops with `kept repeating the same tool call` rather than looping.
+- **Note:** these drive the **real `AgentEngine`** with a scripted (model-free) `LlamaClient`, so they run
+  fully offline; verified end to end (12 assertions) before commit.
+
+## 561. Shared scripted-agent fixture (ScriptedAgent)
+
+`ScriptedAgent` (test sources) centralizes the scripted `LlamaClient`, the `call`/`answer` builders, a
+decision-recording `PermissionService`, and the real-engine `buildEngine` (compaction disabled).
+`GoldenTraceWorkflowTest`, `RecoveryTraceTest`, and `FakeModelHarnessTest` all use it, so there is one
+harness rather than parallel copies. `FakeModelHarnessTest` now drives the **real engine** through the
+fixture (previously a bespoke in-test loop), preserving its read→edit→answer and invalid-args-recovery
+assertions.
+
+## 562. Node in CI
+
+`.github/workflows/ci.yml` now runs `actions/setup-node@v4` before the test suite, so the stdio MCP
+integration tests (`McpLiveIntegrationTest`, the `mcpPromptSlashCommandTrace`) execute on CI instead of
+self-skipping when `node` is absent.

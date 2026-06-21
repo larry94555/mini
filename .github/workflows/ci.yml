@@ -18,6 +18,10 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Set up Node.js (so the stdio MCP integration tests run instead of self-skipping)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Cache wrapper Maven distribution
         uses: actions/cache@v4
         with:
