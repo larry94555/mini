@@ -34,3 +34,11 @@ unit-tested in `EvalSuiteFileTest`.
 Add lines for your domain. Prefer `contains`/`regex` for free-form answers and `equals` only when you can
 constrain the output exactly (e.g. "reply with one lowercase word"). Keep prompts self-contained and
 deterministic so pass/fail reflects the agent, not prompt ambiguity.
+
+### Harness-behavior cases
+
+The shipped suite also includes a few cases that require the agent to **use a tool** before answering — for
+example reading `fixtures/note.txt` or listing `fixtures/` — so the suite exercises the agent loop (tool
+dispatch + incorporating the tool result), not just the model's factual recall. The `fixtures/` directory
+holds the small committed files those cases read. These cases naturally need a capable-enough live model to
+actually call the tool; they still self-skip with the rest of the suite when no model is reachable.

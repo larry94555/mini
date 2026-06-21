@@ -4891,3 +4891,43 @@ entries from Conventional Commits on the next release.
 `WORKFLOW_WALKTHROUGH.md` §4 and `TRACE_TOUR.md` with a "trace the tour against the tests" exercise (open
 each step's golden-trace test and find the backing assertion, then run them). Not a test; recorded so the
 doc cross-references stay auditable (and they are checked by case 575).
+
+---
+
+# Relative-link validation, run.sh check-docs, harness-behavior eval cases
+
+## 578. Relative Markdown link validation (scripts/check-docs.sh)
+
+- **Run:** `bash scripts/check-docs.sh` (or `./run.sh check-docs`; `WARN_ONLY=1` to report-only). Also runs
+  in CI.
+- **What it adds:** a fourth check that scans the living docs (README.md + docs/*.md, excluding
+  `docs/HISTORY.md`) for inline links `[text](TARGET)` and fails if a relative target does not exist —
+  resolved **relative to the file the link appears in** (so a link to `TESTING.md` from a `docs/` file
+  correctly resolves to `docs/TESTING.md`). `http(s)://`, `mailto:`, and pure `#anchor` links are ignored;
+  an `#anchor` and an optional `"title"` suffix are stripped; a trailing-slash/directory target is checked
+  with `-d`, a file with `-e`.
+- **Verified offline (POSIX sh + dash):** green baseline (15 living docs, exit 0); injecting a broken file
+  link, a broken directory link, and a per-file-resolution case (a `docs/` link to `TESTING.md` →
+  `docs/TESTING.md`) reports all three and exits 1, while `https://` and `#anchor` links are ignored;
+  `WARN_ONLY=1` exits 0. The script stays POSIX-clean (`sh -n` / `dash -n` pass), so the smoke `sh -n` guard
+  is satisfied.
+
+## 579. `./run.sh check-docs` dev entry point (run.sh)
+
+- **Run:** `./run.sh check-docs` (passes `WARN_ONLY` through).
+- **Observe:** `run.sh` dispatches the `check-docs` subcommand to `scripts/check-docs.sh` before the launcher
+  banner and exits with its status, so contributors invoke the same gate CI runs with one command. `./run.sh`
+  with no arguments is unchanged (builds + starts the app).
+- **Verified offline:** `sh -n run.sh` passes; `sh run.sh check-docs` runs the checker (OK, exit 0) with no
+  launcher banner; `WARN_ONLY=1` passthrough works.
+
+## 580. Harness-behavior eval cases + fixtures (eval/suite.txt, eval/fixtures/)
+
+- The shipped suite (now 10 cases) gains three **harness-behavior** cases that require the agent to use a
+  tool before answering: read `eval/fixtures/note.txt` and report the codename (`GRANITE`) or the lucky
+  number (`73`), and list `eval/fixtures/` and name the text file (`note.txt`). `eval/fixtures/note.txt` is
+  committed for them to read.
+- **Verified offline:** all 10 cases parse via `EvalHarness.parseCases`, and the new `listdir-eval` regex
+  compiles and matches a sample (4/4 in a throwaway harness). **Passing** these requires the live agent +
+  a capable-enough model (they exercise tool dispatch); like the rest of the suite they self-skip when no
+  model is reachable. No code change — `EvalHarness.loadCases()` already reads the file.
