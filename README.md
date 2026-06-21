@@ -187,9 +187,9 @@ No cloud API key is required.
 | `docs/DEPLOY.md` | Deployment: health probes, Docker/k8s, observability |
 | `MemoryStore.java` | Durable cross-session `[MEMORY]` note (per owner) |
 | `.gitattributes` | Line-ending policy (LF for `*.sh`/`mvnw`, CRLF for `*.bat`/`*.cmd`/`*.ps1`) |
-| `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
+| `.githooks/` | Pre-commit guard (scripts stay executable + LF) and pre-push guard (`./run.sh check`); enable with `sh scripts/install-hooks.sh` |
 | `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
-| `scripts/check-docs.sh` | Fail if README/docs reference a test class, `.java` file, TESTING case, relative Markdown link, or intra-repo `#anchor` heading that doesn't exist (`WARN_ONLY=1` to report-only). Run it with `./run.sh check-docs` (`./run.sh help` lists subcommands); also runs in CI |
+| `scripts/check-docs.sh` | Fail if README/docs reference a test class, `.java` file, TESTING case, relative Markdown link, or intra-repo `#anchor` heading that doesn't exist — or if a CI workflow invokes a script that doesn't exist (`WARN_ONLY=1` to report-only). Run it with `./run.sh check-docs` (`./run.sh help` lists subcommands); also runs in CI |
 | `scripts/check-docs-selftest.sh` | Regression guard for `check-docs.sh`'s anchor/slug logic: runs the real checker against fixture docs with tricky headings + known-good/known-bad anchors (including the documented GitHub-divergence cases) and asserts the outcome; runs in CI. Run both gates locally with `./run.sh check` |
 | `scripts/pin-maven-checksum.sh` | Re-pin the wrapper's Maven SHA-512 after a version bump |
 | `mvnw` / `mvnw.cmd` / `.mvn/` | Maven wrapper — build with no system Maven installed |
@@ -274,8 +274,13 @@ sh scripts/install-hooks.sh        # Windows: scripts\install-hooks.cmd
 
 The guard (`.githooks/pre-commit`) blocks a commit if a required script is not executable in git
 (`100755`) or if a `*.sh`/`mvnw` file contains CRLF, and prints the exact `git update-index --chmod=+x`
-fix. `.gitattributes` keeps line endings correct on checkout. **CI now enforces the same check as a hard
-failure** (Linux job in `smoke.yml`), and the cross-platform smoke test covers Linux, macOS, and Windows.
+fix. The same `install-hooks` step also enables a **pre-push guard** (`.githooks/pre-push`) that runs
+`./run.sh check` (the docs reference/link checker plus its anchor/slug self-test) and **blocks the push if
+either fails**, so doc and script breakage — including a workflow that points at an uncommitted script — is
+caught locally instead of in CI. Bypass a single push with `git push --no-verify`. `.gitattributes` keeps
+line endings correct on checkout. **CI now enforces the same checks as hard failures** (Linux job in
+`smoke.yml`, plus the docs gate in `ci.yml`), and the cross-platform smoke test covers Linux, macOS, and
+Windows.
 
 If the scripts ever show up non-executable in git (e.g. after importing from an archive, which cannot carry
 the bit), fix them all in one shot, then commit:

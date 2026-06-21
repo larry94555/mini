@@ -42,13 +42,12 @@ scan() { xargs grep -rhoE "$1" < "$doclist" 2>/dev/null; }
 # Slug limitations (intentional, pinned by check-docs-selftest.sh) -- this diverges from GitHub when:
 #   * consecutive removed punctuation / multiple hyphens collapse to ONE hyphen here, whereas GitHub keeps
 #     them (e.g. "C++ & Friends" -> here "c-friends", GitHub "c--friends"; "A -- B" -> here "a-b").
-#   * underscores are dropped here but kept by GitHub (e.g. "read_file Helper" -> here "readfile-helper",
-#     GitHub "read_file-helper").
-# For ordinary prose headings (letters, digits, spaces, single hyphens, attached punctuation like ".", "(",
-# ")", ",") the two agree. Author anchors to match THIS slug; the self-test guards the behavior from drift.
+# Underscores ARE kept (matching GitHub, e.g. "read_file Helper" -> "read_file-helper"). For ordinary prose
+# headings (letters, digits, spaces, single hyphens, underscores, attached punctuation like ".", "(", ")",
+# ",") the two agree. Author anchors to match THIS slug; the self-test guards the behavior from drift.
 slug() {
   printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]' \
-    | sed -e 's/[^a-z0-9 -]//g' -e 's/ /-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+    | sed -e 's/[^a-z0-9_ -]//g' -e 's/ /-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
 }
 
 # 1) Test-class references: `FooTest` or `FooTest.method` -> must exist under src/test as FooTest.java
@@ -120,6 +119,20 @@ while IFS= read -r f; do
     fi
   done
 done < "$doclist"
+
+# 5) Every script a CI workflow invokes by path must exist (catches a workflow referencing a file that was
+#    never committed -- the failure mode that broke CI before). Matches `scripts/<name>.sh` anywhere and a
+#    bare `bash <name>.sh` / `sh <name>.sh`; ignores globs/variables (e.g. `sh -n "$f"`).
+if [ -d .github/workflows ]; then
+  {
+    grep -rhoE 'scripts/[A-Za-z0-9_.-]+\.sh' .github/workflows 2>/dev/null
+    grep -rhoE '(bash|sh) +[A-Za-z0-9_.-]+\.sh' .github/workflows 2>/dev/null \
+      | sed -e 's/^bash  *//' -e 's/^sh  *//'
+  } | sort -u | while IFS= read -r s; do
+    [ -z "$s" ] && continue
+    [ -f "$s" ] || echo "workflow invokes a script that does not exist: $s" >> "$broken"
+  done
+fi
 
 count="$(wc -l < "$broken" | tr -d ' ')"
 scanned="$(wc -l < "$doclist" | tr -d ' ')"

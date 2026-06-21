@@ -108,22 +108,22 @@ MD
 cat > "$dd/docs/SOURCE.md" <<'MD'
 # Source
 Valid (this slug) [g1](TARGET.md#c-friends).
-Valid (this slug) [g2](TARGET.md#readfile-helper).
+Valid (this slug) [g2](TARGET.md#read_file-helper).
 GitHub-style guess, broken here [b1](TARGET.md#c--friends).
-GitHub-style guess, broken here [b2](TARGET.md#read_file-helper).
+Old dropped-underscore slug, broken now [b2](TARGET.md#readfile-helper).
 MD
 outD="$(mktemp)"
 set +e
 sh "$dd/scripts/check-docs.sh" > "$outD" 2>&1
 codeD=$?
 set -e
-ck "$( [ "$codeD" -eq 1 ] && echo 1 || echo 0 )" "scenario D exits 1 (github-style guesses are broken here)"
+ck "$( [ "$codeD" -eq 1 ] && echo 1 || echo 0 )" "scenario D exits 1 (divergent guesses are broken here)"
 ndd="$(grep -c '\[BROKEN\]' "$outD" || true)"
 ck "$( [ "$ndd" -eq 2 ] && echo 1 || echo 0 )" "scenario D reports exactly 2 broken (got $ndd)"
 ck "$(grep -q 'c--friends' "$outD" && echo 1 || echo 0)" "scenario D flags the double-hyphen (collapse divergence)"
-ck "$(grep -q 'read_file-helper' "$outD" && echo 1 || echo 0)" "scenario D flags the kept-underscore divergence"
+ck "$(grep -q 'readfile-helper' "$outD" && echo 1 || echo 0)" "scenario D flags the old dropped-underscore slug"
 ck "$(grep -q '#c-friends' "$outD" && echo 0 || echo 1)" "scenario D accepts the collapsed-hyphen slug"
-ck "$(grep -q 'readfile-helper' "$outD" && echo 0 || echo 1)" "scenario D accepts the dropped-underscore slug"
+ck "$(grep -q 'read_file-helper' "$outD" && echo 0 || echo 1)" "scenario D accepts the kept-underscore slug"
 
 rm -rf "$a" "$b" "$dd" "$outA" "$outB" "$outC" "$outD"
 
