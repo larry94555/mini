@@ -132,7 +132,8 @@ public final class AlertsOverview {
               .append("<a class=\"nav\" href=\"#\" onclick=\"return applyDigestRange()\">Apply</a> ")
               .append("<a class=\"nav\" href=\"#\" onclick=\"return resetDigestRange()\">Reset (live)</a> ")
               .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('history')\">History CSV</a> ")
-              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('audit')\">Audit CSV</a>")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return downloadDigestCsv('audit')\">Audit CSV</a> ")
+              .append("<a class=\"nav\" href=\"#\" onclick=\"return copyDigestLink()\">Copy report link</a>")
               .append("<span id=\"digest_range_note\" class=\"muted\"></span></div>");
             // date-range fetch handlers (always available; suppress the live poll while a range is pinned)
             sb.append("<script>window.digestRangeActive=false;")
@@ -152,7 +153,12 @@ public final class AlertsOverview {
               .append("document.getElementById('digest_from').value=iso(from);document.getElementById('digest_to').value=iso(to);return applyDigestRange();}")
               .append("function downloadDigestCsv(kind){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
               .append("var path=(kind==='audit')?'/admin/alerts/digest-audit':'/admin/alerts/slo-digest/history';")
-              .append("var qs='?format=csv&limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');window.location.href=path+qs;return false;}</script>");
+              .append("var qs='?format=csv&limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');window.location.href=path+qs;return false;}")
+              .append("function copyDigestLink(){var f=document.getElementById('digest_from').value,t=document.getElementById('digest_to').value;")
+              .append("var qs='?limit=200'+(f?('&from='+f):'')+(t?('&to='+t):'');var url=window.location.origin+'/admin/alerts/digest-report'+qs;")
+              .append("var n=document.getElementById('digest_range_note');")
+              .append("function done(){if(n)n.textContent=' report link copied';}")
+              .append("if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(done,function(){if(n)n.textContent=' '+url;});}else{if(n)n.textContent=' '+url;}return false;}</script>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">delivery-success (\u25a0 muted, \u25c6 catch-up): </span>");
             sb.append("<span id=\"digest_trendbox\">").append(digestTrendSvg(rowsOld, "delivery_success", 160, 28)).append("</span></div>");
             sb.append("<div class=\"spark\"><span class=\"sparklabel\">window SLO ratio: </span>");

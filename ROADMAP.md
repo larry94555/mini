@@ -340,6 +340,8 @@ Possible future work:
 
 Keep this section short. Move detailed history elsewhere if needed.
 
+- Combined digest report bundle + copy-link + range validation: GET /admin/alerts/digest-report returns mute state + history + audit for a date range (JSON or one sectioned CSV); the overview gains a Copy report link button that copies the bundle URL for the current range; and the history/audit/report endpoints reject malformed or inverted date ranges with HTTP 400 + a clear message (pure rangeError).
+
 - Digest history CSV + quick-range buttons + CSV download links: GET /admin/alerts/slo-digest/history gains ?format=csv (parity with digest-audit); the overview date-picker adds 24h/7d/30d quick-range buttons that set the window and apply; and History/Audit CSV download links export the current from/to range.
 
 - Marker-faithful live trends + overview date-picker + window-ratio target line: the delivery-success trend now redraws its mute (square) / catch-up (diamond) markers on every auto-refresh via a JS trendSVG (previously markers were server-render only); the digest section gains a from/to date-picker that fetches the ranged history/audit and pauses the live poll while pinned; and the window-ratio trend overlays the SLO target reference line.
