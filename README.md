@@ -724,7 +724,9 @@ branches — a mutation denied in PLAN mode, an invalid-args call that recovers,
 (`outside this caller's capability scope`, audited, not executed) and per-tenant rate limiting
 (`RATE_LIMITED`) — by `CapabilityScopingTraceTest`, and the subagent hand-off — a parent turn delegating to
 a named subagent that runs its own loop and whose result returns into the parent transcript — by
-`SubAgentHandoffTraceTest`. All share the `ScriptedAgent` test fixture (scripted
+`SubAgentHandoffTraceTest`, with the failure paths (a throwing sub tool, and a sub tripping its own
+duplicate guard) surfacing cleanly to the parent covered by `SubAgentFailureTraceTest`. All share the
+`ScriptedAgent` test fixture (scripted
 model + real-engine builder), which `FakeModelHarnessTest` also uses. CI installs Node so the stdio MCP
 integration tests run rather than self-skip.
 

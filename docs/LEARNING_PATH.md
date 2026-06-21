@@ -312,19 +312,28 @@ Read:
 
 Concept:
 
-- The edit → verify → **commit** loop, the six hook events, and the MCP server lifecycle, each with a
-  diagram that maps to the methods that implement it.
-- This ties Modules 4 (edit safely), 9 (hooks and slash commands), and 10 (MCP) together into one
-  picture of a complete coding turn.
+- The edit → verify → **commit** loop, the six hook events, the MCP server lifecycle, subagent delegation,
+  and access-control denial — each with a diagram that maps to the methods that implement it, and (in §4 of
+  the walkthrough) to the golden-trace test that proves it.
+- This ties Modules 4 (edit safely), 9 (hooks and slash commands), 10 (MCP), the subagent delegation path,
+  and capability/rate-limit scoping together into one picture of a complete coding turn — and shows how each
+  branch is asserted deterministically with a scripted model.
 
 Test checkpoints (run these and read the assertions — they are the executable version of the diagrams):
 
 - `./mvnw -Dtest=GoldenTraceWorkflowTest test` — drives the real agent loop through edit → stage → commit
   with a scripted model, asserting tool dispatch, the permission decision, hook firing, and the
   git-verified edit-trust summary.
+- `./mvnw -Dtest=RecoveryTraceTest test` — the non-happy-path branches: plan-mode `RECORD_PLAN`,
+  invalid-args recovery, and the duplicate-call guard.
+- `./mvnw -Dtest=CapabilityScopingTraceTest test` — the access-control branches: an out-of-scope tool is
+  denied + audited (not executed), and a tool over its per-tenant limit returns `RATE_LIMITED`.
+- `./mvnw -Dtest=SubAgentHandoffTraceTest,SubAgentFailureTraceTest test` — subagent delegation: a parent
+  hands a task to a named subagent whose result returns into the parent transcript, plus the failure paths
+  (a throwing sub tool, and a sub tripping its own duplicate guard) surfacing cleanly to the parent.
 - `./mvnw -Dtest=McpLiveIntegrationTest test` — connects to a stub MCP server over stdio and HTTP
-  (including a streaming multi-event SSE response) and exercises tools, resources, and the
-  `/mcp__server__prompt` slash command.
+  (including streaming multi-event and unbounded keep-alive SSE) and exercises tools, resources, the
+  `/mcp__server__prompt` slash command, and two-server namespacing/routing.
 - `./mvnw -Dtest=GitCommitApprovalFlowTest test` — drives a real commit through the approval flow and shows
   the staged diff riding the approval payload.
 
