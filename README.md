@@ -710,8 +710,11 @@ This whole MCP path is exercised end to end by `McpLiveIntegrationTest`, which c
 tiny stub server over **both** transports — a node child process (`src/test/resources/mcp/stub-server.js`)
 over stdio, and a JDK `HttpServer` over HTTP — and asserts that tools, resources and prompts are discovered
 and that `read_resource` and the `/mcp__server__prompt` slash command return the server-rendered content.
-The stdio half self-skips if `node` isn't on `PATH`; the HTTP half always runs. See
-[`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md) for the lifecycle diagrams.
+The stdio half self-skips if `node` isn't on `PATH`; the HTTP half always runs (including a streaming
+multi-event SSE response). See [`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md) for the
+lifecycle diagrams. The whole edit → verify → commit turn is also covered by `GoldenTraceWorkflowTest`,
+which drives the **real agent loop** with a scripted (model-free) client and asserts tool dispatch, the
+permission decision, hook firing, and the git-verified edit-trust summary in one trace.
 
 A coding answer is easy to overstate, so after any run that changed files `imini` appends a
 **git-verified summary** of the edits to the final answer:

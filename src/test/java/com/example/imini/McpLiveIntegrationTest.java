@@ -66,6 +66,50 @@ class McpLiveIntegrationTest {
         }
     }
 
+    // ---- HTTP transport with a STREAMING (multi-event) SSE response ----
+
+    @Test
+    void discoversAndInvokesOverStreamingSse() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/rpc", ex -> {
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String resp = handle(body);                 // null for notifications
+            ex.getResponseHeaders().add("Content-Type", "text/event-stream");
+            if (resp == null) { ex.sendResponseHeaders(200, -1); ex.close(); return; }
+            // Emit a couple of interim progress events BEFORE the real response event, as a streaming
+            // server would; the client must skip them and pick the response (has result).
+            StringBuilder sse = new StringBuilder();
+            sse.append("event: message\n").append("data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"p\":0.5}}\n\n");
+            sse.append("event: message\n").append("data: ").append(resp).append("\n\n");
+            byte[] out = sse.toString().getBytes(StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(200, out.length);
+            try (OutputStream os = ex.getResponseBody()) { os.write(out); }
+        });
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            McpManager mcp = new McpManager();
+            setTimeout(mcp, 30);
+            mcp.connect("ssestub", Map.of("transport", "http", "url", "http://127.0.0.1:" + port + "/rpc"));
+            assertDiscoveryAndInvocation(mcp, "ssestub");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    // ---- pure: the streaming SSE selector picks the response, not interim events ----
+
+    @Test
+    void sseSelectorPicksResponseAmongMultipleEvents() {
+        String sse = "event: message\n"
+                + "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n"
+                + "event: message\n"
+                + "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"ok\":true}}\n\n";
+        String picked = McpManager.jsonFromHttpBody(sse);
+        assertTrue(picked != null && picked.contains("\"result\""),
+                "should pick the response event, not the progress notification: " + picked);
+    }
+
     // ---- shared assertions over a connected manager ----
 
     private void assertDiscoveryAndInvocation(McpManager mcp, String server) {

@@ -44,11 +44,12 @@ live-server **MCP integration test** (node stdio stub + JDK HttpServer stub, bot
 
 Remaining candidates are genuinely optional — pursue only if a concrete need appears:
 
-1. **More eval/test depth** — golden-trace eval scenarios that drive the git/hook/MCP paths through the
-   full agent loop (not just unit/integration seams), and a live stdio+HTTP test matrix on CI runners that
-   have `node`.
-2. **SSE *streaming* MCP** — the HTTP transport handles single-response JSON/SSE; long-lived
-   server-initiated streams are still out of scope.
+1. **Live CI test matrix** — run the stdio MCP + node-dependent tests on CI runners that have `node`
+   installed (today the stdio half self-skips when `node` is absent), so the full transport matrix is
+   exercised in CI, not just locally.
+2. **True long-lived SSE streaming** — the HTTP transport now consumes a *terminating* multi-event
+   `text/event-stream` (it skips interim progress events and picks the response); genuinely unbounded,
+   server-initiated streams (keep-alive, server push) remain out of scope.
 3. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
    if real usage shows a need.
 
@@ -156,6 +157,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Golden-trace workflow test + streaming SSE MCP + learning-path/workshop modules: `GoldenTraceWorkflowTest` drives the real `AgentEngine` loop with a scripted (model-free) `LlamaClient` through edit→stage→commit, asserting tool dispatch, the permission decision, hook firing, and the git-verified edit-trust summary in one trace (plus an MCP-prompt-slash-command trace); the HTTP MCP transport now consumes a terminating multi-event `text/event-stream`, skipping interim progress events to pick the JSON-RPC response (`McpManager.jsonFromHttpBody`), covered by a streaming-SSE integration test + a pure selector test; and `docs/WORKFLOW_WALKTHROUGH.md` is wired into `docs/LEARNING_PATH.md` (Module 13.5) and `docs/WORKSHOP.md` (Lab 6) with the new tests as checkpoints.
 
 - Live MCP integration test + git-commit approval-flow test + workflow walkthrough doc: `McpLiveIntegrationTest` connects `McpManager` to a stub server over both transports (a node child process over stdio + a JDK `HttpServer` over HTTP) and asserts tools/resources/prompts discovery plus `read_resource` and the `/mcp__server__prompt` slash command returning rendered content (stdio half self-skips without node); `GitCommitApprovalFlowTest` drives a real repo through stage → approval → commit, asserting the staged diff is attached to the approval payload; and `docs/WORKFLOW_WALKTHROUGH.md` documents the edit→verify→commit loop, the six-event hook lifecycle, and the MCP lifecycle with mermaid diagrams. A small package-private `McpManager.connect()` test seam was added.
 

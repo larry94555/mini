@@ -576,22 +576,28 @@ public class McpManager {
 
     /**
      * Pure: given an HTTP MCP body, return the JSON-RPC payload string — the body itself if it is a JSON
-     * object, or the first {@code data:} line's JSON for an SSE ({@code text/event-stream}) body; null if
-     * neither. Separated from JSON parsing so the transport selection is unit-testable without Jackson.
+     * object, or, for an SSE ({@code text/event-stream}) body that may carry MULTIPLE {@code data:} events
+     * (progress/notification events followed by the response), the event that is the actual JSON-RPC
+     * response (contains a top-level {@code "result"} or {@code "error"}). Falls back to the first
+     * {@code data:} object when none looks like a response. Returns null if neither. Separated from JSON
+     * parsing so transport/stream selection is unit-testable without Jackson.
      */
     static String jsonFromHttpBody(String body) {
         if (body == null) return null;
         String trimmed = body.trim();
         if (trimmed.isEmpty()) return null;
         if (trimmed.startsWith("{")) return trimmed;
+        String firstData = null;
         for (String line : trimmed.split("\\r?\\n")) {
             String l = line.trim();
-            if (l.startsWith("data:")) {
-                String json = l.substring("data:".length()).trim();
-                if (json.startsWith("{")) return json;
-            }
+            if (!l.startsWith("data:")) continue;
+            String json = l.substring("data:".length()).trim();
+            if (!json.startsWith("{")) continue;
+            if (firstData == null) firstData = json;
+            // Prefer the response event (has result/error) over interim notification/progress events.
+            if (json.contains("\"result\"") || json.contains("\"error\"")) return json;
         }
-        return null;
+        return firstData;   // no explicit response event seen; fall back to the first data: object
     }
 
     private Map<String, Object> parseHttpBody(String body) {
