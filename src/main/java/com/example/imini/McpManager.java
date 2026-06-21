@@ -10,6 +10,7 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.URI;
@@ -507,18 +508,25 @@ public class McpManager {
         private final String name;
         private final URI uri;
         private final HttpClient client;
+        private final ExecutorService io;
         private int nextId = 1;
 
         HttpTransport(String name, String url) {
             this.name = name;
             this.uri = URI.create(url);
             this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            this.io = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "mcp-http-" + name);
+                t.setDaemon(true);
+                return t;
+            });
         }
 
         @Override public synchronized Map<String, Object> request(String method, Map<String, Object> params) throws IOException {
+            int id = nextId++;
             Map<String, Object> msg = new LinkedHashMap<>();
             msg.put("jsonrpc", "2.0");
-            msg.put("id", nextId++);
+            msg.put("id", id);
             msg.put("method", method);
             msg.put("params", params);
             try {
@@ -528,18 +536,70 @@ public class McpManager {
                         .header("Accept", "application/json, text/event-stream")
                         .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(msg), StandardCharsets.UTF_8))
                         .build();
-                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                // Stream the body so an unbounded (keep-alive) SSE response can be consumed incrementally:
+                // we read line by line and return as soon as the JSON-RPC response event arrives, then close.
+                HttpResponse<InputStream> resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
                 if (resp.statusCode() / 100 != 2) {
+                    resp.body().close();
                     throw new IOException("MCP HTTP server '" + name + "' returned " + resp.statusCode());
                 }
-                Map<String, Object> parsed = parseHttpBody(resp.body());
-                if (parsed == null) throw new IOException("MCP HTTP server '" + name + "' returned no JSON-RPC body");
-                return parsed;
+                String ctype = resp.headers().firstValue("content-type").orElse("").toLowerCase();
+                if (ctype.contains("text/event-stream")) {
+                    return readSseResponse(resp.body(), id, method);
+                }
+                // Plain JSON (or a terminating SSE that fits in one read): buffer and select.
+                try (InputStream is = resp.body()) {
+                    String body = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                    Map<String, Object> parsed = parseHttpBody(body);
+                    if (parsed == null) throw new IOException("MCP HTTP server '" + name + "' returned no JSON-RPC body");
+                    return parsed;
+                }
             } catch (IOException ioe) {
                 throw ioe;
             } catch (Exception e) {
                 throw new IOException("MCP HTTP request to '" + name + "' failed: " + e.getMessage());
             }
+        }
+
+        /**
+         * Read a (possibly unbounded) {@code text/event-stream} line by line on a worker thread, returning
+         * the first {@code data:} event that is the JSON-RPC response (matching id, or carrying
+         * result/error), then closing the stream. Interim notification/progress events are skipped, and a
+         * keep-alive stream that never sends the response is bounded by the per-call timeout.
+         */
+        private Map<String, Object> readSseResponse(InputStream body, int id, String method) throws IOException {
+            Future<Map<String, Object>> f = io.submit(() -> {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        String json = sseDataJson(line);
+                        if (json == null) continue;                 // not a data: JSON line (comment/event/blank)
+                        Map<String, Object> obj = parse(json);
+                        if (obj == null) continue;
+                        if (isJsonRpcResponse(obj, id)) return obj;  // the response we're waiting for
+                        // else an interim notification/progress event: keep reading
+                    }
+                    throw new IOException("MCP HTTP server '" + name + "' closed the stream before responding to " + method);
+                }
+            });
+            try {
+                return f.get(toolTimeoutSeconds, TimeUnit.SECONDS);
+            } catch (TimeoutException te) {
+                f.cancel(true);
+                try { body.close(); } catch (Exception ignore) {}
+                throw new IOException("MCP HTTP server '" + name + "' timed out after " + toolTimeoutSeconds
+                        + "s on " + method + " (no response event on the stream).");
+            } catch (java.util.concurrent.ExecutionException ee) {
+                Throwable cause = ee.getCause();
+                throw (cause instanceof IOException io2) ? io2 : new IOException(String.valueOf(cause));
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted reading MCP stream from '" + name + "'");
+            }
+        }
+
+        private Map<String, Object> parse(String json) {
+            try { return mapper.readValue(json, Map.class); } catch (Exception e) { return null; }
         }
 
         @Override public synchronized void notify(String method, Map<String, Object> params) throws IOException {
@@ -559,7 +619,24 @@ public class McpManager {
             }
         }
 
-        @Override public void close() { /* stateless HTTP; nothing to tear down */ }
+        @Override public void close() { io.shutdownNow(); }
+    }
+
+    /** Pure: the JSON object string after a leading {@code data:} on an SSE line, or null if not a data: JSON line. */
+    static String sseDataJson(String line) {
+        if (line == null) return null;
+        String l = line.trim();
+        if (!l.startsWith("data:")) return null;
+        String json = l.substring("data:".length()).trim();
+        return json.startsWith("{") ? json : null;
+    }
+
+    /** Pure: is this parsed message the JSON-RPC response we're waiting for (matching id, or carrying result/error)? */
+    static boolean isJsonRpcResponse(Map<String, Object> msg, int id) {
+        if (msg == null) return false;
+        Object rid = msg.get("id");
+        if (rid instanceof Number n && n.intValue() == id) return true;
+        return msg.containsKey("result") || msg.containsKey("error");
     }
 
     /** Parse an HTTP MCP body: plain JSON, or SSE — extract the first {@code data:} JSON line. Pure + static for testing. */

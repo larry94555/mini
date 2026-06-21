@@ -117,10 +117,21 @@ final class ScriptedAgent {
     static AgentEngine buildEngine(LlamaClient model, PermissionService perms, HookService hooks,
                                    GitInspector git) throws Exception {
         Database db = new Database();
-        Metrics metrics = new Metrics(new RunService(), new RunHistoryStore(db));
-        RunRecorder recorder = new RunRecorder(new AuditLog(db), new SessionStore(db), db);
         CapabilityService caps = new CapabilityService(new AuditLog(db));
         ToolRateLimiter rate = new ToolRateLimiter(db);
+        return buildEngine(model, perms, hooks, git, caps, rate);
+    }
+
+    /**
+     * As {@link #buildEngine(LlamaClient, PermissionService, HookService, GitInspector)} but with a
+     * caller-supplied {@link CapabilityService} and {@link ToolRateLimiter} (already configured + init'd),
+     * so access-control traces can exercise capability scoping and per-tenant rate limiting.
+     */
+    static AgentEngine buildEngine(LlamaClient model, PermissionService perms, HookService hooks,
+                                   GitInspector git, CapabilityService caps, ToolRateLimiter rate) throws Exception {
+        Database db = new Database();
+        Metrics metrics = new Metrics(new RunService(), new RunHistoryStore(db));
+        RunRecorder recorder = new RunRecorder(new AuditLog(db), new SessionStore(db), db);
         ContextManager ctx = new ContextManager(model, metrics);
         setField(ctx, ContextManager.class, "maxToolChars", 100000);
         setField(ctx, ContextManager.class, "foldEnabled", false);
