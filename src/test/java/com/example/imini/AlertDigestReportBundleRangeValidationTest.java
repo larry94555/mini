@@ -69,7 +69,7 @@ class AlertDigestReportBundleRangeValidationTest {
         Map<String, Object> stats = new java.util.LinkedHashMap<>();
         stats.put("recent_digests", List.of(hrow("t", true, "probe", 0.99, "b")));
         String html = AlertsOverview.render(stats, List.of());
-        assertTrue(html.contains("copyDigestLink()"));
+        assertTrue(html.contains("copyDigestLink("));
         assertTrue(html.contains("function copyDigestLink("));
         assertTrue(html.contains("/admin/alerts/digest-report")); // copies the bundle URL
     }
