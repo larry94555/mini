@@ -1,6 +1,7 @@
 package com.example.imini;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -216,5 +217,65 @@ final class ScriptedAgent {
         Field f = cls.getDeclaredField(name);
         f.setAccessible(true);
         f.set(target, value);
+    }
+
+    // ---- schema builders (shared by the trace tests) ----
+
+    /** A JSON-schema property of the given type, e.g. {@code prop("string")}. */
+    static Map<String, Object> prop(String type) {
+        return Map.of("type", type);
+    }
+
+    /** An object JSON-schema with the given properties and required field names. */
+    static Map<String, Object> schema(Map<String, Object> properties, String... required) {
+        Map<String, Object> s = new LinkedHashMap<>();
+        s.put("type", "object");
+        s.put("properties", properties);
+        s.put("required", List.of(required));
+        return s;
+    }
+
+    // ---- real-engine harness rooted at a temp dir (shared by the trace tests) ----
+
+    /**
+     * A real {@link AgentEngine} plus the collaborators a trace usually needs to assert against: the
+     * recording {@link RecordingPermissions}, the {@link GitInspector}, and the {@link Sandbox} rooted at
+     * the test's temp dir. Built by {@link #harness}.
+     */
+    static final class Harness {
+        final AgentEngine engine;
+        final RecordingPermissions perms;
+        final GitInspector git;
+        final Sandbox sandbox;
+        final HookService hooks;
+
+        Harness(AgentEngine engine, RecordingPermissions perms, GitInspector git, Sandbox sandbox, HookService hooks) {
+            this.engine = engine;
+            this.perms = perms;
+            this.git = git;
+            this.sandbox = sandbox;
+            this.hooks = hooks;
+        }
+    }
+
+    /** Harness with default (disabled) capability + rate-limit services. */
+    static Harness harness(LlamaClient model, Path dir) throws Exception {
+        Database db = new Database();
+        CapabilityService caps = new CapabilityService(new AuditLog(db));
+        ToolRateLimiter rate = new ToolRateLimiter(db);
+        return harness(model, dir, caps, rate);
+    }
+
+    /** Harness with caller-supplied (configured) capability + rate-limit services. */
+    static Harness harness(LlamaClient model, Path dir, CapabilityService caps, ToolRateLimiter rate) throws Exception {
+        Sandbox sandbox = new Sandbox();
+        setField(sandbox, Sandbox.class, "root", dir);
+        setField(sandbox, Sandbox.class, "confineWrites", false);
+        GitInspector git = new GitInspector(sandbox);
+        setField(git, GitInspector.class, "timeoutSeconds", 30);
+        HookService hooks = new HookService();
+        RecordingPermissions perms = new RecordingPermissions(new Approvals(), git, hooks);
+        AgentEngine engine = buildEngine(model, perms, hooks, git, caps, rate);
+        return new Harness(engine, perms, git, sandbox, hooks);
     }
 }

@@ -25,7 +25,7 @@ class CapabilityScopingTraceTest {
     /** A read-only tool that records how many times it executed. */
     private static Tool countingRead(AtomicInteger execs) {
         return new Tool("read_marker", "Read (non-mutating).",
-                schema(Map.of("path", prop("string")), "path"), false, args -> {
+                ScriptedAgent.schema(Map.of("path", ScriptedAgent.prop("string")), "path"), false, args -> {
             execs.incrementAndGet();
             return "read ok";
         });
@@ -34,7 +34,7 @@ class CapabilityScopingTraceTest {
     /** A mutating tool that records how many times it executed. */
     private static Tool countingWrite(AtomicInteger execs, Path target) {
         return new Tool("write_marker", "Write (mutating).",
-                schema(Map.of("text", prop("string")), "text"), true, args -> {
+                ScriptedAgent.schema(Map.of("text", ScriptedAgent.prop("string")), "text"), true, args -> {
             execs.incrementAndGet();
             try { Files.writeString(target, String.valueOf(args.get("text"))); return "wrote"; }
             catch (Exception e) { return "ERROR: " + e.getMessage(); }
@@ -68,7 +68,7 @@ class CapabilityScopingTraceTest {
                 call("write_marker", Map.of("text", "nope")), // out of scope -> denied
                 answer("Did what I was allowed to."));
 
-        String answerText = engine(model, dir, caps, rate)
+        String answerText = ScriptedAgent.harness(model, dir, caps, rate).engine
                 .run(ScriptedAgent.systemPrompt(), "Read, then try to write.",
                         tools, PermissionService.Mode.AUTO, "cap-1", "cap-1", RunSink.NOOP);
 
@@ -102,7 +102,7 @@ class CapabilityScopingTraceTest {
                 call("read_marker", Map.of("path", "x")),  // over limit -> RATE_LIMITED
                 answer("Stopped after the rate limit."));
 
-        String answerText = engine(model, dir, caps, rate)
+        String answerText = ScriptedAgent.harness(model, dir, caps, rate).engine
                 .run(ScriptedAgent.systemPrompt(), "Read twice quickly.",
                         tools, PermissionService.Mode.AUTO, "rate-1", "rate-1", RunSink.NOOP);
 
@@ -115,17 +115,6 @@ class CapabilityScopingTraceTest {
 
     // ---- helpers ----
 
-    private AgentEngine engine(LlamaClient model, Path dir, CapabilityService caps, ToolRateLimiter rate)
-            throws Exception {
-        Sandbox sandbox = new Sandbox();
-        ScriptedAgent.setField(sandbox, Sandbox.class, "root", dir);
-        ScriptedAgent.setField(sandbox, Sandbox.class, "confineWrites", false);
-        GitInspector git = new GitInspector(sandbox);
-        HookService hooks = new HookService();
-        ScriptedAgent.RecordingPermissions perms = new ScriptedAgent.RecordingPermissions(new Approvals(), git, hooks);
-        return ScriptedAgent.buildEngine(model, perms, hooks, git, caps, rate);
-    }
-
     /** CapabilityService that records which tools were audited as denied. */
     private static final class RecordingCapabilities extends CapabilityService {
         final List<String> audited = new java.util.ArrayList<>();
@@ -137,13 +126,4 @@ class CapabilityScopingTraceTest {
         }
     }
 
-    private static Map<String, Object> prop(String type) { return Map.of("type", type); }
-
-    private static Map<String, Object> schema(Map<String, Object> properties, String... required) {
-        Map<String, Object> s = new LinkedHashMap<>();
-        s.put("type", "object");
-        s.put("properties", properties);
-        s.put("required", List.of(required));
-        return s;
-    }
 }

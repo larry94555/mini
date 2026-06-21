@@ -25,13 +25,8 @@ class RecoveryTraceTest {
 
     /** A mutating tool that records how many times it actually executed (to prove non-execution in PLAN). */
     private static Tool countingWrite(AtomicInteger execs, Path target) {
-        Map<String, Object> props = new LinkedHashMap<>();
-        props.put("text", Map.of("type", "string", "description", "text to write"));
-        Map<String, Object> schema = new LinkedHashMap<>();
-        schema.put("type", "object");
-        schema.put("properties", props);
-        schema.put("required", List.of("text"));
-        return new Tool("write_marker", "Write text to the marker file (mutating).", schema, true, args -> {
+        return new Tool("write_marker", "Write text to the marker file (mutating).",
+                ScriptedAgent.schema(Map.of("text", ScriptedAgent.prop("string")), "text"), true, args -> {
             execs.incrementAndGet();
             try {
                 Files.writeString(target, String.valueOf(args.get("text")));
@@ -53,15 +48,15 @@ class RecoveryTraceTest {
                 call("write_marker", Map.of("text", "hello")),
                 answer("I planned the write."));
 
-        AgentEngine engine = engineFor(model, dir);
-        String answerText = engine.run(ScriptedAgent.systemPrompt(), "Write hello to the marker.",
+        ScriptedAgent.Harness h = ScriptedAgent.harness(model, dir);
+        String answerText = h.engine.run(ScriptedAgent.systemPrompt(), "Write hello to the marker.",
                 tools, PermissionService.Mode.PLAN, "main", "plan-1", RunSink.NOOP);
 
         // RECORD_PLAN: the mutating tool was NOT executed, no file written
         assertEquals(0, execs.get(), "PLAN mode must not execute the mutating tool");
         assertFalse(Files.exists(marker), "no file should be written in PLAN mode");
         // the permission decision was RECORD_PLAN
-        assertTrue(perms.decisions.contains("write_marker=RECORD_PLAN"), "decisions=" + perms.decisions);
+        assertTrue(h.perms.decisions.contains("write_marker=RECORD_PLAN"), "decisions=" + h.perms.decisions);
         // the tool result told the model nothing ran, and the answer carries the plan suffix
         assertTrue(model.toolResults().stream().anyMatch(r -> r.contains("[plan mode] Recorded (not executed)")),
                 "tool result: " + model.toolResults());
@@ -82,8 +77,8 @@ class RecoveryTraceTest {
                 call("write_marker", Map.of("text", "recovered")),    // valid retry
                 answer("Recovered after the validation error."));
 
-        AgentEngine engine = engineFor(model, dir);
-        String answerText = engine.run(ScriptedAgent.systemPrompt(), "Write to the marker.",
+        ScriptedAgent.Harness h = ScriptedAgent.harness(model, dir);
+        String answerText = h.engine.run(ScriptedAgent.systemPrompt(), "Write to the marker.",
                 tools, PermissionService.Mode.AUTO, "recover-1", "recover-1", RunSink.NOOP);
 
         // the first call never executed (validation short-circuits before execution)
@@ -113,8 +108,8 @@ class RecoveryTraceTest {
                 call("write_marker", Map.of("text", "x")),
                 answer("(should not be reached)"));
 
-        AgentEngine engine = engineFor(model, dir);
-        String answerText = engine.run(ScriptedAgent.systemPrompt(), "Write x repeatedly.",
+        ScriptedAgent.Harness h = ScriptedAgent.harness(model, dir);
+        String answerText = h.engine.run(ScriptedAgent.systemPrompt(), "Write x repeatedly.",
                 tools, PermissionService.Mode.AUTO, "dup-1", "dup-1", RunSink.NOOP);
 
         // the guard NOTE was emitted (count > 2) and execution was capped at the first two calls
@@ -126,24 +121,4 @@ class RecoveryTraceTest {
                 "run should stop on the duplicate guard: " + answerText);
     }
 
-    // ---- helpers ----
-
-    private RecordingPermsHolder perms;
-
-    private static final class RecordingPermsHolder {
-        final List<String> decisions;
-        RecordingPermsHolder(List<String> d) { this.decisions = d; }
-    }
-
-    /** Build a real engine rooted at dir with a recording PermissionService captured into {@link #perms}. */
-    private AgentEngine engineFor(LlamaClient model, Path dir) throws Exception {
-        Sandbox sandbox = new Sandbox();
-        ScriptedAgent.setField(sandbox, Sandbox.class, "root", dir);
-        ScriptedAgent.setField(sandbox, Sandbox.class, "confineWrites", false);
-        GitInspector git = new GitInspector(sandbox);
-        HookService hooks = new HookService();
-        ScriptedAgent.RecordingPermissions rp = new ScriptedAgent.RecordingPermissions(new Approvals(), git, hooks);
-        this.perms = new RecordingPermsHolder(rp.decisions);
-        return ScriptedAgent.buildEngine(model, rp, hooks, git);
-    }
 }

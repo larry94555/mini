@@ -43,7 +43,7 @@ class SubAgentFailureTraceTest {
         SubAgent subAgent = engineAndSub(model, dir);
         Map<String, Tool> subTools = Map.of("sub_lookup",
                 new Tool("sub_lookup", "Look something up (throws).",
-                        schema(Map.of("q", prop("string")), "q"), false, a -> {
+                        ScriptedAgent.schema(Map.of("q", ScriptedAgent.prop("string")), "q"), false, a -> {
                     subToolCalls.incrementAndGet();
                     throw new RuntimeException("backend unavailable");
                 }));
@@ -85,7 +85,7 @@ class SubAgentFailureTraceTest {
         SubAgent subAgent = engineAndSub(model, dir);
         Map<String, Tool> subTools = Map.of("sub_write",
                 new Tool("sub_write", "Write (mutating).",
-                        schema(Map.of("text", prop("string")), "text"), true, a -> {
+                        ScriptedAgent.schema(Map.of("text", ScriptedAgent.prop("string")), "text"), true, a -> {
                     subWrites.incrementAndGet();
                     try { Files.writeString(marker, String.valueOf(a.get("text"))); } catch (Exception ignore) {}
                     return "wrote";
@@ -108,15 +108,10 @@ class SubAgentFailureTraceTest {
 
     /** Build one real engine (captured into {@link #parentEngine}) and a real SubAgent wrapping it. */
     private SubAgent engineAndSub(LlamaClient model, Path dir) throws Exception {
-        Sandbox sandbox = new Sandbox();
-        ScriptedAgent.setField(sandbox, Sandbox.class, "root", dir);
-        ScriptedAgent.setField(sandbox, Sandbox.class, "confineWrites", false);
-        GitInspector git = new GitInspector(sandbox);
-        HookService hooks = new HookService();
-        ScriptedAgent.RecordingPermissions perms = new ScriptedAgent.RecordingPermissions(new Approvals(), git, hooks);
-        this.parentEngine = ScriptedAgent.buildEngine(model, perms, hooks, git);
+        ScriptedAgent.Harness h = ScriptedAgent.harness(model, dir);
+        this.parentEngine = h.engine;
         Database db = new Database();
-        BuiltinTools builtins = new BuiltinTools(new CheckpointStore(db), new TodoStore(), sandbox,
+        BuiltinTools builtins = new BuiltinTools(new CheckpointStore(db), new TodoStore(), h.sandbox,
                 new RetrievalService(db), new PreviewStore());
         return new SubAgent(parentEngine, builtins);
     }
@@ -124,7 +119,7 @@ class SubAgentFailureTraceTest {
     private Tool delegateTool(SubAgent subAgent, Map<String, Tool> subTools) {
         return new Tool("delegate_agent",
                 "Delegate to a named subagent; returns its final answer.",
-                schema(Map.of("name", prop("string"), "task", prop("string")), "name", "task"),
+                ScriptedAgent.schema(Map.of("name", ScriptedAgent.prop("string"), "task", ScriptedAgent.prop("string")), "name", "task"),
                 false, a -> {
             try {
                 return subAgent.run("sub-session", SUB_SYS, String.valueOf(a.get("task")), subTools, RunSink.NOOP);
@@ -134,13 +129,4 @@ class SubAgentFailureTraceTest {
         });
     }
 
-    private static Map<String, Object> prop(String type) { return Map.of("type", type); }
-
-    private static Map<String, Object> schema(Map<String, Object> properties, String... required) {
-        Map<String, Object> s = new LinkedHashMap<>();
-        s.put("type", "object");
-        s.put("properties", properties);
-        s.put("required", List.of(required));
-        return s;
-    }
 }
