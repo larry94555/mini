@@ -3,6 +3,6 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 cd "$ROOT"
-chmod +x .githooks/pre-commit .githooks/check-scripts.sh 2>/dev/null || true
+chmod +x .githooks/pre-commit .githooks/pre-push .githooks/check-scripts.sh 2>/dev/null || true
 git config core.hooksPath .githooks
 echo "Installed git hooks (core.hooksPath=.githooks)."

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# imini pre-push guard: runs the documentation gates (./run.sh check = check-docs.sh + check-docs-selftest.sh)
+# before allowing a push, so doc/script breakage and missing-file mistakes are caught locally instead of in
+# CI. Install once with:  sh scripts/install-hooks.sh   (sets core.hooksPath=.githooks).
+# Bypass for a single push with:  git push --no-verify
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+ROOT="$(CDPATH= cd -- "$HERE/.." && pwd -P)"
+cd "$ROOT"
+if ! sh run.sh check; then
+  echo "pre-push: blocked by the documentation gate." >&2
+  echo "Fix the items above, or bypass once with: git push --no-verify" >&2
+  exit 1
+fi

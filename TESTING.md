@@ -5033,3 +5033,38 @@ living docs now carry the §4 anchor, all validated by `check-docs.sh`'s anchor 
   matching the two CI gates with one command. `./run.sh help` lists it; an unknown subcommand still exits 2;
   `./run.sh` with no argument still launches the app.
 - **Verified offline:** `sh -n run.sh` passes; `./run.sh check` runs both gates and reports PASS (exit 0).
+
+---
+
+# Pre-push doc-gate hook, workflow-script existence check, underscore slug fix
+
+## 590. Pre-push documentation-gate hook (.githooks/pre-push)
+
+- **Install:** `sh scripts/install-hooks.sh` (sets `core.hooksPath=.githooks` and marks the hooks
+  executable). **Bypass once:** `git push --no-verify`.
+- **What it does:** before a push, runs `./run.sh check` (`scripts/check-docs.sh` +
+  `scripts/check-docs-selftest.sh`) and blocks the push if either fails, so doc/script breakage and
+  missing-file mistakes are caught locally instead of in CI.
+- **Verified offline:** on a clean tree the hook runs both gates and exits 0 (push allowed); after injecting
+  a broken relative link it exits 1 with the breakage and the bypass hint (push blocked). POSIX (`sh -n`).
+
+## 591. Workflow-script existence check (scripts/check-docs.sh, check #5)
+
+- **Run:** `bash scripts/check-docs.sh` / `./run.sh check-docs`.
+- **What it adds:** scans `.github/workflows/*.yml` for the scripts they invoke (`scripts/<name>.sh`
+  anywhere, and bare `bash <name>.sh` / `sh <name>.sh`) and fails if a referenced script does not exist —
+  the exact failure mode that broke CI when a workflow step pointed at an uncommitted file. Globs/variables
+  (e.g. `sh -n "$f"`) are not matched.
+- **Verified offline:** green baseline (workflows reference only `scripts/check-docs.sh` and
+  `scripts/check-docs-selftest.sh`, both present); adding a step that runs `bash scripts/ghost-script.sh`
+  makes it report that script and exit 1, with no false positive on the `sh -n "$f"` glob in `smoke.yml`.
+
+## 592. Underscore slug divergence removed (scripts/check-docs.sh + selftest)
+
+The slug helper now keeps `_` in its character class, matching GitHub (`read_file Helper` →
+`read_file-helper` rather than the old `readfile-helper`); the "Slug limitations" note and
+`check-docs-selftest.sh` Scenario D were updated so the kept-underscore slug is the valid one and the old
+dropped-underscore form is flagged. The only remaining documented divergence is the consecutive-punctuation
+hyphen collapse. **Verified offline:** the self-test's 16 assertions pass, perturbing the slug (dropping `_`
+again) makes it fail, and `check-docs.sh` stays green (no existing anchor relied on the dropped-underscore
+behavior).
