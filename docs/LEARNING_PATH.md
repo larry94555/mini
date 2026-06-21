@@ -348,6 +348,28 @@ Concept:
 - `imini` is not Claude Code.
 - It is a small local harness that mirrors the architectural categories: context, tools, permissions, sessions, checkpoints, MCP, hooks, subagents, and codebase navigation.
 
+## Capstone: the grand tour
+
+Read:
+
+- [`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4 (how each branch is proven), then
+  [`TRACE_TOUR.md`](TRACE_TOUR.md).
+
+Concept:
+
+- `TRACE_TOUR.md` narrates a single realistic session that chains an edit→commit (with a hook firing), a
+  delegation to a named subagent, and an MCP tool call — the pieces from Modules 4-13 composed into one
+  turn, with each step cross-referenced to the golden-trace test that proves it.
+
+Exercise — trace the tour against the tests:
+
+- For each step in `TRACE_TOUR.md`, open the golden-trace test it names and find the assertion that backs
+  the claim (e.g. the edit-trust block → `GoldenTraceWorkflowTest.editStageCommitTrace`; the hand-off →
+  `SubAgentHandoffTraceTest`; the failure paths → `SubAgentFailureTraceTest`).
+- Run them: `./mvnw -Dtest=GoldenTraceWorkflowTest,RecoveryTraceTest,CapabilityScopingTraceTest,SubAgentHandoffTraceTest,SubAgentFailureTraceTest,McpLiveIntegrationTest test`.
+- Confirm the documented behavior matches the assertions — the narrative is continuously checked, not just
+  described.
+
 ## Completion checklist
 
 You have completed this learning path when you can explain:

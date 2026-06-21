@@ -1158,7 +1158,7 @@ public class AgentController {
     @PostMapping("/admin/eval")
     public Map<String, Object> adminEval() {
         requireAdmin();
-        return eval.runSuite(EvalHarness.defaultCases());
+        return eval.runSuite(eval.loadCases());
     }
 
     /**

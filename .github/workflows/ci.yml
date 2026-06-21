@@ -29,6 +29,8 @@ jobs:
           key: ${{ runner.os }}-mvnwrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
       - name: Make the Maven wrapper executable
         run: chmod +x mvnw
+      - name: Check docs reference integrity (test/class/file/case references resolve)
+        run: bash scripts/check-docs.sh
       - name: Run the test suite
         run: ./mvnw -B -ntp test
 

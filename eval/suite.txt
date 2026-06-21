@@ -1,0 +1,17 @@
+# imini evaluation suite — one case per line:  id | match | expected | prompt
+# match ∈ { contains, regex, equals }  (case-insensitive)
+#   contains : the model's answer contains the expected text (case-insensitive)
+#   regex    : the answer matches the expected regex (DOTALL, case-insensitive)
+#   equals   : the answer equals the expected text after whitespace/case normalization
+# This file is loaded by EvalHarness.loadCases() (override the path with eval.suite-file).
+# It is intentionally small and model-agnostic; replace it with your own domain suite.
+# Rubric: a case PASSES when scoreCase() matches; the suite pass-rate is passed/total. The
+# eval-gate CI workflow fails the build when the pass-rate drops below its threshold.
+
+greet      | contains | hello | Say hello in exactly one short sentence.
+arith      | contains | 42    | What is 17 plus 25? Reply with just the number.
+capital    | contains | paris | What is the capital of France? One word.
+yesno      | contains | yes   | Is water wet? Answer yes or no.
+multiply   | contains | 56    | What is 7 times 8? Reply with just the number.
+spelling   | regex    | (?i)\bnecessary\b | Spell the word that means "needed": n-e-c-...? Reply with the single word.
+oneword    | equals   | blue  | What color is a clear daytime sky? Reply with exactly one lowercase word, no punctuation.
