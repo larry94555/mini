@@ -718,15 +718,17 @@ public class AgentController {
         long[] r = dateRangeMs(from, to, days);
         int lim = Math.max(1, Math.min(200, limit));
         Map<String, Object> mute = alertSink.digestMuteState();
+        Map<String, Object> snapshot = alertSink.sloDigest();
         List<Map<String, Object>> history = alertSink.sloDigestHistory(lim, r[0], r[1]);
         List<Map<String, Object>> audit = alertSink.digestAuditTrail(lim, r[0], r[1]);
         if ("csv".equalsIgnoreCase(format)) {
             return ResponseEntity.ok()
                     .header("Content-Type", "text/csv")
                     .header("Content-Disposition", "attachment; filename=\"imini-digest-report.csv\"")
-                    .body(AlertSink.digestReportCsv(mute, history, audit));
+                    .body(AlertSink.digestReportCsv(mute, snapshot, history, audit));
         }
         Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("snapshot", snapshot);
         out.put("mute", mute);
         out.put("history", history);
         out.put("audit", audit);

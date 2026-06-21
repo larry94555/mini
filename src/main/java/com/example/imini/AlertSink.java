@@ -1698,7 +1698,19 @@ public class AlertSink {
     /** Pure: a single sectioned CSV bundling mute state + history + audit (for an incident-review download). */
     static String digestReportCsv(Map<String, Object> mute, List<Map<String, Object>> history,
                                   List<Map<String, Object>> audit) {
+        return digestReportCsv(mute, null, history, audit);
+    }
+
+    /** Pure: sectioned CSV bundling current snapshot + mute state + history + audit. */
+    static String digestReportCsv(Map<String, Object> mute, Map<String, Object> snapshot,
+                                  List<Map<String, Object>> history, List<Map<String, Object>> audit) {
         StringBuilder sb = new StringBuilder();
+        if (snapshot != null) {
+            sb.append("# snapshot\nkey,value\n");
+            for (Map.Entry<String, Object> e : snapshot.entrySet()) {
+                sb.append(csvCell(e.getKey())).append(',').append(csvCell(e.getValue())).append('\n');
+            }
+        }
         sb.append("# mute\n");
         sb.append("muted,muted_until,muted_reason\n");
         if (mute != null) {

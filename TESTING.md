@@ -4469,3 +4469,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** the overview renders a "Copy report link" button wired to `copyDigestLink()`, which builds the
   `/admin/alerts/digest-report` URL for the current from/to and copies it (clipboard API with a text fallback).
   (JS syntax-checked + exercised with `node`.)
+
+---
+
+# Report bundle snapshot, download link, picker validation feedback
+
+## 540. Snapshot in the report bundle (AlertDigestReportSnapshotDownloadValidationTest + manual)
+
+- **Run:** `./mvnw -Dtest=AlertDigestReportSnapshotDownloadValidationTest test`.
+- **Observe (unit):** the 4-arg `digestReportCsv(mute, snapshot, history, audit)` emits a leading `# snapshot`
+  key,value section (ordered before `# mute`/`# history`/`# audit`); the 3-arg form omits it (back-compat).
+  **Manual:** `GET /admin/alerts/digest-report` JSON now carries a `snapshot` object (current `sloDigest()`).
+
+## 541. Download report bundle link (AlertDigestReportSnapshotDownloadValidationTest)
+
+- **Observe:** the overview renders a "Download report bundle" link wired to `downloadDigestCsv('report')`,
+  which resolves to `/admin/alerts/digest-report?format=csv` for the current from/to.
+
+## 542. Picker validation feedback (AlertDigestReportSnapshotDownloadValidationTest + node)
+
+- **Observe:** `applyDigestRange()` checks the response (`if(!x.ok)`), throws the server's `{error}` message,
+  and on failure shows it in the picker note while leaving `window.digestRangeActive=false` (view not pinned).
+  Quick-range buttons inherit this via `applyDigestRange`. (JS exercised with `node`: good range pins; an
+  inverted range surfaces "'from' must not be after 'to'".)
