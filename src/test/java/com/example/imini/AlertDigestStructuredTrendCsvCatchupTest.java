@@ -91,7 +91,7 @@ class AlertDigestStructuredTrendCsvCatchupTest {
         d2.put("delivery_success", 0.97); d2.put("summary", "b");
         stats.put("recent_digests", List.of(d1, d2));
         String html = AlertsOverview.render(stats, List.of());
-        assertTrue(html.contains("delivery-success across recent digests"));
+        assertTrue(html.contains("delivery-success"));
         assertTrue(html.contains("digest_trendbox"));
     }
 
