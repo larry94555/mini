@@ -57,7 +57,7 @@ This map connects common Claude Code-style harness concepts to the files in `imi
 
 _Proven by golden traces: `CapabilityScopingTraceTest` (out-of-scope denial + audit, and `RATE_LIMITED`),
 `RecoveryTraceTest` (plan-mode `RECORD_PLAN`, invalid-args recovery, duplicate-call guard). See
-[`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4._
+[`WORKFLOW_WALKTHROUGH.md` §4](WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite)._
 
 ## State and persistence
 
@@ -88,7 +88,7 @@ _Proven by golden traces: `CapabilityScopingTraceTest` (out-of-scope denial + au
 
 _Proven by golden traces: `SubAgentHandoffTraceTest` + `SubAgentFailureTraceTest` (delegation hand-off and
 failure propagation), `McpLiveIntegrationTest` (stdio/HTTP discovery, streaming + unbounded SSE, two-server
-namespacing/routing). See [`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4._
+namespacing/routing). See [`WORKFLOW_WALKTHROUGH.md` §4](WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite)._
 
 ## User experience and operations
 

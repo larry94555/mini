@@ -21,3 +21,7 @@ oneword    | equals   | blue  | What color is a clear daytime sky? Reply with ex
 readfile-codename | contains | GRANITE | Use your file-reading tool to read eval/fixtures/note.txt, then reply with the project codename it states.
 readfile-number   | contains | 73      | Read the file eval/fixtures/note.txt with a tool and reply with just the lucky number it gives.
 listdir-eval      | regex    | (?i)note\.txt | List the files in the eval/fixtures directory using a tool, then name the text file you find there.
+
+# --- different tool path: a write-then-read round trip exercises the mutating + reading tools together.
+roundtrip-write-read | contains | BANANA | Use a tool to write the exact text BANANA into a file named scratch-eval.txt in the workspace, then read that file back with a tool and reply with its contents.
+roundtrip-append     | regex    | (?i)line1.*line2 | Create a file notes-eval.txt, write the line "line1" to it, then append the line "line2", then read the whole file back and reply with all of its contents.

@@ -352,7 +352,7 @@ Concept:
 
 Read:
 
-- [`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4 (how each branch is proven), then
+- [`WORKFLOW_WALKTHROUGH.md` §4 (how each branch is proven)](WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite), then
   [`TRACE_TOUR.md`](TRACE_TOUR.md).
 
 Concept:

@@ -188,6 +188,7 @@ MCP round-trip ones are CI/live (real Jackson) and self-skip without `node`. See
 - `HookService.java` (+ call sites in `AgentEngine`/`AgentLoop`) — the hook lifecycle.
 - `McpManager.java` — the MCP client, transports, and prompt slash commands.
 - `docs/TRACE_EDIT.md` — a concrete end-to-end trace of a single edit.
+- [`docs/TRACE_TOUR.md`](TRACE_TOUR.md) — one session chaining edit→commit, delegation, and an MCP call, each step linked back to [§4](#4-how-each-branch-is-proven-the-golden-trace-suite).
 - `ScriptedAgent.java` — the shared scripted-model + real-engine fixture behind the golden traces (§4).
 - `TESTING.md` cases 549-568 — how each branch is tested, including the live MCP integration test and the
   golden-trace suite mapped in §4.

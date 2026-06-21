@@ -38,6 +38,14 @@ scan() { xargs grep -rhoE "$1" < "$doclist" 2>/dev/null; }
 
 # slug TEXT -> a GitHub-style heading anchor: lowercase, drop punctuation (keep alnum/space/hyphen),
 # spaces->hyphens, collapse repeats, trim. Approximate but covers ordinary headings.
+#
+# Slug limitations (intentional, pinned by check-docs-selftest.sh) -- this diverges from GitHub when:
+#   * consecutive removed punctuation / multiple hyphens collapse to ONE hyphen here, whereas GitHub keeps
+#     them (e.g. "C++ & Friends" -> here "c-friends", GitHub "c--friends"; "A -- B" -> here "a-b").
+#   * underscores are dropped here but kept by GitHub (e.g. "read_file Helper" -> here "readfile-helper",
+#     GitHub "read_file-helper").
+# For ordinary prose headings (letters, digits, spaces, single hyphens, attached punctuation like ".", "(",
+# ")", ",") the two agree. Author anchors to match THIS slug; the self-test guards the behavior from drift.
 slug() {
   printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]' \
     | sed -e 's/[^a-z0-9 -]//g' -e 's/ /-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
