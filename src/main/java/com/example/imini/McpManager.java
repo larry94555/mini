@@ -164,6 +164,16 @@ public class McpManager {
         log.info("[mcp] registered " + tools.size() + " tool(s) from " + serverCount + " server(s).");
     }
 
+    /**
+     * Test/programmatic seam: connect to a single MCP server from a config map (same shape as one
+     * {@code mcpServers} entry — stdio {command,args,env} or {transport:"http",url}), running the full
+     * handshake + tools/resources/prompts discovery. Used by integration tests to drive a stub server
+     * without writing an mcp.json; production uses {@link #start()} which reads mcp.json.
+     */
+    void connect(String name, Map<String, Object> conf) {
+        startServer(name, conf);
+    }
+
     @SuppressWarnings("unchecked")
     private void startServer(String name, Map<String, Object> conf) {
         try {

@@ -20,6 +20,7 @@ No cloud API key is required.
 - Guided learning path: [`docs/LEARNING_PATH.md`](docs/LEARNING_PATH.md)
 - Guided 90-minute workshop (labs + test checkpoints): [`docs/WORKSHOP.md`](docs/WORKSHOP.md)
 - End-to-end edit trace: [`docs/TRACE_EDIT.md`](docs/TRACE_EDIT.md)
+- Workflow walkthrough (edit→verify→commit, hooks, MCP — with diagrams): [`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md)
 - Claude Code concept map: [`docs/CONCEPT_MAP.md`](docs/CONCEPT_MAP.md)
 - What imini deliberately leaves out (and where you'd go next): [`docs/WHATS_NOT_INCLUDED.md`](docs/WHATS_NOT_INCLUDED.md)
 - Recursive Language Models — concept note (why imini doesn't use them, when they fit): [`docs/RECURSIVE_LANGUAGE_MODELS.md`](docs/RECURSIVE_LANGUAGE_MODELS.md)
@@ -704,6 +705,13 @@ streamable-HTTP JSON-RPC endpoint; plain-JSON and single-event SSE responses are
     "local":  { "command": "npx", "args": ["-y", "@scope/server"] },
     "remote": { "transport": "http", "url": "https://mcp.internal/rpc" } } }
 ```
+
+This whole MCP path is exercised end to end by `McpLiveIntegrationTest`, which connects `McpManager` to a
+tiny stub server over **both** transports — a node child process (`src/test/resources/mcp/stub-server.js`)
+over stdio, and a JDK `HttpServer` over HTTP — and asserts that tools, resources and prompts are discovered
+and that `read_resource` and the `/mcp__server__prompt` slash command return the server-rendered content.
+The stdio half self-skips if `node` isn't on `PATH`; the HTTP half always runs. See
+[`docs/WORKFLOW_WALKTHROUGH.md`](docs/WORKFLOW_WALKTHROUGH.md) for the lifecycle diagrams.
 
 A coding answer is easy to overstate, so after any run that changed files `imini` appends a
 **git-verified summary** of the edits to the final answer:
