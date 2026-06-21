@@ -55,11 +55,12 @@ sandbox is the project.
 supervisor/worker trees, planner/executor splits, debate or voting ensembles, long-horizon "manager" agents
 that spawn and monitor sub-tasks, or routing a request to the best of several specialized harnesses.
 
-**Why it's not in imini.** imini shows the single-loop building block and exactly one delegation example
-(`SubAgent`, reached via the `delegate_research` tool, which runs an isolated second loop and returns only
-its summary). A full meta-harness — dynamic spawning, inter-agent messaging, shared blackboard state,
-back-pressure, partial-failure handling, deadlock/loop avoidance across agents — is its own architecture and
-would obscure the core lesson.
+**Why it's not in imini.** imini shows the single-loop building block and a delegation example
+(`SubAgent`, reached via the `delegate_research` tool for web research and the `delegate_agent` tool for
+named, tool-scoped subagents from `AgentRegistry`, each running an isolated second loop that returns only
+its final answer; the hand-off is covered end to end by `SubAgentHandoffTraceTest`). A full meta-harness —
+dynamic spawning, inter-agent messaging, shared blackboard state, back-pressure, partial-failure handling,
+deadlock/loop avoidance across agents — is its own architecture and would obscure the core lesson.
 
 **What adding it would involve.** A scheduler/orchestrator with a typed task graph, a message bus or shared
 store for agent-to-agent state, per-agent budgets and timeouts, failure/retry and cancellation semantics
@@ -122,25 +123,32 @@ high-risk steps. There is no complete solution; production systems layer several
 **What it is.** Systematic measurement of *agent* quality — task-success benchmarks, regression suites of
 end-to-end scenarios, golden transcripts, scoring.
 
-**Why it's not in imini.** imini has thorough **unit** tests for deterministic logic (`mvn test`), but it
-does not benchmark the *model's* behavior on tasks. Agent-level eval needs a fixed model and curated tasks,
-which a teaching repo running a swappable local model does not pin down.
+**Why it's only partial in imini.** imini has thorough **unit** tests for deterministic logic (`mvn test`),
+deterministic **golden-trace** tests that drive the real agent loop end to end with a scripted model
+(`GoldenTraceWorkflowTest`, `RecoveryTraceTest`, `CapabilityScopingTraceTest`, `SubAgentHandoffTraceTest`),
+and an opt-in model-quality gate (`EvalHarness` + `POST /admin/eval` + the `eval-gate.yml` CI workflow that
+fails the build below a pass-rate threshold). What it does **not** have is a large curated task benchmark
+with model-graded scoring and variance handling — that needs a fixed model and curated tasks, which a
+teaching repo running a swappable local model does not pin down.
 
 **What adding it would involve.** A task dataset with expected outcomes, a runner that executes the full
 loop and scores results (exact-match, rubric-based, or model-graded), variance handling across runs, and a
-way to diff quality between harness versions. `TESTING.md` documents manual scenarios; turning those into an
-automated scored suite is the gap.
+way to diff quality between harness versions. The deterministic-trace and eval-gate pieces exist; scaling to
+a curated, model-graded benchmark is the remaining gap.
 
 ## Cost / token accounting and rate limiting
 
 **What it is.** Per-user and per-task accounting of tokens and money, with quotas and throttling.
 
-**Why it's not in imini.** `Metrics`/`TokenBudgetService` track approximate output tokens and enforce a
-prompt budget, but there is no per-identity cost ledger or quota system — there is no billing model in a
-local single-user harness.
+**Why it's only partial in imini.** imini now records per-identity usage in a `cost_ledger` (priced via
+`cost.*`), exposes per-tenant usage at `GET /admin/cost`, enforces tiered monthly token quotas (HTTP 429 on
+the run endpoints), and throttles individual tools per tenant with `ToolRateLimiter` (the `RATE_LIMITED`
+result, covered by `CapabilityScopingTraceTest`). What it does **not** include is a real billing/payment
+integration or metered invoicing — there is no money movement in a local harness.
 
-**What adding it would involve.** Tying token counts to identities, a persistent usage ledger, configurable
-quotas with enforcement (reject/queue/degrade), and pricing if you talk to a paid API.
+**What adding it would involve.** Wiring the ledger to a payment provider, invoice generation, plan
+management, and dunning/overage handling. The accounting, quota, and throttling primitives are present;
+turning them into a billing product is the remaining gap.
 
 ## Model routing, fallback, and ensembles
 

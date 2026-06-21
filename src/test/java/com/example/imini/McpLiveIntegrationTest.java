@@ -98,6 +98,39 @@ class McpLiveIntegrationTest {
         }
     }
 
+    // ---- multi-server: tool-name namespacing + per-server prompt routing ----
+
+    @Test
+    void twoServersNamespaceToolsAndRoutePromptsIndependently() throws Exception {
+        if (!nodeAvailable()) {
+            System.out.println("[skip] node not on PATH; skipping multi-server MCP routing test");
+            return;
+        }
+        Path stub = locateStub();
+        assertNotNull(stub, "stub-server.js must be present in test resources");
+
+        McpManager mcp = new McpManager();
+        setTimeout(mcp, 30);
+        // Same stub program connected under two distinct server names.
+        mcp.connect("alpha", Map.of("command", "node", "args", List.of(stub.toString())));
+        mcp.connect("beta", Map.of("command", "node", "args", List.of(stub.toString())));
+
+        // Tools from each server are namespaced <server>_<tool>, so they don't collide.
+        var toolNames = mcp.tools().stream().map(t -> t.name).toList();
+        assertTrue(toolNames.contains("alpha_echo"), "alpha's tool is namespaced: " + toolNames);
+        assertTrue(toolNames.contains("beta_echo"), "beta's tool is namespaced: " + toolNames);
+        assertTrue(toolNames.contains("alpha_read_resource") && toolNames.contains("beta_read_resource"),
+                "each server gets its own read_resource tool: " + toolNames);
+
+        // Prompt slash commands are per-server and route to the correct server.
+        assertTrue(mcp.isPromptCommand("/mcp__alpha__review"), "alpha prompt command exists");
+        assertTrue(mcp.isPromptCommand("/mcp__beta__review"), "beta prompt command exists");
+        String a = mcp.renderPromptCommand("/mcp__alpha__review file=A.java");
+        String b = mcp.renderPromptCommand("/mcp__beta__review file=B.java");
+        assertTrue(a != null && a.contains("review A.java"), "alpha rendered its prompt: " + a);
+        assertTrue(b != null && b.contains("review B.java"), "beta rendered its prompt: " + b);
+    }
+
     // ---- HTTP transport: an UNBOUNDED keep-alive SSE stream (incremental line reads) ----
 
     @Test

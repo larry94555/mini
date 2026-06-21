@@ -48,7 +48,7 @@ final class ScriptedAgent {
     }
 
     /** A scripted, model-free {@link LlamaClient}: returns the next canned assistant message per call. */
-    static final class ScriptedLlama extends LlamaClient {
+    static class ScriptedLlama extends LlamaClient {
         private final List<Map<String, Object>> steps;
         private int next;
         String lastUserContent;
@@ -65,6 +65,29 @@ final class ScriptedAgent {
             this.steps = new ArrayList<>(steps);
         }
 
+        /** No-arg for subclasses that override {@link #nextStep} with their own step source. */
+        protected ScriptedLlama() {
+            super(null);
+            this.steps = new ArrayList<>();
+        }
+
+        /** The next scripted assistant message for this turn. Default: sequential from the step list. */
+        protected Map<String, Object> nextStep(List<Map<String, Object>> messages) {
+            if (next >= steps.size()) return answer("[no more scripted steps]");
+            return steps.get(next++);
+        }
+
+        /** The system-prompt text of the current turn (messages[0] when role=system), or "". */
+        protected static String systemOf(List<Map<String, Object>> messages) {
+            if (messages != null && !messages.isEmpty()) {
+                Map<String, Object> m0 = messages.get(0);
+                if ("system".equals(m0.get("role")) && m0.get("content") != null) {
+                    return String.valueOf(m0.get("content"));
+                }
+            }
+            return "";
+        }
+
         private Map<String, Object> pop(List<Map<String, Object>> messages) {
             lastMessages = messages;
             for (Map<String, Object> m : messages) {
@@ -72,8 +95,7 @@ final class ScriptedAgent {
                     lastUserContent = String.valueOf(m.get("content"));
                 }
             }
-            if (next >= steps.size()) return answer("[no more scripted steps]");
-            return steps.get(next++);
+            return nextStep(messages);
         }
 
         @Override
@@ -98,6 +120,37 @@ final class ScriptedAgent {
                 }
             }
             return out;
+        }
+    }
+
+    /**
+     * A scripted model that serves TWO (or more) agents on one engine by routing each turn to a script
+     * chosen by a marker substring in the turn's system prompt — so a parent turn and a nested sub-agent
+     * turn (which run on the same engine instance) each follow their own canned sequence regardless of
+     * interleaving. Used by the subagent hand-off trace.
+     */
+    static final class RoutingScriptedLlama extends ScriptedLlama {
+        private final Map<String, List<Map<String, Object>>> scripts;
+        private final Map<String, Integer> idx = new java.util.HashMap<>();
+
+        RoutingScriptedLlama(Map<String, List<Map<String, Object>>> scripts) {
+            super();
+            this.scripts = scripts;
+        }
+
+        @Override
+        protected Map<String, Object> nextStep(List<Map<String, Object>> messages) {
+            String sys = systemOf(messages);
+            for (Map.Entry<String, List<Map<String, Object>>> e : scripts.entrySet()) {
+                if (sys.contains(e.getKey())) {
+                    int i = idx.getOrDefault(e.getKey(), 0);
+                    List<Map<String, Object>> script = e.getValue();
+                    if (i >= script.size()) return answer("[no more scripted steps for " + e.getKey() + "]");
+                    idx.put(e.getKey(), i + 1);
+                    return script.get(i);
+                }
+            }
+            return answer("[no script matched system prompt]");
         }
     }
 
