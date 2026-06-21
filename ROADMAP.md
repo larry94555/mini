@@ -46,9 +46,9 @@ Remaining candidates are genuinely optional — pursue only if a concrete need a
 
 1. **Hook/Notification breadth** — additional `Notification` trigger points (e.g. on long-running tools)
    if real usage shows a need.
-2. **More eval depth** — additional scripted scenarios (e.g. a multi-server MCP routing trace, or a
-   subagent hand-off trace) if a specific behaviour needs a regression guard. The core engine branches
-   (happy path, plan/invalid-args/dup guard, capability/rate-limit denial) are now all covered end to end.
+2. **More eval depth** — the control-flow branches now all have end-to-end golden traces (happy path,
+   plan/invalid-args/dup guard, capability/rate-limit denial, subagent hand-off, multi-server MCP routing).
+   Further traces are pure regression guards for specific behaviours, not coverage gaps.
 
 If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
 **done** — prefer educational depth (docs, diagrams, eval scenarios) over inventing new surface.
@@ -154,6 +154,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Subagent hand-off golden trace + multi-server MCP routing trace + doc-drift audit: `SubAgentHandoffTraceTest` drives the real `AgentEngine` and the real `SubAgent` with a scripted model — a parent turn delegates to a named subagent, the subagent runs its own nested turn (its tool call + answer), its result returns into the parent transcript, and the parent answers (the shared `ScriptedAgent` fixture gains a `RoutingScriptedLlama` that scripts two agents on one engine by system-prompt marker); `McpLiveIntegrationTest` gains a two-server routing test asserting `<server>_<tool>` namespacing and per-server `/mcp__<server>__<prompt>` routing; and `docs/WHATS_NOT_INCLUDED.md` was corrected for drift (agent-eval now notes the golden traces + `EvalHarness`/eval-gate; cost/rate-limiting now notes the `cost_ledger`/quotas/`ToolRateLimiter`; sub-agents now note `delegate_agent` + the new trace).
 
 - Capability-scoping golden trace + HISTORY consolidation + true long-lived SSE streaming: `CapabilityScopingTraceTest` drives the real `AgentEngine` through its access-control branches with a scripted model — capability scoping denies an out-of-scope tool with `outside this caller's capability scope` (audited, not executed) while the in-scope tool runs, and `ToolRateLimiter` throttles a tool over its per-tenant limit with the `RATE_LIMITED` message (verified 8/8 offline, reusing the shared `ScriptedAgent` fixture via a new `buildEngine` overload); older `Recently completed` entries were swept into `docs/HISTORY.md` to keep the roadmap focused; and the HTTP MCP transport now consumes an **unbounded** server-push `text/event-stream` via incremental line reads (`ofInputStream` + `readSseResponse`), returning as soon as the JSON-RPC response event arrives and closing the stream — keep-alive/interim events are skipped (`McpManager.sseDataJson`/`isJsonRpcResponse`), covered by a keep-alive `HttpServer` integration test + pure helper unit tests.
 

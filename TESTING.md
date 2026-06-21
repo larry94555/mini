@@ -4752,3 +4752,40 @@ self-skipping when `node` is absent.
 Older `Recently completed` entries were moved out of `ROADMAP.md` into `docs/HISTORY.md` (which already held
 the alerting/SLO-era entries); `ROADMAP.md` now keeps only the most recent few with a pointer to the full
 archive. No entries were lost. Not a test; recorded so the doc move is auditable.
+
+---
+
+# Subagent hand-off trace, multi-server MCP routing, doc-drift audit
+
+## 566. Subagent hand-off golden trace (SubAgentHandoffTraceTest)
+
+- **Run:** `./mvnw -Dtest=SubAgentHandoffTraceTest test`.
+- **Observe (`parentDelegatesToSubagentAndIncorporatesItsResult`):** a parent turn calls a
+  `delegate_agent`-style tool whose executor invokes the **real `SubAgent`**, which runs a nested
+  `AgentEngine` turn (label `"sub"`) on the same engine. The parent and subagent are scripted from one
+  `ScriptedAgent.RoutingScriptedLlama`, routed by a marker in each turn's system prompt. The test asserts
+  the full hand-off: the subagent's own tool (`sub_lookup`) executed inside the nested loop; the subagent's
+  final answer (`SUB_RESULT: …42`) propagated back into the **parent** transcript as the `delegate_agent`
+  tool result; and the parent produced its own final answer (`PARENT_DONE`), not the sub's.
+- **Note:** drives the real engine + real `SubAgent` (the scripted model removes the only live-server
+  dependency), so it runs fully offline; verified end to end (5 assertions). Extends the shared
+  `ScriptedAgent` fixture with `RoutingScriptedLlama` to script two agents on one engine.
+
+## 567. Multi-server MCP routing + tool namespacing (McpLiveIntegrationTest)
+
+- **Observe (`twoServersNamespaceToolsAndRoutePromptsIndependently`):** the same stub MCP program is
+  connected under two server names (`alpha`, `beta`). The test asserts each server's tools are namespaced
+  `<server>_<tool>` (`alpha_echo` vs `beta_echo`, plus per-server `_read_resource`) so they never collide,
+  and that the prompt slash commands route per server — `/mcp__alpha__review file=A.java` and
+  `/mcp__beta__review file=B.java` each render their own server's prompt with the right argument.
+- **Note:** CI/live (needs `node` for the stdio child processes and real Jackson for the round-trip);
+  self-skips when `node` is absent.
+
+## 568. Doc-drift audit (docs only)
+
+`docs/WHATS_NOT_INCLUDED.md` was corrected against features that now exist: the **agent-evaluation** entry
+now reflects the deterministic golden-trace tests + the `EvalHarness`/`eval-gate.yml` model-quality gate
+(narrowing the gap to a curated, model-graded benchmark); the **cost/rate-limiting** entry now reflects the
+`cost_ledger`, `/admin/cost`, tiered quotas, and per-tenant `ToolRateLimiter` (narrowing the gap to real
+billing); and the **sub-agent** entry now mentions `delegate_agent` (named subagents) and the new hand-off
+trace. Not a test; recorded so the doc corrections are auditable.

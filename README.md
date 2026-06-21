@@ -722,7 +722,9 @@ permission decision, hook firing, and the git-verified edit-trust summary in one
 branches — a mutation denied in PLAN mode, an invalid-args call that recovers, and the duplicate-call guard
 — are covered the same way by `RecoveryTraceTest`, and the access-control branches — capability scoping
 (`outside this caller's capability scope`, audited, not executed) and per-tenant rate limiting
-(`RATE_LIMITED`) — by `CapabilityScopingTraceTest`. All share the `ScriptedAgent` test fixture (scripted
+(`RATE_LIMITED`) — by `CapabilityScopingTraceTest`, and the subagent hand-off — a parent turn delegating to
+a named subagent that runs its own loop and whose result returns into the parent transcript — by
+`SubAgentHandoffTraceTest`. All share the `ScriptedAgent` test fixture (scripted
 model + real-engine builder), which `FakeModelHarnessTest` also uses. CI installs Node so the stdio MCP
 integration tests run rather than self-skip.
 
