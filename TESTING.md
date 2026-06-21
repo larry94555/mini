@@ -4789,3 +4789,38 @@ now reflects the deterministic golden-trace tests + the `EvalHarness`/`eval-gate
 `cost_ledger`, `/admin/cost`, tiered quotas, and per-tenant `ToolRateLimiter` (narrowing the gap to real
 billing); and the **sub-agent** entry now mentions `delegate_agent` (named subagents) and the new hand-off
 trace. Not a test; recorded so the doc corrections are auditable.
+
+---
+
+# Walkthrough trace-map refresh, subagent failure propagation, learning-path cross-links
+
+## 569. WORKFLOW_WALKTHROUGH "how each branch is proven" (docs only)
+
+`docs/WORKFLOW_WALKTHROUGH.md` gains a §4 that maps every lifecycle diagram (edit→verify→commit, the six
+hook events, the MCP server lifecycle, subagent delegation, and access-control denial) to the specific
+golden-trace test + method that asserts it, plus a subagent-delegation sequence diagram (§3a). The
+single-event-SSE phrasing was corrected to multi-event/unbounded, and the "where to read next" pointers
+now reference `ScriptedAgent.java` and TESTING cases 549-568. Not a test; recorded so the doc/test
+cross-references stay auditable.
+
+## 570. Subagent failure propagation (SubAgentFailureTraceTest)
+
+- **Run:** `./mvnw -Dtest=SubAgentFailureTraceTest test`.
+- **Observe (`failingSubToolSurfacesAsErrorAndParentRecovers`):** the subagent's tool throws; `safeExec`
+  turns it into an `ERROR:` result the sub sees (asserted via the routing model's per-agent transcript),
+  the sub's final answer propagates to the parent as the `delegate_agent` result, and the parent produces
+  its own final answer — no crash.
+- **Observe (`subDuplicateGuardStopStringSurfacesToParent`):** the subagent repeats the same mutating call;
+  its OWN duplicate-call guard caps execution at two and stops the sub run, and the engine-generated
+  `kept repeating the same tool call` stop string surfaces verbatim as the delegate result while the parent
+  completes cleanly.
+- **Note:** drives the real engine + real `SubAgent` offline (verified 7/7). Uses the `RoutingScriptedLlama`
+  per-agent transcript capture (`toolResultsFor`) added to the shared fixture.
+
+## 571. Learning-path & concept-map cross-links (docs only)
+
+`docs/LEARNING_PATH.md` Module 13.5 now lists the access-control (`CapabilityScopingTraceTest`),
+recovery (`RecoveryTraceTest`), and delegation (`SubAgentHandoffTraceTest` + `SubAgentFailureTraceTest`)
+traces as checkpoints alongside the write-workflow ones; `docs/CONCEPT_MAP.md` gains capability-scoping and
+per-tenant-rate-limiting rows plus "proven by golden traces" notes on the Permissions and Extensibility
+sections. Not tests; recorded for auditability.

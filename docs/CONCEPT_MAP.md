@@ -52,6 +52,12 @@ This map connects common Claude Code-style harness concepts to the files in `imi
 | Command screening | Deny or allowlist shell commands before execution | `Sandbox.java`, `SandboxTest.java` |
 | Container command wrapper | Optional way to run shell commands in an external container/jail | `Sandbox.java`, `application.properties` |
 | Prompt-injection fencing | Mark external tool output as data, not instructions | `Untrusted.java`, `AgentEngine.java` |
+| Capability scoping | Restrict which tools a caller's role may use | `CapabilityService.java`, `AgentEngine.java` |
+| Per-tenant rate limiting | Throttle a tool per tenant (`RATE_LIMITED`) | `ToolRateLimiter.java`, `AgentEngine.java` |
+
+_Proven by golden traces: `CapabilityScopingTraceTest` (out-of-scope denial + audit, and `RATE_LIMITED`),
+`RecoveryTraceTest` (plan-mode `RECORD_PLAN`, invalid-args recovery, duplicate-call guard). See
+[`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4._
 
 ## State and persistence
 
@@ -79,6 +85,10 @@ This map connects common Claude Code-style harness concepts to the files in `imi
 | Subagent | Delegate a constrained task to a narrower agent | `SubAgent.java` |
 | Hooks | Run deterministic shell commands before/after tool use | `HookService.java` |
 | Slash commands | Reusable prompt templates | `SlashCommands.java`, `commands/*.md` |
+
+_Proven by golden traces: `SubAgentHandoffTraceTest` + `SubAgentFailureTraceTest` (delegation hand-off and
+failure propagation), `McpLiveIntegrationTest` (stdio/HTTP discovery, streaming + unbounded SSE, two-server
+namespacing/routing). See [`WORKFLOW_WALKTHROUGH.md`](WORKFLOW_WALKTHROUGH.md) §4._
 
 ## User experience and operations
 

@@ -1,4 +1,4 @@
-# Workflow walkthrough: edit → verify → commit, hooks, and MCP
+# Workflow walkthrough: edit → verify → commit, hooks, MCP, delegation, and how each branch is proven
 
 This is a guided tour of the three workflow surfaces that make imini feel like a real coding agent: the
 **edit → verify → commit loop**, the **hook lifecycle**, and the **MCP server lifecycle**. Everything here
@@ -128,8 +128,57 @@ Once connected:
   rendered prompt (`prompts/get`, with `key=value` arguments substituted) becomes the turn's input.
 
 Transports are pluggable behind a small `Transport` interface: a stdio child process (newline-delimited
-JSON-RPC) or an HTTP endpoint (`transport:"http"`, plain-JSON or single-event SSE). The
-`McpLiveIntegrationTest` drives both against a stub server.
+JSON-RPC) or an HTTP endpoint (`transport:"http"`, plain-JSON or SSE — including an unbounded, multi-event
+`text/event-stream` consumed incrementally). The `McpLiveIntegrationTest` drives both against a stub server.
+
+---
+
+## 4. How each branch is proven (the golden-trace suite)
+
+Every lifecycle above is backed by an automated **golden trace**: a test that drives the *real*
+`AgentEngine` (and, where relevant, the real `SubAgent`/`McpManager`) with a *scripted, model-free*
+`LlamaClient`, so the diagram's control flow is asserted deterministically without a live model. The
+scripted model and the real-engine builder live in the shared `ScriptedAgent` test fixture. Read a trace
+next to its diagram and the picture becomes executable.
+
+| Lifecycle / branch | Diagram above | Golden-trace test (method) | What it asserts |
+| --- | --- | --- | --- |
+| edit → verify → commit (happy path) | §1 | `GoldenTraceWorkflowTest.editStageCommitTrace` | the file is edited and the commit lands on HEAD (dispatch), the permission gate returns `ALLOW` per mutating tool, the pre/stop hooks fire, and the git-verified edit-trust summary names the changed file |
+| plan mode (nothing executed) | §1 | `RecoveryTraceTest.planModeRecordsButDoesNotExecute` | a mutating call is gated to `RECORD_PLAN`; it never runs, and the answer carries the plan suffix |
+| invalid args → corrective feedback → retry | §1 | `RecoveryTraceTest.invalidArgsBecomeFeedbackThenRecover` | the first call yields `INVALID_ARGS …` (fed back, not executed); the model retries with valid args and succeeds |
+| duplicate-call guard | §1 | `RecoveryTraceTest.duplicateCallGuardStopsRepetition` | repeated identical calls trip the guard NOTE, execution is capped, and the run stops |
+| hook lifecycle (pre/post/stop) | §2 | `GoldenTraceWorkflowTest.editStageCommitTrace` | the `preToolUse` hook marker is written and the `stop` hook output is appended to the answer |
+| capability scoping (access-control denial) | §2 | `CapabilityScopingTraceTest.toolOutsideRoleScopeIsDeniedAndNotExecuted` | an out-of-scope tool returns `outside this caller's capability scope`, is audited, and does not execute, while the in-scope tool runs |
+| per-tenant rate limiting | §2 | `CapabilityScopingTraceTest.toolOverRateLimitReturnsRateLimited` | a tool over its limit returns `RATE_LIMITED` and does not execute |
+| MCP server lifecycle (discover + invoke) | §3 | `McpLiveIntegrationTest.discoversAndInvokesOverStdio` / `…OverHttp` | handshake → tools/resources/prompts discovery → `read_resource` and the `/mcp__server__prompt` slash command return server-rendered content (stdio self-skips without `node`) |
+| MCP prompt as a turn input | §3 | `GoldenTraceWorkflowTest.mcpPromptSlashCommandTrace` | a rendered MCP prompt reaches the model as the user turn |
+| MCP multi-server namespacing/routing | §3 | `McpLiveIntegrationTest.twoServersNamespaceToolsAndRoutePromptsIndependently` | two servers expose `<server>_<tool>` without collision and `/mcp__<server>__<prompt>` routes to the right server |
+| MCP streaming transport (terminating + unbounded SSE) | §3 | `McpLiveIntegrationTest.discoversAndInvokesOverStreamingSse` / `…consumesUnboundedKeepAliveSseStream` | a multi-event `text/event-stream` is consumed incrementally, skipping interim/keep-alive events to pick the JSON-RPC response |
+| subagent delegation (hand-off) | §3a | `SubAgentHandoffTraceTest.parentDelegatesToSubagentAndIncorporatesItsResult` | a parent delegates to a named subagent that runs its own nested loop; the subagent's tool runs and its answer returns into the parent transcript; the parent produces the final answer |
+
+### §3a. Subagent delegation lifecycle
+
+Delegation reuses the same engine: the parent calls a `delegate_agent` (or `delegate_research`) tool, whose
+executor runs `SubAgent.run(...)` — a *nested* `AgentEngine.run` with label `"sub"` and a scoped, read-only
+tool set. The subagent's noisy intermediate context stays in its own loop; only its final answer returns to
+the parent as the tool result.
+
+```mermaid
+sequenceDiagram
+    participant P as Parent loop
+    participant T as delegate_agent tool
+    participant Sub as SubAgent (nested engine.run "sub")
+    P->>T: tool_call delegate_agent{name, task}
+    T->>Sub: run(sub system prompt, task, scoped tools)
+    Sub->>Sub: its own tool calls + final answer
+    Sub-->>T: final answer only
+    T-->>P: tool result = sub's answer
+    P->>P: incorporate, produce final answer
+```
+
+These traces run fully offline (the scripted model removes the only live-server dependency); the
+MCP round-trip ones are CI/live (real Jackson) and self-skip without `node`. See `TESTING.md` cases
+557-568 for the run commands and per-assertion detail.
 
 ---
 
@@ -139,4 +188,6 @@ JSON-RPC) or an HTTP endpoint (`transport:"http"`, plain-JSON or single-event SS
 - `HookService.java` (+ call sites in `AgentEngine`/`AgentLoop`) — the hook lifecycle.
 - `McpManager.java` — the MCP client, transports, and prompt slash commands.
 - `docs/TRACE_EDIT.md` — a concrete end-to-end trace of a single edit.
-- `TESTING.md` cases 549-556 — how each of these is tested (including the live MCP integration test).
+- `ScriptedAgent.java` — the shared scripted-model + real-engine fixture behind the golden traces (§4).
+- `TESTING.md` cases 549-568 — how each branch is tested, including the live MCP integration test and the
+  golden-trace suite mapped in §4.

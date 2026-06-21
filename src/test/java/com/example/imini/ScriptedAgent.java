@@ -132,6 +132,7 @@ final class ScriptedAgent {
     static final class RoutingScriptedLlama extends ScriptedLlama {
         private final Map<String, List<Map<String, Object>>> scripts;
         private final Map<String, Integer> idx = new java.util.HashMap<>();
+        private final Map<String, List<Map<String, Object>>> lastByKey = new java.util.HashMap<>();
 
         RoutingScriptedLlama(Map<String, List<Map<String, Object>>> scripts) {
             super();
@@ -143,6 +144,7 @@ final class ScriptedAgent {
             String sys = systemOf(messages);
             for (Map.Entry<String, List<Map<String, Object>>> e : scripts.entrySet()) {
                 if (sys.contains(e.getKey())) {
+                    lastByKey.put(e.getKey(), messages);   // remember this agent's transcript
                     int i = idx.getOrDefault(e.getKey(), 0);
                     List<Map<String, Object>> script = e.getValue();
                     if (i >= script.size()) return answer("[no more scripted steps for " + e.getKey() + "]");
@@ -151,6 +153,20 @@ final class ScriptedAgent {
                 }
             }
             return answer("[no script matched system prompt]");
+        }
+
+        /** Tool-result contents the agent matching {@code key} most recently saw (its own sub-transcript). */
+        List<String> toolResultsFor(String key) {
+            List<String> out = new ArrayList<>();
+            List<Map<String, Object>> msgs = lastByKey.get(key);
+            if (msgs != null) {
+                for (Map<String, Object> m : msgs) {
+                    if ("tool".equals(m.get("role")) && m.get("content") != null) {
+                        out.add(String.valueOf(m.get("content")));
+                    }
+                }
+            }
+            return out;
         }
     }
 
