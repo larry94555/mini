@@ -36,6 +36,11 @@ public class GitInspector {
         return runGit(List.of("diff", "--stat"));
     }
 
+    /** {@code git diff --cached --stat}: the staged changes, for surfacing in the commit approval prompt. */
+    public String diffCachedStat() {
+        return runGit(List.of("diff", "--cached", "--stat"));
+    }
+
     /**
      * Snapshot the current working tree (tracked + untracked, honoring .gitignore) as a git tree object
      * and return its SHA, WITHOUT touching the user's index or working tree -- it stages into a throwaway

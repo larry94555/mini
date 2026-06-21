@@ -35,13 +35,14 @@ public class GitWriteTools {
 
     private final Sandbox sandbox;
     @Value("${agent.tool-timeout-seconds:60}") private int toolTimeoutSeconds;
+    @Value("${git.allow-push:false}") private boolean allowPush;
 
     public GitWriteTools(Sandbox sandbox) {
         this.sandbox = sandbox;
     }
 
     public List<Tool> all() {
-        return List.of(gitStage(), gitCommit(), gitBranch());
+        return List.of(gitStage(), gitCommit(), gitBranch(), gitPush());
     }
 
     // ---------------------------------------------------------------------
@@ -116,6 +117,29 @@ public class GitWriteTools {
         });
     }
 
+    public Tool gitPush() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("remote", strProp("Remote to push to (default 'origin')."));
+        props.put("branch", strProp("Branch to push (default: the current branch)."));
+        props.put("set_upstream", boolProp("Set the upstream tracking ref (git push -u). Default false."));
+        return new Tool("git_push",
+                "Push commits to a remote. DISABLED by default — set git.allow-push=true to enable, and the caller's "
+                        + "role must permit it. Mutating: requires approval. Off by default because it affects shared state.",
+                schema(props), true, args -> {
+            if (!allowPush) {
+                return "ERROR: git_push is disabled. Set git.allow-push=true to enable it (it is off by default "
+                        + "because pushing affects shared remote state).";
+            }
+            String remote = str(args, "remote");
+            String branch = str(args, "branch");
+            if (!remote.isBlank() && !isValidRemoteName(remote)) return "ERROR: invalid remote name '" + remote + "'.";
+            if (!branch.isBlank() && !isValidBranchName(branch)) return "ERROR: invalid branch name '" + branch + "'.";
+            String out = runGit(pushArgs(remote, branch, boolArg(args, "set_upstream", false)));
+            if (out.startsWith("ERROR")) return out;
+            return "Pushed.\n" + truncate(out, 4000);
+        });
+    }
+
     // ---------------------------------------------------------------------
     // Pure argv builders (static -> unit-testable without a repo)
     // ---------------------------------------------------------------------
@@ -156,6 +180,24 @@ public class GitWriteTools {
         if (name.startsWith("-")) return false;                 // not a flag
         if (name.contains("..") || name.endsWith("/") || name.endsWith(".lock")) return false;
         return name.matches("[A-Za-z0-9._/-]+");
+    }
+
+    /** git argv for push. {@code git push [-u] [remote] [branch]} (omitting blanks). */
+    public static List<String> pushArgs(String remote, String branch, boolean setUpstream) {
+        List<String> a = new ArrayList<>(List.of("push"));
+        if (setUpstream) a.add("-u");
+        if (remote != null && !remote.isBlank()) {
+            a.add(remote);
+            if (branch != null && !branch.isBlank()) a.add(branch);
+        }
+        return a;
+    }
+
+    /** Conservative remote-name validation (no whitespace/flags/metacharacters). */
+    public static boolean isValidRemoteName(String remote) {
+        if (remote == null || remote.isBlank()) return false;
+        if (remote.startsWith("-")) return false;
+        return remote.matches("[A-Za-z0-9._/-]+");
     }
 
     // ---------------------------------------------------------------------

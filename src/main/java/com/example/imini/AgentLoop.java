@@ -70,13 +70,16 @@ public class AgentLoop {
     private final AgentRegistry agents;
     private final MemoryStore memory;
     private final ContextManager context;
+    private final McpManager mcp;
+    private final java.util.Set<String> startedSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final HookService hooks;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AgentLoop(AgentEngine engine, ToolRegistry registry, SessionStore sessions,
                      ProjectContext project, InitService init, ContextRefService refs, SlashCommands slash, TodoStore todos, CheckRunner checks,
                      PlanStore plans, CheckSuggester suggester, RunRecorder recorder, GitInspector git,
                      PlanHistory history, SkillService skills, AgentRegistry agents, VisionSupport vision,
-                     MemoryStore memory, ContextManager context) {
+                     MemoryStore memory, ContextManager context, McpManager mcp, HookService hooks) {
         this.engine = engine;
         this.registry = registry;
         this.sessions = sessions;
@@ -96,6 +99,8 @@ public class AgentLoop {
         this.vision = vision;
         this.memory = memory;
         this.context = context;
+        this.mcp = mcp;
+        this.hooks = hooks;
     }
 
     private String systemPrompt() {
@@ -162,12 +167,36 @@ public class AgentLoop {
 
     /** Expand a /<skill-name> invocation to the skill body (logged on the trace), else slash.expand(). */
     private String expandCommandOrSkill(String message, String sessionId, RunSink sink) {
+        if (mcp.isPromptCommand(message)) {
+            sink.log("[mcp] prompt " + message.trim().split("\\s+")[0]);
+            String rendered = mcp.renderPromptCommand(message);
+            if (rendered != null && !rendered.isBlank()) return rendered;
+        }
         String invoked = skills.invokedSkillName(message, sessionId);
         if (invoked != null) {
             sink.log("[skill] invoked /" + invoked);
             return skills.expandInvocation(message, sessionId);
         }
         return slash.expand(message);
+    }
+
+    /** Help text including any MCP-prompt slash commands discovered from mcp.json. */
+    private String helpText() {
+        String base = slash.help();
+        String mcpHelp = mcp.promptCommandHelp();
+        return mcpHelp.isBlank() ? base : base + "\n\nMCP prompts (from mcp.json):\n" + mcpHelp;
+    }
+
+    /** Fire SessionStart hooks the first time we see a session; returns context to prepend (or ""). */
+    private String sessionStartContext(String sessionId, RunSink sink) {
+        if (sessionId == null || !hooks.hasSessionStartHooks()) return "";
+        if (!startedSessions.add(sessionId)) return "";   // already started
+        String ctx = hooks.runSessionStart(sessionId);
+        if (ctx != null && !ctx.isBlank()) {
+            sink.log("[hook:sessionStart] injected context (" + ctx.length() + " chars)");
+            return "<session-context>\n" + ctx + "\n</session-context>\n\n";
+        }
+        return "";
     }
 
     /** Inline @file/@directory references into the message and note what was attached on the trace. */
@@ -198,7 +227,7 @@ public class AgentLoop {
         org.slf4j.MDC.put("session", sessionId == null ? "" : sessionId);
         try {
             if (sink != null) sink.log("[mode] running in " + mode.name().toLowerCase());
-            if (slash.isHelp(userQuestion)) return slash.help();
+            if (slash.isHelp(userQuestion)) return helpText();
             if (project.isMemoryCommand(userQuestion)) return project.report();
             if (init.isInitCommand(userQuestion)) return init.runInit();
             if (skills.isSkillsCommand(userQuestion)) return skills.skillsReport(sessionId);
@@ -207,7 +236,7 @@ public class AgentLoop {
             if (agentReply != null) return agentReply;
             String forked = maybeForkedSkill(userQuestion, sessionId, sink);
             if (forked != null) return forked;
-            String question = withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
+            String question = sessionStartContext(sessionId, sink) + withRefs(expandCommandOrSkill(userQuestion, sessionId, sink), sink);
             if (shouldAutoPlan(systemPromptFor(question, sessionId), question, sink)) {
                 return runPlan(sessionId, question, mode, sink);
             }
@@ -222,7 +251,7 @@ public class AgentLoop {
     /** Multi-turn: continues (or starts) the conversation stored under sessionId. */
     public String chat(String sessionId, String userMessage, Mode mode, RunSink sink) throws Exception {
         if (sink != null) sink.log("[mode] running in " + mode.name().toLowerCase());
-        if (slash.isHelp(userMessage)) return slash.help();
+        if (slash.isHelp(userMessage)) return helpText();
         if (project.isMemoryCommand(userMessage)) return project.report();
         if (init.isInitCommand(userMessage)) return init.runInit();
         if (skills.isSkillsCommand(userMessage)) return skills.skillsReport(sessionId);

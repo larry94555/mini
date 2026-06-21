@@ -58,6 +58,8 @@ public class McpManager {
     // Discovered MCP resources/prompts (for introspection + tests). resource = {server,uri,name}; prompt = {server,name,description}.
     private final List<Map<String, Object>> resources = new ArrayList<>();
     private final List<Map<String, Object>> prompts = new ArrayList<>();
+    // Slash-command name (mcp__server__prompt) -> the prompt's callable tool, for /-dispatch.
+    private final Map<String, Tool> promptCommands = new LinkedHashMap<>();
 
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
@@ -69,8 +71,70 @@ public class McpManager {
     /** Discovered MCP resources across all servers (each: {server, uri, name}). */
     public List<Map<String, Object>> resources() { return resources; }
 
-    /** Discovered MCP prompts across all servers (each: {server, name, description}). */
+    /** Discovered MCP prompts across all servers (each: {server, name, description, command}). */
     public List<Map<String, Object>> prompts() { return prompts; }
+
+    /** True if the message is a slash invocation of a discovered MCP prompt (e.g. {@code /mcp__server__name ...}). */
+    public boolean isPromptCommand(String msg) {
+        String c = commandToken(msg);
+        return c != null && promptCommands.containsKey(c);
+    }
+
+    /**
+     * Render an MCP prompt slash command to its prompt text: parses {@code /mcp__server__name k=v k2=v2},
+     * calls {@code prompts/get} with the parsed arguments, and returns the rendered messages. Returns null
+     * if the message is not a known prompt command. The result becomes the prompt the model then runs on.
+     */
+    public String renderPromptCommand(String msg) {
+        String c = commandToken(msg);
+        if (c == null) return null;
+        Tool t = promptCommands.get(c);
+        if (t == null) return null;
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("arguments", parsePromptArgs(argString(msg)));
+        return t.executor.apply(args);
+    }
+
+    /** One-line help listing of the available MCP prompt slash commands (empty string if none). */
+    public String promptCommandHelp() {
+        if (promptCommands.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> p : prompts) {
+            sb.append("  /").append(p.get("command"));
+            Object d = p.get("description");
+            if (d != null && !String.valueOf(d).isBlank()) sb.append("  -- ").append(d);
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
+    /** Pure: the first token after a leading '/', or null if the message is not a slash command. */
+    static String commandToken(String msg) {
+        if (msg == null) return null;
+        String m = msg.trim();
+        if (!m.startsWith("/")) return null;
+        int sp = m.indexOf(' ');
+        return (sp < 0 ? m.substring(1) : m.substring(1, sp)).trim();
+    }
+
+    /** Pure: the argument string after the command token (everything after the first space), or "". */
+    static String argString(String msg) {
+        if (msg == null) return "";
+        String m = msg.trim();
+        int sp = m.indexOf(' ');
+        return sp < 0 ? "" : m.substring(sp + 1).trim();
+    }
+
+    /** Pure: parse {@code key=value} space-separated tokens into an arguments map (empty if none). */
+    static Map<String, Object> parsePromptArgs(String argStr) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (argStr == null || argStr.isBlank()) return out;
+        for (String tok : argStr.trim().split("\\s+")) {
+            int eq = tok.indexOf('=');
+            if (eq > 0) out.put(tok.substring(0, eq), tok.substring(eq + 1));
+        }
+        return out;
+    }
 
     /** Minimal JSON-RPC transport: stdio (child process) or streamable HTTP (POST to a URL). */
     interface Transport {
@@ -203,15 +267,20 @@ public class McpManager {
                 entry.put("server", name);
                 entry.put("name", pname);
                 entry.put("description", pdesc);
+                // Claude-Code-style slash command name: /mcp__<server>__<prompt>
+                String command = "mcp__" + sanitize(name) + "__" + sanitize(pname);
+                entry.put("command", command);
                 prompts.add(entry);
                 // Expose each prompt as a callable tool (the Claude-Code "/mcp__server__prompt" surface).
                 final String original = pname;
-                tools.add(new Tool(sanitize(name + "_prompt_" + pname),
+                Tool promptTool = new Tool(sanitize(name + "_prompt_" + pname),
                         "[MCP:" + name + " prompt] " + pdesc,
                         Map.of("type", "object", "properties",
                                 Map.of("arguments", Map.of("type", "object", "description", "Prompt arguments (optional)."))),
-                        false, true, callArgs -> getPrompt(t, name, original, callArgs)));
-                log.info("[mcp] " + name + " -> prompt " + pname);
+                        false, true, callArgs -> getPrompt(t, name, original, callArgs));
+                tools.add(promptTool);
+                promptCommands.put(command, promptTool);
+                log.info("[mcp] " + name + " -> prompt " + pname + " (/" + command + ")");
             }
         } catch (Exception e) {
             log.info("[mcp] " + name + " has no prompts (" + e.getMessage() + ")");
