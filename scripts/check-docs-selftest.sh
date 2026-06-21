@@ -88,7 +88,44 @@ codeC=$?
 set -e
 ck "$( [ "$codeC" -eq 0 ] && echo 1 || echo 0 )" "scenario C WARN_ONLY exits 0 despite breakage"
 
-rm -rf "$a" "$b" "$outA" "$outB" "$outC"
+# --- Scenario D: divergence-prone headings. Pin the documented slug behavior (consecutive punctuation
+#     collapses to one hyphen; underscores are dropped) so it is intentional and drift-protected. The
+#     anchors matching THIS slug are valid; the GitHub-style guesses (double hyphen, kept underscore) are
+#     correctly reported broken.
+dd="$(mktemp -d)"
+mkdir -p "$dd/scripts" "$dd/docs"
+cp "$SCRIPT" "$dd/scripts/check-docs.sh"
+printf '# tmp\n' > "$dd/README.md"
+cat > "$dd/docs/TARGET.md" <<'MD'
+# Target
+
+## C++ & Friends
+Body.
+
+## read_file Helper
+Body.
+MD
+cat > "$dd/docs/SOURCE.md" <<'MD'
+# Source
+Valid (this slug) [g1](TARGET.md#c-friends).
+Valid (this slug) [g2](TARGET.md#readfile-helper).
+GitHub-style guess, broken here [b1](TARGET.md#c--friends).
+GitHub-style guess, broken here [b2](TARGET.md#read_file-helper).
+MD
+outD="$(mktemp)"
+set +e
+sh "$dd/scripts/check-docs.sh" > "$outD" 2>&1
+codeD=$?
+set -e
+ck "$( [ "$codeD" -eq 1 ] && echo 1 || echo 0 )" "scenario D exits 1 (github-style guesses are broken here)"
+ndd="$(grep -c '\[BROKEN\]' "$outD" || true)"
+ck "$( [ "$ndd" -eq 2 ] && echo 1 || echo 0 )" "scenario D reports exactly 2 broken (got $ndd)"
+ck "$(grep -q 'c--friends' "$outD" && echo 1 || echo 0)" "scenario D flags the double-hyphen (collapse divergence)"
+ck "$(grep -q 'read_file-helper' "$outD" && echo 1 || echo 0)" "scenario D flags the kept-underscore divergence"
+ck "$(grep -q '#c-friends' "$outD" && echo 0 || echo 1)" "scenario D accepts the collapsed-hyphen slug"
+ck "$(grep -q 'readfile-helper' "$outD" && echo 0 || echo 1)" "scenario D accepts the dropped-underscore slug"
+
+rm -rf "$a" "$b" "$dd" "$outA" "$outB" "$outC" "$outD"
 
 echo
 if [ "$fails" -eq 0 ]; then

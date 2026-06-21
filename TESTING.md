@@ -4999,3 +4999,37 @@ contents) and a write-append-read sequence (`notes-eval.txt` → `line1`/`line2`
 scratch files at run time, so they add no fixture dependency (the fixture-coupling guard in case 581 is
 unaffected). **Verified offline:** all 12 cases parse and the new regex compiles + matches (4/4 in a
 throwaway harness); **passing** them needs the live agent + a capable model (they self-skip otherwise).
+
+---
+
+# Slug-limitations note + divergence guard, more deep links, run.sh check umbrella
+
+## 587. Slug divergence pinned + documented (scripts/check-docs.sh + selftest)
+
+- **Run:** `bash scripts/check-docs-selftest.sh` (or `./run.sh check`).
+- **What's new:** `check-docs.sh`'s `slug` helper now carries a "Slug limitations" note describing exactly
+  where it diverges from GitHub's anchor algorithm — consecutive removed punctuation / multiple hyphens
+  collapse to one hyphen here (GitHub keeps them), and underscores are dropped here (GitHub keeps them).
+  A new self-test **Scenario D** pins this: headings `C++ & Friends` and `read_file Helper` are linked with
+  both the slug this script produces (`#c-friends`, `#readfile-helper` — must resolve) and the GitHub-style
+  guesses (`#c--friends`, `#read_file-helper` — must be reported broken).
+- **Verified offline:** the self-test now makes 16 assertions, all passing; Scenario D fails if the
+  collapse/underscore behavior changes, so the divergence is intentional, visible, and drift-protected.
+  POSIX (`sh -n`/`dash -n` pass).
+
+## 588. More validated anchor deep links (docs only)
+
+`docs/CONCEPT_MAP.md`'s two "proven by golden traces" notes now deep-link
+`WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite` instead of referring to §4 by
+name, joining the links added earlier in `LEARNING_PATH.md`, `TRACE_TOUR.md`, and the walkthrough. Four
+living docs now carry the §4 anchor, all validated by `check-docs.sh`'s anchor check (case 582);
+`bash scripts/check-docs.sh` stays green.
+
+## 589. `./run.sh check` umbrella (run.sh)
+
+- **Run:** `./run.sh check`.
+- **Observe:** runs `scripts/check-docs.sh` then `scripts/check-docs-selftest.sh`, labels each stage
+  (`[1/2]`, `[2/2]`), and prints a combined `check: PASS`/`check: FAIL`, exiting non-zero if either fails —
+  matching the two CI gates with one command. `./run.sh help` lists it; an unknown subcommand still exits 2;
+  `./run.sh` with no argument still launches the app.
+- **Verified offline:** `sh -n run.sh` passes; `./run.sh check` runs both gates and reports PASS (exit 0).

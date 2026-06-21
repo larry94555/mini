@@ -190,7 +190,7 @@ No cloud API key is required.
 | `.githooks/` | Pre-commit guard: scripts stay executable + LF (`sh scripts/install-hooks.sh` to enable) |
 | `scripts/git-mark-exec.sh` | One-shot: mark all scripts executable in git (`100755`) |
 | `scripts/check-docs.sh` | Fail if README/docs reference a test class, `.java` file, TESTING case, relative Markdown link, or intra-repo `#anchor` heading that doesn't exist (`WARN_ONLY=1` to report-only). Run it with `./run.sh check-docs` (`./run.sh help` lists subcommands); also runs in CI |
-| `scripts/check-docs-selftest.sh` | Regression guard for `check-docs.sh`'s anchor/slug logic: runs the real checker against fixture docs with tricky headings + known-good/known-bad anchors and asserts the outcome; runs in CI |
+| `scripts/check-docs-selftest.sh` | Regression guard for `check-docs.sh`'s anchor/slug logic: runs the real checker against fixture docs with tricky headings + known-good/known-bad anchors (including the documented GitHub-divergence cases) and asserts the outcome; runs in CI. Run both gates locally with `./run.sh check` |
 | `scripts/pin-maven-checksum.sh` | Re-pin the wrapper's Maven SHA-512 after a version bump |
 | `mvnw` / `mvnw.cmd` / `.mvn/` | Maven wrapper — build with no system Maven installed |
 

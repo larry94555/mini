@@ -8,22 +8,33 @@ cd -- "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 #   ./run.sh                       # build + start the app (default)
 #   ./run.sh check-docs            # validate docs references + links (exit 1 on breakage)
 #   WARN_ONLY=1 ./run.sh check-docs  # report only
+#   ./run.sh check                 # run check-docs + its self-test (matches the two CI gates)
 #   ./run.sh help                  # show this list
 case "${1:-}" in
   "") : ;;  # no subcommand -> fall through to the launcher
   check-docs) exec sh scripts/check-docs.sh ;;
+  check)
+    rc=0
+    echo "[1/2] docs reference + link integrity"
+    sh scripts/check-docs.sh || rc=1
+    echo "[2/2] anchor/slug self-test"
+    sh scripts/check-docs-selftest.sh || rc=1
+    echo "----------------------------------------"
+    if [ "$rc" -eq 0 ]; then echo "check: PASS"; else echo "check: FAIL"; fi
+    exit "$rc" ;;
   help|-h|--help)
     cat <<'USAGE'
 imini run.sh -- usage:
   ./run.sh                build and start imini (default; needs Java, Maven/wrapper, optionally llama-server)
   ./run.sh check-docs     validate that docs references and Markdown links resolve (the gate CI runs)
                           set WARN_ONLY=1 to report problems without failing
+  ./run.sh check          run check-docs plus its anchor/slug self-test (both CI gates), combined pass/fail
   ./run.sh help           show this message
 USAGE
     exit 0 ;;
   *)
     echo "run.sh: unknown subcommand '$1'." >&2
-    echo "Try './run.sh help', './run.sh check-docs', or './run.sh' (no argument) to start the app." >&2
+    echo "Try './run.sh help', './run.sh check', './run.sh check-docs', or './run.sh' (no argument) to start the app." >&2
     exit 2 ;;
 esac
 
