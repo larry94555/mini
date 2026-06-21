@@ -630,14 +630,22 @@ public class AgentController {
 
     /** Recent SLO digests (newest-first), from the persisted history. Admin only. */
     @GetMapping("/admin/alerts/slo-digest/history")
-    public List<Map<String, Object>> adminAlertsSloDigestHistory(
+    public ResponseEntity<?> adminAlertsSloDigestHistory(
             @RequestParam(name = "limit", defaultValue = "20") int limit,
+            @RequestParam(name = "format", defaultValue = "json") String format,
             @RequestParam(name = "from", defaultValue = "") String from,
             @RequestParam(name = "to", defaultValue = "") String to,
             @RequestParam(name = "days", defaultValue = "0") int days) {
         requireAdmin();
         long[] r = dateRangeMs(from, to, days);
-        return alertSink.sloDigestHistory(Math.max(1, Math.min(200, limit)), r[0], r[1]);
+        List<Map<String, Object>> rows = alertSink.sloDigestHistory(Math.max(1, Math.min(200, limit)), r[0], r[1]);
+        if ("csv".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok()
+                    .header("Content-Type", "text/csv")
+                    .header("Content-Disposition", "attachment; filename=\"imini-digest-history.csv\"")
+                    .body(AlertSink.digestHistoryCsv(rows));
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(rows);
     }
 
     /** Resolve from/to (ISO yyyy-MM-dd) or a trailing days window into [fromMs, toMs] epoch-ms bounds. */

@@ -4422,3 +4422,26 @@ These build on the setup above (app running, second terminal for `ask.bat`/`chat
 - **Observe:** with an SLO target present, the window-ratio trend draws the dashed reference line
   (`stroke-dasharray`); the live rebuild keeps the target on the window-ratio trend
   (`metricTrend(...,'window_ratio',true)`) but not on budget (`...,'budget_remaining',false`).
+
+---
+
+# Digest history CSV, quick-range buttons, CSV download links
+
+## 534. Digest history CSV export (AlertDigestHistoryCsvQuickRangeDownloadTest)
+
+- **Run:** `./mvnw -Dtest=AlertDigestHistoryCsvQuickRangeDownloadTest test`.
+- **Observe:** `digestHistoryCsv` emits `time,posted,mode,window_ratio,delivery_success,budget_remaining,summary`
+  with RFC-4180 quoting; empty input is header-only. Endpoint: `GET /admin/alerts/slo-digest/history?format=csv`
+  (JSON remains default; honors `from`/`to`/`days`).
+
+## 535. Quick-range buttons (AlertDigestHistoryCsvQuickRangeDownloadTest + node)
+
+- **Observe:** the overview date-picker renders 24h/7d/30d buttons wired to `quickRange(days)`, which sets the
+  from/to inputs to the trailing window and calls `applyDigestRange()`. (JS syntax-checked + exercised with
+  `node`.)
+
+## 536. CSV download links (AlertDigestHistoryCsvQuickRangeDownloadTest + node)
+
+- **Observe:** "History CSV" and "Audit CSV" links call `downloadDigestCsv(kind)`, which builds
+  `/admin/alerts/slo-digest/history` or `/admin/alerts/digest-audit` with `?format=csv` plus the current
+  from/to, and navigates to it. (URL building verified with `node`.)

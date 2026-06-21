@@ -1666,6 +1666,18 @@ public class AlertSink {
         }
     }
 
+    /** Pure: CSV of digest history rows (header: time,posted,mode,window_ratio,delivery_success,budget_remaining,summary). */
+    static String digestHistoryCsv(List<Map<String, Object>> rows) {
+        StringBuilder sb = new StringBuilder("time,posted,mode,window_ratio,delivery_success,budget_remaining,summary\n");
+        if (rows != null) for (Map<String, Object> r : rows) {
+            sb.append(csvCell(r.get("time"))).append(',').append(csvCell(r.get("posted"))).append(',')
+              .append(csvCell(r.get("mode"))).append(',').append(csvCell(r.get("window_ratio"))).append(',')
+              .append(csvCell(r.get("delivery_success"))).append(',').append(csvCell(r.get("budget_remaining"))).append(',')
+              .append(csvCell(r.get("summary"))).append('\n');
+        }
+        return sb.toString();
+    }
+
     /** Pure: CSV of digest audit rows (header: time,user,action,target,outcome). */
     static String digestAuditCsv(List<Map<String, Object>> rows) {
         StringBuilder sb = new StringBuilder("time,user,action,target,outcome\n");
