@@ -24,7 +24,10 @@ No cloud API key is required.
 - What imini deliberately leaves out (and where you'd go next): [`docs/WHATS_NOT_INCLUDED.md`](docs/WHATS_NOT_INCLUDED.md)
 - Recursive Language Models — concept note (why imini doesn't use them, when they fit): [`docs/RECURSIVE_LANGUAGE_MODELS.md`](docs/RECURSIVE_LANGUAGE_MODELS.md)
 - Feature tests and manual scenarios: [`TESTING.md`](TESTING.md)
-- Future work: [`ROADMAP.md`](ROADMAP.md)
+- Future work — start with the **"Next PR — decision procedure"** block at the top, which ranks the
+  remaining high-value, high-frequency workflow gaps for a human or an AI to pick up:
+  [`ROADMAP.md`](ROADMAP.md)
+- Full completed-work history (moved out of the roadmap): [`docs/HISTORY.md`](docs/HISTORY.md)
 
 ## What this project teaches
 

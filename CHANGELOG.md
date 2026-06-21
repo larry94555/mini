@@ -7,5 +7,5 @@ tags `vX.Y.Z` -- which triggers the release and image-publish workflows.
 
 ## [0.2.0] - baseline
 
-- Established baseline for automated changelog/versioning. Prior history is in `ROADMAP.md`
-  ("Recently completed").
+- Established baseline for automated changelog/versioning. Prior history is in
+  [`docs/HISTORY.md`](docs/HISTORY.md) (moved out of `ROADMAP.md`).
