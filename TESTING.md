@@ -5137,3 +5137,35 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   real classes confirms the same (disabled == `isWithin(default)`, Sandbox/Permission wiring, add/remove
   semantics). Cross-platform note: confinement delegates to `isWithin` (`Path.resolve().normalize()
   .startsWith()`), so Windows drive-letter/case rules come from the JVM; offline tests run on POSIX.
+
+---
+
+# Track B PR #2 — grant/revoke tools (always-gated) + /admin/roots
+
+## 599. grant/revoke are never auto-approved; ordinary tools still are (WorkspaceRootToolsTest)
+
+- **Run:** `./mvnw -Dtest=WorkspaceRootToolsTest test`.
+- **`grantIsNeverAutoApprovedButOrdinaryToolsAre`:** `PermissionService.decide` in `AUTO` mode returns
+  `ALLOW` ("auto-approved") for ordinary mutating tools (`write_marker`, `git_commit`) — so existing golden
+  traces are unaffected — but for `grant_workspace_root`/`revoke_workspace_root` it does **not** return
+  `ALLOW`; they route to the approval path (`ALWAYS_CONFIRM`).
+- **`grantRecordsInPlanModeAndIgnoresAutoApproveFlag`:** in `PLAN` mode a grant returns `RECORD_PLAN`; with
+  the global `autoApprove` flag on, a grant is still not auto-approved while an ordinary tool is.
+- **Verified offline:** `System.in` is pointed at EOF before constructing `PermissionService`, so the
+  console approval path returns `DENY` rather than blocking; a throwaway harness confirms the same routing
+  (15/15).
+
+## 600. grant/revoke executors honor access, audit, and the disabled flag (WorkspaceRootToolsTest)
+
+- **`grantAndRevokeExecutorsHonorAccessAndAudit`:** both tools are `mutating`; `grant_workspace_root` with
+  `access=read` makes the path readable but not writable; `revoke_workspace_root` removes it; a relative
+  path is rejected (absolute required). Each decision is written to the `AuditLog`.
+- **`grantReportsWhenMultiRootDisabled`:** with `agent.multi-root.enabled=false`, a grant reports that
+  multi-root is disabled and adds nothing.
+
+## 601. GET /admin/roots lists the registry (read-only)
+
+- **Endpoint:** `GET /admin/roots` (admin) returns `{enabled, default, roots:[{id, path, access}]}` — a
+  read-only view of the current `WorkspaceRoots` registry for visibility. Wired in `AgentController`;
+  compiles against the full app (127 main classes). (Endpoint body is a straight registry read; the registry
+  logic itself is covered by cases 596-600.)

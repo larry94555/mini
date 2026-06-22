@@ -81,6 +81,13 @@ public class PermissionService {
   private Path root;
 
   /**
+   * Tools that must always go through human approval — never auto-approved (even in {@code auto} mode) and
+   * never satisfied by an allow rule. Granting/revoking a workspace root is a trust decision.
+   */
+  static final java.util.Set<String> ALWAYS_CONFIRM =
+      java.util.Set.of("grant_workspace_root", "revoke_workspace_root");
+
+  /**
    * Track B workspace-roots registry. Optional: injected in production, null when {@code PermissionService}
    * is constructed directly (tests), in which case write confinement falls back to the single {@link #root}.
    */
@@ -140,6 +147,17 @@ public class PermissionService {
     }
     if (confine && writesOutsideRoot(tool, args)) {
       return new Decision(Kind.DENY, "target path is outside the workspace (" + root + ")");
+    }
+    // Always-confirm tools (e.g. granting a new workspace root) are a trust decision: they are NEVER
+    // auto-approved and never satisfied by an allow rule. In plan mode they still record; otherwise they
+    // route to the human approval path regardless of auto/ask. A deny rule above can still block them.
+    if (ALWAYS_CONFIRM.contains(tool)) {
+      if (mode == Mode.PLAN) {
+        return new Decision(Kind.RECORD_PLAN, null);
+      }
+      return "remote".equalsIgnoreCase(promptMode)
+          ? decideRemote(sessionId, tool, args)
+          : promptConsole(sessionId, tool, args);
     }
     if (matches(allow, tool, args) || matches(rememberedFor(sessionId), tool, args)) {
       return new Decision(Kind.ALLOW, "allowed by rule");

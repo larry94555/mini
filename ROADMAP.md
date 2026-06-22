@@ -80,11 +80,13 @@ plus `list_dir`.
    root (CWD) is always present and `READ_WRITE`. `Sandbox`/`PermissionService`/`RetrievalService` consult the
    registry instead of a single field. New config `agent.multi-root.enabled` (default **false**).
 
-2. **Approval-gated root grants.** A `grant_workspace_root` tool (mutating, always gated — never auto-approved
+2. **Approval-gated root grants.** ✅ **Done (PR #2).** A `grant_workspace_root` tool (mutating, always gated — never auto-approved
    even in `AUTO`) that requests the user authorize an absolute path at a given access level. On approval the
    root joins the registry for the session, is written to `AuditLog`, and shows in the approval UI with the
    path, access level, and (for read) a one-line listing preview. A matching `POST /admin/roots` +
-   `revoke_workspace_root`. Reads/writes outside *all* granted roots stay denied.
+   `revoke_workspace_root`. Reads/writes outside *all* granted roots stay denied. *(Implemented as the
+   always-gated tools + a read-only `GET /admin/roots`; grants are currently process-wide rather than truly
+   per-session — see PR #3+ for per-session scoping and the approval-UI preview.)*
 
 3. **`writesOutsideRoot` becomes `writesOutsideGrantedRoots`.** `PermissionService.decide` denies only when a
    path is outside *every* `READ_WRITE` root; a path inside a granted RW root proceeds to the normal approval
@@ -249,6 +251,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track B PR #2 — approval-gated grant/revoke root tools + `GET /admin/roots`: added `grant_workspace_root` (absolute `path` + `read`/`read_write` `access`) and `revoke_workspace_root` (`path`; never the default), both mutating and in a new `PermissionService.ALWAYS_CONFIRM` set so they are **never auto-approved** — even in `auto` mode or with `autoApprove` set they route to the human approval path (`plan` still records); a `deny` rule can still block them. Ordinary mutating tools (`write_marker`, `git_commit`, …) still auto-approve in `auto`, so existing golden traces are unaffected (verified offline). Grants/revokes are written to the `AuditLog`, report clearly when multi-root is disabled, and reject relative paths. A read-only `GET /admin/roots` lists the registry. Covered by `WorkspaceRootToolsTest` (4 methods) + extended `docs/MULTI_ROOT.md` with a worked TypeScript-port example. PR #3 (transactional `create_project`) is next.
 
 - Track B PR #1 — WorkspaceRoots registry + wiring (multi-root, default-closed): replaced the single workspace root with a `WorkspaceRoots` registry (id + absolute path + `READ`/`READ_WRITE` access; default root always present and `READ_WRITE`), behind `agent.multi-root.enabled` (default false) with optional `agent.multi-root.roots` seeds. `Sandbox`, `PermissionService`, and `RetrievalService` consult the registry via an optional injected field that falls back to the historical single-root logic when absent — so plain construction (and the test fixtures) are unchanged and, with multi-root disabled, behavior is byte-for-byte identical (verified: `canRead`/`canWrite` reduce to `isWithin(defaultRoot)`). A `READ` root permits reads but denies writes; a write inside a granted `READ_WRITE` root is not auto-allowed — it still goes through the normal approval. Covered by `WorkspaceRootsTest` (6 methods) + `docs/MULTI_ROOT.md`. The grant/scaffold tools are deliberately deferred to PR #2 (this PR is the registry + wiring only).
 

@@ -826,9 +826,14 @@ agent.multi-root.roots=/home/larry/github/mini|read, /home/larry/github/typescri
 
 The default root is always present and `read_write`; a `read` root permits reads but **denies writes**; a
 `read_write` root permits both (writes still go through the normal approval). Reads/writes outside every
-registered root remain denied. With multi-root disabled, the seeds are ignored and nothing changes. See
-[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the full model, access levels, and the (forthcoming)
-approval-gated grant flow.
+registered root remain denied. With multi-root disabled, the seeds are ignored and nothing changes.
+
+Once enabled, the agent can request roots at runtime with two **always-gated** tools (never auto-approved,
+even in `auto` mode): `grant_workspace_root` (args `path`, `access`) and `revoke_workspace_root` (arg
+`path`). Granting a root always prompts for approval and is written to the audit log; the default root can't
+be revoked. Administrators can inspect the live registry read-only at `GET /admin/roots`. See
+[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the full model, access levels, and a worked example of the
+grant flow for a cross-project port.
 
 ## Codebase navigation workflow
 
