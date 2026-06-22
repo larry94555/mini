@@ -28,6 +28,98 @@ OPS / HARDENING  = alerting, metrics, dashboards, auth, packaging, signing,
 **Build the highest unbuilt WORKFLOW FEATURE. Decline OPS/HARDENING work** unless the
 request is explicitly about trust, security, or operations.
 
+---
+
+## Track B — Real-world capability: multi-root project work (NEW DIRECTION)
+
+> Added because the harness, while a faithful *educational* model of the Claude Code workflow, is confined
+> to a single workspace and so cannot perform a realistic cross-project task such as:
+>
+> > "Create a project at `C:\Users\larry\github\typescript-project` that is the TypeScript equivalent of the
+> > code at `C:\Users\larry\github\mini`."
+>
+> The goal of Track B is to make the harness genuinely useful for real tasks **without** weakening its
+> safety model — every capability below is gated behind explicit, auditable, scoped user approval. This
+> raises educational impact: it shows how a coding agent safely escapes a single sandbox.
+
+### Why it is blocked today (honest current-state assessment)
+
+Verified against the source, three layers stop the task above:
+
+1. **Single workspace root.** `agent.workspace-root` (default = CWD) is read once by `Sandbox`,
+   `PermissionService`, and `RetrievalService`. There is exactly one root.
+2. **Reads are confined to it.** `Sandbox` (`sandbox.confine-reads=true`) and `PermissionService.isWithin`
+   reject reads outside the root, so the agent cannot even *read* the source project at path A if the
+   destination/working root is elsewhere.
+3. **Writes outside the root are hard-denied before approval.** `PermissionService.decide` calls
+   `writesOutsideRoot(...)` and returns `DENY` for `write_file`/`edit_file` whose `path` is outside the root
+   — this happens *before* any approval path, so even an authorizing user cannot currently permit it.
+
+There is also **no project-scaffolding capability** (creating a directory tree / many files atomically) and
+**no port/translation tooling**; today's file tools are single-file `read_file`/`write_file`/`edit_file`
+plus `list_dir`.
+
+### Design principles (safety is the feature)
+
+- **Default-closed.** Multi-root stays *off* unless explicitly enabled; with it off, behavior is byte-for-byte
+  what it is today.
+- **Explicit, scoped grants.** A second root is usable only after the user grants it, naming the exact
+  absolute path and the access (`read` vs `read-write`). Grants are per-session, audited, and expire.
+- **Approval at the boundary, per destination root.** Writing into a newly granted root requires an approval
+  whose payload shows the *root* and a *summary of the file set* (counts, total bytes, the tree), not just a
+  single path — so the user authorizes the project creation, not 200 invisible writes.
+- **Plan mode first.** A multi-file scaffold must be presentable as a plan (the full file manifest) under
+  `PLAN` mode and executed only after the user re-sends in `ask`/`auto`.
+- **Every cross-root action is auditable** in the existing `AuditLog`, and **capability-scoped** (a tenant/
+  role may be barred from multi-root entirely via `CapabilityService`).
+
+### Ranked changes (each shippable as its own approval-gated PR)
+
+1. **Multi-root model (`WorkspaceRoots` service).** Replace the single `root` with a registry of roots, each
+   with an id, absolute path, and access level (`READ`, `READ_WRITE`). The default root (CWD) is always
+   present and `READ_WRITE`. `Sandbox`/`PermissionService`/`RetrievalService` consult the registry instead of
+   a single field. New config `agent.multi-root.enabled` (default **false**).
+
+2. **Approval-gated root grants.** A `grant_workspace_root` tool (mutating, always gated — never auto-approved
+   even in `AUTO`) that requests the user authorize an absolute path at a given access level. On approval the
+   root joins the registry for the session, is written to `AuditLog`, and shows in the approval UI with the
+   path, access level, and (for read) a one-line listing preview. A matching `POST /admin/roots` +
+   `revoke_workspace_root`. Reads/writes outside *all* granted roots stay denied.
+
+3. **`writesOutsideRoot` becomes `writesOutsideGrantedRoots`.** `PermissionService.decide` denies only when a
+   path is outside *every* `READ_WRITE` root; a path inside a granted RW root proceeds to the normal approval
+   path (it is **not** auto-allowed merely by being granted — a destructive write still needs the mode's
+   approval). Reads are checked against `READ`-or-better roots.
+
+4. **Project-scaffold capability (`create_project` / `write_files`).** A tool that takes a manifest
+   (list of relative paths + contents under a destination root) and, under `PLAN`, returns the full tree +
+   byte counts as the plan; under `ask`/`auto`, performs the writes **transactionally** (all-or-nothing,
+   into a temp dir then atomic move, refusing to overwrite a non-empty destination unless the approval said
+   so). The approval payload summarizes the manifest, not individual files.
+
+5. **Port/translate workflow (the actual task).** With (1)-(4), "port A to TypeScript at B" becomes: grant
+   `read` on A and `read-write` on B → the agent reads A (existing nav/retrieval tools, now multi-root) →
+   produces a `create_project` manifest for B (the model does the language translation) → user approves the
+   manifest → transactional scaffold. Add an `init`-style profile/template hook so common scaffolds
+   (a TS project's `package.json`, `tsconfig.json`, `src/`, test config) are consistent. Translation quality
+   is the model's job; the harness guarantees the *safety envelope and the file operations*.
+
+6. **Tests + docs (mandatory, same PRs).** Golden traces for: a denied ungranted write; a granted-root write
+   that still requires approval; a `PLAN`-mode scaffold that records the manifest without writing; a
+   transactional scaffold that rolls back on a mid-way failure; capability-scoping that bars multi-root for a
+   role. A `docs/MULTI_ROOT.md` walkthrough and a `WHATS_NOT_INCLUDED.md` update. Cross-platform path
+   handling (Windows `C:\…` vs POSIX) must be covered, since the motivating task uses Windows paths.
+
+### Acceptance (the motivating task works safely)
+
+A user can run the TypeScript-port request; the agent **cannot** touch A or B until the user grants those
+roots with explicit access levels; the new-project write is presented as an approvable manifest (or a plan
+first); nothing is written outside a granted `READ_WRITE` root; every grant and write is audited; and with
+multi-root disabled the harness behaves exactly as it does today.
+
+---
+
+
 ### Build next (ranked; re-verify against README + source before starting)
 
 The three previous "Build next" workflow gaps — **git write workflow**, **hook lifecycle breadth**, and
@@ -50,8 +142,11 @@ Remaining candidates are genuinely optional — pursue only if a concrete need a
    plan/invalid-args/dup guard, capability/rate-limit denial, subagent hand-off, multi-server MCP routing).
    Further traces are pure regression guards for specific behaviours, not coverage gaps.
 
-If none of these clears the "high value AND frequent" bar for your goals, the workflow representation is
-**done** — prefer educational depth (docs, diagrams, eval scenarios) over inventing new surface.
+If none of these clears the "high value AND frequent" bar for your goals, the *single-workspace educational*
+workflow representation is **done**. The next frontier is **Track B (multi-root project work)** above —
+making the harness useful for real cross-project tasks while keeping every escape from the sandbox behind
+explicit, scoped, audited user approval. Track B is the priority direction when the goal is real-world
+usefulness rather than more single-root depth.
 
 ### Do NOT build next
 
@@ -154,6 +249,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- ROADMAP direction — Track B (multi-root project work): added a new roadmap track defining how the harness can safely perform real-world cross-project tasks (e.g. "create a TypeScript project at B that ports the code at A") behind explicit, scoped, audited user approvals — an honest current-state assessment of why it's blocked today (single workspace root; reads/writes confined; writes outside the root hard-denied before approval; no project-scaffold capability), safety design principles (default-closed, explicit per-path grants with access levels, approval at the destination-root boundary, plan-mode-first manifests, audited + capability-scoped), and six ranked approval-gated PRs (multi-root registry, grant/revoke-root tools, `writesOutsideGrantedRoots`, transactional `create_project`/`write_files`, the port workflow, and mandatory golden traces + docs incl. Windows path handling). Docs-only; no code change yet.
 
 - Hook-executable self-check + broadened workflow-script check + CONTRIBUTING.md: `.githooks/check-scripts.sh` now requires every tracked `.githooks/*` hook to be `100755` (and `git-mark-exec.sh` includes `pre-push`), so a hook can't silently lose its executable bit on an archive import — this also surfaces `.githooks/pre-push`, which had been committed `100644`; `scripts/check-docs.sh`'s workflow-script check now scans all `.github` YAML (incl. composite-action `action.yml`) and more invocation shapes (`cd && sh x.sh`, `./x.sh`); and a top-level `CONTRIBUTING.md` consolidates the local + CI gates into one "before you push" checklist (and is itself validated by the docs checker).
 
