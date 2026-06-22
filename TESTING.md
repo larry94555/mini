@@ -5101,3 +5101,39 @@ A top-level `CONTRIBUTING.md` consolidates the local gates (`sh scripts/install-
 `./run.sh check-docs`, `./mvnw test`) and the CI gates (`smoke.yml`, `ci.yml`, `eval-gate.yml`) into one
 checklist, and is linked from the README. It is included in the docs the checker scans (now 16 living docs),
 so its links and references are validated too; `bash scripts/check-docs.sh` stays green.
+
+---
+
+# Track B PR #1 — WorkspaceRoots registry + wiring
+
+## 596. WorkspaceRoots registry: disabled path is byte-identical (WorkspaceRootsTest)
+
+- **Run:** `./mvnw -Dtest=WorkspaceRootsTest test`.
+- **`disabledIsByteIdenticalSingleRoot`:** with `agent.multi-root.enabled=false`, the registry holds exactly
+  one `READ_WRITE` root (the default); `canRead`/`canWrite` reduce to `isWithin(defaultRoot, …)`; static
+  seeds in `agent.multi-root.roots` are ignored; and `add()` is a no-op (the feature cannot widen access
+  while off). Verified offline.
+- **`accessTokenParsing`:** `read_write`/`rw`/`read-write` → `READ_WRITE`; everything else (incl. null) →
+  `READ`.
+
+## 597. A READ root permits reads but not writes (WorkspaceRootsTest)
+
+- **`enabledReadRootPermitsReadNotWrite`:** with multi-root enabled and seeds `src|read, out|read_write`, the
+  registry has three roots; a path under the `READ` root is readable but not writable; a path under the
+  `READ_WRITE` root (and the default) is both; a path outside every root is neither. `remove(default)` is
+  refused; `remove(added)` works.
+
+## 598. Sandbox + PermissionService consult the registry, with a single-root null-fallback
+
+- **`sandboxNullFallbackMatchesSingleRoot`:** a `new Sandbox()` with no injected registry confines exactly as
+  the historical single-root code (write inside default OK; write outside denied).
+- **`sandboxWithRegistryHonorsAccessLevels`:** with the registry injected, `Sandbox.enforcePath` allows a
+  read under a `READ` root, denies a write under it, and allows a write under a `READ_WRITE` root.
+- **`permissionWritesOutsideGrantedRoots`:** `PermissionService.writesOutsideRoot` (null-fallback) treats a
+  write outside the single default root as outside; with the registry it is "outside" only when not within
+  any `READ_WRITE` root — and a write **inside** a granted RW root is *not* auto-allowed, it returns
+  `false` (not outside) so it proceeds to the normal approval path.
+- **Verified offline:** all six `WorkspaceRootsTest` methods pass; a 29-assertion throwaway harness over the
+  real classes confirms the same (disabled == `isWithin(default)`, Sandbox/Permission wiring, add/remove
+  semantics). Cross-platform note: confinement delegates to `isWithin` (`Path.resolve().normalize()
+  .startsWith()`), so Windows drive-letter/case rules come from the JVM; offline tests run on POSIX.

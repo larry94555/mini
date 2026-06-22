@@ -72,11 +72,19 @@ public class RetrievalService {
     private Path root;
     private Set<String> exts;
 
+    /** Track B registry (optional). When present, the index root is the registry's default root (same
+     * value as {@code agent.workspace-root}); multi-root indexing of additional roots is future work. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private WorkspaceRoots workspaceRoots;
+
     @PostConstruct
     public void init() {
         root = (workspaceRootCfg == null || workspaceRootCfg.isBlank()
                 ? Path.of(System.getProperty("user.dir"))
                 : Path.of(workspaceRootCfg)).toAbsolutePath().normalize();
+        if (workspaceRoots != null) {
+            root = workspaceRoots.defaultRoot();   // registry-sourced; identical value, single point of truth
+        }
         exts = new LinkedHashSet<>();
         for (String e : extensionsCfg.split(",")) if (!e.isBlank()) exts.add(e.trim().toLowerCase(Locale.ROOT));
         log.info("[retrieval] root=" + root + "; mode=" + (useEmbeddings ? "embeddings" : "lexical"));

@@ -87,6 +87,14 @@ public class Sandbox {
   private final List<String> allow = new ArrayList<>();
   private final List<String> deny = new ArrayList<>(DEFAULT_DENY);
 
+  /**
+   * The workspace-roots registry (Track B). Optional: injected in production, but left null when a
+   * {@code Sandbox} is constructed directly (e.g. in tests), in which case path confinement falls back to
+   * the single {@link #root}. Behavior with multi-root disabled is identical either way.
+   */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private WorkspaceRoots workspaceRoots;
+
   /** The resolved workspace root: absolute and normalized. */
   public Path root() {
     return root;
@@ -133,7 +141,15 @@ public class Sandbox {
       return null;
     }
 
-    if (!PermissionService.isWithin(root, path)) {
+    boolean ok;
+    if (workspaceRoots != null) {
+      // Multi-root aware: a write must land in a READ_WRITE root; a read in any registered root.
+      ok = isWrite ? workspaceRoots.canWrite(path) : workspaceRoots.canRead(path);
+    } else {
+      // Single-root fallback (identical to pre-registry behavior).
+      ok = PermissionService.isWithin(root, path);
+    }
+    if (!ok) {
       return "DENIED: '" + path + "' is outside the workspace (" + root + ").";
     }
 
