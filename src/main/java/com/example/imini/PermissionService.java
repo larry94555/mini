@@ -190,6 +190,16 @@ public class PermissionService {
       } catch (Exception ignore) {
         // best effort; never block approval on a diff failure
       }
+    } else if ("create_project".equals(tool)) {
+      // Summarize the manifest (root, file count, total bytes, tree) instead of dumping every file's content
+      // into the approval UI.
+      try {
+        enriched = new java.util.LinkedHashMap<>(args);
+        enriched.remove("files");
+        enriched.put("_summary", ProjectTools.summarize(args));
+      } catch (Exception ignore) {
+        // best effort
+      }
     }
 
     String argsJson;
