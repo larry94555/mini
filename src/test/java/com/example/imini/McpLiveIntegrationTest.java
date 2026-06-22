@@ -28,13 +28,11 @@ class McpLiveIntegrationTest {
 
     @Test
     void discoversAndInvokesOverStdio() throws Exception {
-        if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.discoversAndInvokesOverStdio", nodeAvailable())) return;
-        Path stub = locateStub();
-        assertNotNull(stub, "stub-server.js must be present in test resources");
+        if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.discoversAndInvokesOverStdio", McpStubFixture.available())) return;
 
         McpManager mcp = new McpManager();
         setTimeout(mcp, 30);
-        mcp.connect("nodestub", Map.of("command", "node", "args", List.of(stub.toString())));
+        mcp.connect("nodestub", McpStubFixture.command());
 
         assertDiscoveryAndInvocation(mcp, "nodestub");
     }
@@ -99,15 +97,13 @@ class McpLiveIntegrationTest {
 
     @Test
     void twoServersNamespaceToolsAndRoutePromptsIndependently() throws Exception {
-        if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.twoServersRoutePrompts", nodeAvailable())) return;
-        Path stub = locateStub();
-        assertNotNull(stub, "stub-server.js must be present in test resources");
+        if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.twoServersRoutePrompts", McpStubFixture.available())) return;
 
         McpManager mcp = new McpManager();
         setTimeout(mcp, 30);
         // Same stub program connected under two distinct server names.
-        mcp.connect("alpha", Map.of("command", "node", "args", List.of(stub.toString())));
-        mcp.connect("beta", Map.of("command", "node", "args", List.of(stub.toString())));
+        mcp.connect("alpha", McpStubFixture.command());
+        mcp.connect("beta", McpStubFixture.command());
 
         // Tools from each server are namespaced <server>_<tool>, so they don't collide.
         var toolNames = mcp.tools().stream().map(t -> t.name).toList();
@@ -284,25 +280,6 @@ class McpLiveIntegrationTest {
         java.util.Map<String, Tool> m = new java.util.LinkedHashMap<>();
         for (Tool t : mcp.tools()) m.put(t.name, t);
         return m;
-    }
-
-    private static boolean nodeAvailable() {
-        try {
-            Process p = new ProcessBuilder("node", "--version").redirectErrorStream(true).start();
-            return p.waitFor() == 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static Path locateStub() {
-        for (String c : new String[]{
-                "src/test/resources/mcp/stub-server.js",
-                "target/test-classes/mcp/stub-server.js"}) {
-            Path p = Path.of(c);
-            if (Files.exists(p)) return p.toAbsolutePath();
-        }
-        return null;
     }
 
     private static void setTimeout(McpManager mcp, int seconds) throws Exception {

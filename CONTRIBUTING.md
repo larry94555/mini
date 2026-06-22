@@ -53,5 +53,7 @@ Run the same gates CI runs:
   `IMINI_REQUIRE_MODEL`.
 - **Git-gated tests build an isolated repo via `GitRepoFixture`** (deterministic local identity, isolated from
   global/system git config) so they pass in a clean checkout, not only where git is pre-configured.
+- **Node/MCP-gated tests locate the stub via `McpStubFixture`** (loads `/mcp/stub-server.js` from the test
+  classpath, so it resolves regardless of working directory) and gate through `IntegrationGate("node", …)`.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

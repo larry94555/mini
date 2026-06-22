@@ -5373,3 +5373,30 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
 - Both `GitCommitApprovalFlowTest` and `GoldenTraceWorkflowTest`'s edit/stage/commit trace use it and remain
   gated through `IntegrationGate.proceed("git", …)`, so they self-skip when git is absent (or hard-fail when
   `IMINI_REQUIRE_GIT` is set) and genuinely pass when git is present.
+
+---
+
+# Node/MCP-gated tests — reliable stub location
+
+## 621. The MCP stub is located from the classpath (McpStubFixture)
+
+- **Convention:** Node/MCP-gated tests locate the bundled stub server through `McpStubFixture`, which loads
+  `/mcp/stub-server.js` from the **test classpath** (how Maven exposes `src/test/resources`) and copies it to
+  a temp file, falling back to known filesystem paths only if needed. This replaces the previous
+  CWD-relative `locateStub()` that returned null when the test wasn't launched from the module root.
+- `McpStubFixture.available()` (node present AND the stub resolvable) is the gate's availability probe;
+  `McpStubFixture.command()` returns the `mcp.connect(...)` config. Both `McpLiveIntegrationTest` (stdio
+  tests) and `GoldenTraceWorkflowTest.mcpPromptSlashCommandTrace` use it, still gated through
+  `IntegrationGate.proceed("node", …)`.
+
+## 622. Node/MCP traces: skip cleanly offline, assert in CI
+
+- With the stub unresolvable or node absent (e.g. a unit-only build), the node-gated tests **self-skip**
+  cleanly (`[integration] … (node) skipped`) rather than failing on a missing stub. In CI, with node
+  provisioned and the resource on the classpath, `available()` is true and they run (`… (node) ran`); the
+  opt-in `Integration tests` workflow sets `IMINI_REQUIRE_NODE=1` and `scripts/integration-coverage.sh`
+  **fails the build if any node test skipped**, so a silently-skipping MCP test is caught.
+- The stdio round trip was verified end to end: node runs the resolved stub and answers `initialize`,
+  `tools/list`, `prompts/list`, and `prompts/get` with valid JSON-RPC (the `review` prompt renders
+  "review A.java"). The full in-Java discovery assertions need a real JSON mapper at runtime, so under the
+  offline stub mapper the slash-command trace self-skips after connecting; it asserts fully in CI.
