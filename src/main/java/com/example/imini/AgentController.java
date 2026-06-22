@@ -81,6 +81,7 @@ public class AgentController {
     private final CostService cost;
     private final EvalHarness eval;
     private final CapabilityService capabilities;
+    private final WorkspaceRoots workspaceRoots;
     private final ToolRateLimiter toolRateLimiter;
     private final AlertSink alertSink;
     private final CsrfGuard csrf;
@@ -97,7 +98,8 @@ public class AgentController {
                            WorkspaceService workspace, MemoryStore memory, ContextManager context,
                            Database db, SessionReaper reaper,
                            Tracer tracer, CostService cost, EvalHarness eval, CapabilityService capabilities,
-                           ToolRateLimiter toolRateLimiter, AlertSink alertSink, CsrfGuard csrf) {
+                           ToolRateLimiter toolRateLimiter, AlertSink alertSink, CsrfGuard csrf,
+                           WorkspaceRoots workspaceRoots) {
         this.loop = loop;
         this.sessions = sessions;
         this.checkpoints = checkpoints;
@@ -134,6 +136,7 @@ public class AgentController {
         this.toolRateLimiter = toolRateLimiter;
         this.alertSink = alertSink;
         this.csrf = csrf;
+        this.workspaceRoots = workspaceRoots;
     }
 
     // ---- blocking ----------------------------------------------------------
@@ -565,6 +568,25 @@ public class AgentController {
     }
 
     /** JSON backing the overview page's live auto-refresh. Admin only. */
+    /** The current workspace-roots registry (Track B): id, path, and access level. Admin only, read-only. */
+    @GetMapping("/admin/roots")
+    public Map<String, Object> adminRoots() {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("enabled", workspaceRoots.enabled());
+        out.put("default", workspaceRoots.defaultRoot().toString());
+        java.util.List<Map<String, Object>> rs = new java.util.ArrayList<>();
+        for (WorkspaceRoots.Root r : workspaceRoots.roots()) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", r.id());
+            m.put("path", r.path().toString());
+            m.put("access", r.access().toString());
+            rs.add(m);
+        }
+        out.put("roots", rs);
+        return out;
+    }
+
     @GetMapping("/admin/alerts/overview.json")
     public Map<String, Object> adminAlertsOverviewJson() {
         requireAdmin();

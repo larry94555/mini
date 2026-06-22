@@ -6,9 +6,8 @@ one repo," but not for real cross-project tasks such as *"create a TypeScript pr
 the code at path A."* Track B adds a **registry of workspace roots** so the harness can, with explicit user
 approval, read a second project and scaffold a new one — without ever weakening the single-root default.
 
-This page describes the model and the access levels introduced by **PR #1 (the registry)**. The
-approval-gated grant tools and the transactional project scaffold are later, separately-gated PRs; see the
-"Roadmap" section below and `ROADMAP.md`.
+This page describes the registry model and access levels (**PR #1**) and the approval-gated grant/revoke
+tools (**PR #2**). The transactional project scaffold is a later, separately-gated PR; see `ROADMAP.md`.
 
 ## The model
 
@@ -65,22 +64,43 @@ For the motivating task you would grant `READ` on the source (`…\github\mini`)
 destination (`…\github\typescript-project`). The agent could then read the source and write the new project,
 but could not modify the source.
 
-## The approval flow (where this is going)
+## The grant tools (implemented in PR #2)
 
-PR #1 establishes the registry and its enforcement. The intended end-to-end flow, built in the following
-PRs, is:
+Two tools let the agent request additional roots, both **mutating** and **always gated** — they are listed in
+`PermissionService.ALWAYS_CONFIRM`, so they are **never auto-approved**: even in `auto` mode (or with the
+global `autoApprove` flag set) they route to the human approval path; in `plan` mode they record as a plan.
+A `deny` rule can still block them. Granting a new root is a trust decision, so it always asks.
 
-1. The user asks for a cross-project task.
-2. The agent calls an **approval-gated** `grant_workspace_root` tool naming the exact absolute path and
-   access level. This tool is **always** gated — it is never auto-approved, even in `auto` mode.
-3. On approval the root joins the session's registry and the grant is written to the audit log.
-4. Reads/writes outside every granted root stay denied; a write into a granted `READ_WRITE` root still goes
-   through the normal per-write approval.
-5. A transactional `create_project` tool presents the new project as a plan (the full file manifest) under
-   plan mode, and writes it all-or-nothing once approved.
+- **`grant_workspace_root`** — args `path` (absolute) and `access` (`read` or `read_write`, default `read`).
+  On approval it adds the root to the registry and writes the grant to the audit log. A relative path is
+  rejected; while multi-root is disabled it reports that and changes nothing.
+- **`revoke_workspace_root`** — args `path`. Removes a previously granted root (the default root cannot be
+  revoked). Also audited.
 
-Until those PRs land, the registry can be exercised through the `agent.multi-root.roots` config seeds (for
-local experimentation) and is covered by the offline tests described in `TESTING.md`.
+Administrators can inspect the live registry read-only at **`GET /admin/roots`**, which returns the enabled
+flag, the default root, and the list of `{id, path, access}` entries.
+
+### Worked example — the TypeScript port
+
+> "Create a project at `C:\Users\larry\github\typescript-project` that is the TypeScript equivalent of the
+> code at `C:\Users\larry\github\mini`."
+
+With `agent.multi-root.enabled=true`, the safe flow is:
+
+1. The agent calls `grant_workspace_root {path: "C:\\Users\\larry\\github\\mini", access: "read"}`. Because
+   this is an always-confirm tool, **you are prompted to approve** regardless of permission mode. You
+   approve; the source is now readable (not writable).
+2. The agent calls `grant_workspace_root {path: "C:\\Users\\larry\\github\\typescript-project", access:
+   "read_write"}`. **You approve again.** The destination is now readable and writable.
+3. The agent reads the source project (the read root) and produces the TypeScript equivalent. Each write
+   lands under the destination's `read_write` root — and still goes through the **normal** per-write approval
+   (being inside a granted root is not a blanket auto-approve).
+4. Any attempt to write back into the source `read` root is denied; any path outside both granted roots is
+   denied.
+5. `GET /admin/roots` shows both grants; the audit log records each `grant_workspace_root` decision.
+
+Until the transactional `create_project` scaffold lands (a later PR), step 3 is ordinary `write_file` calls,
+each individually approved. The grant tools and registry are what make those writes *possible and bounded*.
 
 ## Cross-platform paths
 
