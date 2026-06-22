@@ -96,17 +96,13 @@ class GoldenTraceWorkflowTest {
     @Test
     void mcpPromptSlashCommandTrace() throws Exception {
         if (!IntegrationGate.proceed("node", "GoldenTraceWorkflowTest.mcpPromptSlashCommand", McpStubFixture.available())) return;
+        if (!IntegrationGate.proceed("json", "GoldenTraceWorkflowTest.mcpPromptSlashCommand", JsonProbe.realMapperAvailable())) return;
 
         McpManager mcp = new McpManager();
         ScriptedAgent.setField(mcp, McpManager.class, "toolTimeoutSeconds", 30);
         mcp.connect("stub", McpStubFixture.command());
 
-        // MCP discovery parses the stub server's JSON-RPC responses; that needs a real JSON mapper at
-        // runtime. Under the offline stub mapper (no-op readTree) discovery yields nothing -> self-skip.
-        if (!mcp.isPromptCommand("/mcp__stub__review")) {
-            System.out.println("[skip] MCP discovery produced no prompt (offline stub JSON mapper; runs fully in CI)");
-            return;
-        }
+        assertTrue(mcp.isPromptCommand("/mcp__stub__review"), "MCP discovery produced the prompt command");
 
         String rendered = mcp.renderPromptCommand("/mcp__stub__review file=A.java");
         assertTrue(rendered != null && rendered.contains("review A.java"), "prompt rendered: " + rendered);
