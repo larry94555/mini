@@ -568,24 +568,22 @@ public class AgentController {
     }
 
     /** JSON backing the overview page's live auto-refresh. Admin only. */
-    /** The current workspace-roots registry (Track B): default root + per-session grants. Admin only. */
+    /** The current workspace-roots registry (Track B): default root + per-session grants with TTL. Admin only. */
     @GetMapping("/admin/roots")
     public Map<String, Object> adminRoots() {
         requireAdmin();
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("enabled", workspaceRoots.enabled());
         out.put("default", workspaceRoots.defaultRoot().toString());
-        Map<String, Object> sessions = new java.util.LinkedHashMap<>();
-        for (Map.Entry<String, java.util.List<WorkspaceRoots.Root>> e : workspaceRoots.bySession().entrySet()) {
-            java.util.List<Map<String, Object>> rs = new java.util.ArrayList<>();
-            for (WorkspaceRoots.Root r : e.getValue()) {
-                Map<String, Object> m = new java.util.LinkedHashMap<>();
-                m.put("id", r.id());
-                m.put("path", r.path().toString());
-                m.put("access", r.access().toString());
-                rs.add(m);
-            }
-            sessions.put(e.getKey(), rs);
+        Map<String, java.util.List<Map<String, Object>>> sessions = new java.util.LinkedHashMap<>();
+        for (WorkspaceRoots.GrantMeta g : workspaceRoots.allGrants()) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", g.id());
+            m.put("path", g.path().toString());
+            m.put("access", g.access().toString());
+            m.put("granted_at", g.grantedAt());
+            m.put("remaining_ttl_ms", g.remainingTtlMs()); // null when unlimited
+            sessions.computeIfAbsent(g.sessionId(), k -> new java.util.ArrayList<>()).add(m);
         }
         out.put("sessions", sessions);
         return out;
@@ -1221,7 +1219,21 @@ public class AgentController {
         return metrics.recentRunsForSession(Math.max(1, Math.min(200, limit)), sessionId);
     }
 
-    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
+    /** The grant/revoke history (newest first): the audit trail filtered to workspace-root actions. Admin only. */
+    @GetMapping("/admin/roots/audit")
+    public List<AuditLog.Entry> adminRootsAudit(
+            @RequestParam(name = "limit", defaultValue = "100") int limit) {
+        requireAdmin();
+        int cap = Math.max(1, Math.min(1000, limit));
+        List<AuditLog.Entry> out = new java.util.ArrayList<>();
+        out.addAll(audit.recent("", "grant_workspace_root", "", 0, cap));
+        out.addAll(audit.recent("", "revoke_workspace_root", "", 0, cap));
+        out.addAll(audit.recent("", "create_project", "", 0, cap));
+        out.sort((a, b) -> Long.compare(b.ts(), a.ts())); // newest first across all actions
+        return out.size() > cap ? out.subList(0, cap) : out;
+    }
+
+    /** Admin-only audit trail of privileged actions (newest first); filter by user/target. */
     @GetMapping("/audit")
     public List<AuditLog.Entry> audit(@RequestParam(name = "user", defaultValue = "") String user,
                                       @RequestParam(name = "action", defaultValue = "") String action,

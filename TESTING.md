@@ -5233,3 +5233,40 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `create_project`(write) → answer, now also asserting the grants are scoped to the run's session
   (`canWrite("other-session", dest)` is false). `docs/PORT_WALKTHROUGH.md` documents the same flow and its
   safety properties; `GET /admin/roots` now reports per-session grants (`{enabled, default, sessions:{…}}`).
+
+---
+
+# Track B — durable grant persistence
+
+## 609. Grants are durable across restarts (GrantPersistenceTest)
+
+- **Run:** `./mvnw -Dtest=GrantPersistenceTest test`.
+- **Offline design:** a `GrantStore` double backed by an in-memory list stands in for the SQLite-backed
+  store (no live database needed), injected into `WorkspaceRoots`; a settable clock (`nowOverride`) drives
+  TTL deterministically.
+- **`grantSurvivesAReload`:** a grant made in one registry instance is persisted and, after building a fresh
+  `WorkspaceRoots` over the same store and running `load()`, is honored again — and still scoped to its
+  session.
+- **`revokeRemovesThePersistedRow`:** `revoke_workspace_root` deletes the persisted row (a later reload would
+  not bring it back).
+
+## 610. TTL: expired grants are ignored and pruned (GrantPersistenceTest)
+
+- **`expiredGrantIsNotReloadedAndIsPruned`:** with a positive TTL, a grant older than the TTL is not reloaded
+  on startup and its row is pruned from the store.
+- **`nonExpiredGrantWithinTtlIsReloaded`:** a grant within the TTL is reloaded with its access level intact.
+- **`inMemoryGrantExpiresAtAccessTime`:** advancing the clock past the TTL makes an in-memory grant stop
+  granting access (ignored, not just unloaded).
+
+## 611. Disabled mode never touches the store (GrantPersistenceTest)
+
+- **`disabledModeNeverTouchesTheStore`:** with `agent.multi-root.enabled=false`, `load()` does not read the
+  table even when rows exist, `add` does not persist, and no save/delete is issued — behavior is
+  byte-identical to the pre-persistence single-workspace harness.
+
+## 612. Admin visibility: granted-at, TTL, and grant/revoke history
+
+- `GET /admin/roots` reports per-session grants with `granted_at` and `remaining_ttl_ms` (null when
+  unlimited), built from `WorkspaceRoots.allGrants()`. `GET /admin/roots/audit` returns the grant/revoke (and
+  `create_project`) history newest-first from the audit log. Both compile against the full app (129 main
+  classes); the underlying grant/TTL logic is covered by cases 609-611.

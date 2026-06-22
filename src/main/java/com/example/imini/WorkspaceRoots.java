@@ -57,10 +57,35 @@ public class WorkspaceRoots {
   @Value("${agent.multi-root.roots:}")
   private String rootsCfg;
 
+  /**
+   * Optional grant time-to-live, in seconds. {@code 0} (the default) means grants never expire. When &gt; 0,
+   * a grant older than the TTL is ignored (not reloaded on startup, and not honored at access time) and
+   * pruned from the store.
+   */
+  @Value("${agent.multi-root.grant-ttl:0}")
+  private long grantTtlSeconds;
+
+  /** Durable backing for grants. Optional: null in plain construction (tests) -> purely in-memory. */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private GrantStore grants;
+
+  /** Injectable clock for deterministic TTL tests; -1 means use the wall clock. */
+  private volatile long nowOverride = -1L;
+
+  private long now() {
+    return nowOverride >= 0 ? nowOverride : System.currentTimeMillis();
+  }
+
+  private long ttlMillis() {
+    return grantTtlSeconds > 0 ? grantTtlSeconds * 1000L : 0L;
+  }
+
   private Path defaultRoot;
   private Root defaultEntry;
   /** Additional roots granted at runtime, keyed by session id. The default root is global (not in here). */
   private final java.util.Map<String, List<Root>> sessionRoots = new java.util.HashMap<>();
+  /** When each session+path grant was made (epoch millis), for TTL and admin reporting. */
+  private final java.util.Map<String, java.util.Map<String, Long>> grantedAtMs = new java.util.HashMap<>();
   private int seq;
 
   private static final String DEFAULT_SESSION = "default";
@@ -79,6 +104,7 @@ public class WorkspaceRoots {
             .normalize();
 
     sessionRoots.clear();
+    grantedAtMs.clear();
     seq = 0;
     defaultEntry = new Root("default", defaultRoot, Access.READ_WRITE);
 
@@ -98,7 +124,41 @@ public class WorkspaceRoots {
       }
     }
 
+    // Reload durable grants (only when multi-root is enabled — disabled mode never touches the table).
+    if (enabled && grants != null) {
+      reloadGrants();
+    }
+
     log.info("[workspace-roots] multi-root=" + enabled + "; default=" + defaultRoot);
+  }
+
+  /** Reload non-expired persisted grants into the in-memory registry; prune expired rows. */
+  private synchronized void reloadGrants() {
+    long ttl = ttlMillis();
+    long cutoff = now() - ttl;
+    if (ttl > 0) {
+      grants.deleteOlderThan(cutoff); // prune expired rows from the store
+    }
+    int loaded = 0;
+    for (GrantStore.GrantRow row : grants.loadAll()) {
+      if (ttl > 0 && row.grantedAt() < cutoff) {
+        continue; // ignore expired (defensive; deleteOlderThan already removed it)
+      }
+      Path norm;
+      try {
+        norm = Path.of(row.path()).toAbsolutePath().normalize();
+      } catch (RuntimeException e) {
+        continue;
+      }
+      if (norm.equals(defaultRoot)) {
+        continue; // default is global, never persisted/reloaded
+      }
+      addInMemory(sid(row.sessionId()), norm, parseAccess(row.access()), row.grantedAt());
+      loaded++;
+    }
+    if (loaded > 0) {
+      log.info("[workspace-roots] reloaded " + loaded + " durable grant(s)");
+    }
   }
 
   static Access parseAccess(String token) {
@@ -141,11 +201,22 @@ public class WorkspaceRoots {
     if (norm.equals(defaultRoot)) {
       return defaultEntry; // default stays READ_WRITE; never downgraded
     }
-    List<Root> list = sessionRoots.computeIfAbsent(sid(sessionId), k -> new ArrayList<>());
+    long ts = now();
+    Root r = addInMemory(sid(sessionId), norm, access, ts);
+    if (grants != null) {
+      grants.save(sid(sessionId), norm.toString(), access == Access.READ_WRITE ? "read_write" : "read", ts);
+    }
+    log.info("[workspace-roots] session " + sid(sessionId) + " added root " + r.id() + " " + r.access() + " " + norm);
+    return r;
+  }
+
+  /** Insert into the in-memory maps only (no persistence) — shared by {@link #add} and reload. */
+  private synchronized Root addInMemory(String sessionId, Path norm, Access access, long grantedAt) {
+    List<Root> list = sessionRoots.computeIfAbsent(sessionId, k -> new ArrayList<>());
     list.removeIf(r -> r.path().equals(norm));
     Root r = new Root("r" + (++seq), norm, access);
     list.add(r);
-    log.info("[workspace-roots] session " + sid(sessionId) + " added root " + r.id() + " " + r.access() + " " + norm);
+    grantedAtMs.computeIfAbsent(sessionId, k -> new java.util.HashMap<>()).put(norm.toString(), grantedAt);
     return r;
   }
 
@@ -156,10 +227,29 @@ public class WorkspaceRoots {
       return false;
     }
     List<Root> list = sessionRoots.get(sid(sessionId));
-    return list != null && list.removeIf(r -> r.path().equals(norm));
+    boolean removed = list != null && list.removeIf(r -> r.path().equals(norm));
+    java.util.Map<String, Long> when = grantedAtMs.get(sid(sessionId));
+    if (when != null) {
+      when.remove(norm.toString());
+    }
+    if (removed && grants != null) {
+      grants.delete(sid(sessionId), norm.toString());
+    }
+    return removed;
   }
 
-  /** True if {@code candidate} resolves within the default root or any of this session's roots. */
+  /** True if the grant for this session+path has aged past the TTL (TTL=0 means never). */
+  private boolean expired(String sessionId, Path path) {
+    long ttl = ttlMillis();
+    if (ttl <= 0) {
+      return false;
+    }
+    java.util.Map<String, Long> when = grantedAtMs.get(sessionId);
+    Long ts = when == null ? null : when.get(path.toString());
+    return ts != null && now() - ts > ttl;
+  }
+
+  /** True if {@code candidate} resolves within the default root or any of this session's (non-expired) roots. */
   public synchronized boolean canRead(String sessionId, String candidate) {
     if (PermissionService.isWithin(defaultRoot, candidate)) {
       return true;
@@ -167,7 +257,7 @@ public class WorkspaceRoots {
     List<Root> list = sessionRoots.get(sid(sessionId));
     if (list != null) {
       for (Root r : list) {
-        if (PermissionService.isWithin(r.path(), candidate)) {
+        if (!expired(sid(sessionId), r.path()) && PermissionService.isWithin(r.path(), candidate)) {
           return true;
         }
       }
@@ -175,7 +265,7 @@ public class WorkspaceRoots {
     return false;
   }
 
-  /** True if {@code candidate} resolves within the default root or any {@code READ_WRITE} root of this session. */
+  /** True if {@code candidate} resolves within the default root or any {@code READ_WRITE} (non-expired) root. */
   public synchronized boolean canWrite(String sessionId, String candidate) {
     if (PermissionService.isWithin(defaultRoot, candidate)) {
       return true; // the default root is always READ_WRITE
@@ -183,7 +273,7 @@ public class WorkspaceRoots {
     List<Root> list = sessionRoots.get(sid(sessionId));
     if (list != null) {
       for (Root r : list) {
-        if (r.writable() && PermissionService.isWithin(r.path(), candidate)) {
+        if (r.writable() && !expired(sid(sessionId), r.path()) && PermissionService.isWithin(r.path(), candidate)) {
           return true;
         }
       }
@@ -208,6 +298,24 @@ public class WorkspaceRoots {
     for (java.util.Map.Entry<String, List<Root>> e : sessionRoots.entrySet()) {
       if (!e.getValue().isEmpty()) {
         out.put(e.getKey(), List.copyOf(e.getValue()));
+      }
+    }
+    return out;
+  }
+
+  /** A grant with its lifecycle metadata, for the admin view. */
+  public record GrantMeta(String sessionId, String id, Path path, Access access, long grantedAt, Long remainingTtlMs) {}
+
+  /** All additional grants across sessions with granted-at time and remaining TTL (null when unlimited). */
+  public synchronized List<GrantMeta> allGrants() {
+    long ttl = ttlMillis();
+    List<GrantMeta> out = new ArrayList<>();
+    for (java.util.Map.Entry<String, List<Root>> e : sessionRoots.entrySet()) {
+      java.util.Map<String, Long> when = grantedAtMs.getOrDefault(e.getKey(), java.util.Map.of());
+      for (Root r : e.getValue()) {
+        long ts = when.getOrDefault(r.path().toString(), 0L);
+        Long remaining = ttl > 0 ? Math.max(0L, ts + ttl - now()) : null;
+        out.add(new GrantMeta(e.getKey(), r.id(), r.path(), r.access(), ts, remaining));
       }
     }
     return out;
