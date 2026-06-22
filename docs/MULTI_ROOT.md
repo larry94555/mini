@@ -204,6 +204,20 @@ so an approved root survives a restart without re-approval.
 `GET /admin/roots` reports each grant's `granted_at` and `remaining_ttl_ms` (null when unlimited).
 `GET /admin/roots/audit` lists the grant/revoke (and `create_project`) history with timestamps and outcomes.
 
+### How durability is verified
+
+Two complementary layers, so the logic is covered offline *and* the real SQL is exercised:
+
+- **Offline unit tests** (`GrantPersistenceTest`) drive the persist/reload/TTL/revoke logic through an
+  in-memory `GrantStore` double and a settable clock. They run everywhere, including builds with no
+  sqlite-jdbc driver, and pin the behavior deterministically.
+- **A real-database integration test** (`GrantPersistenceIntegrationTest`) boots an actual SQLite database
+  on a tempfile, runs the migrations, and drives a real grant → reload → revoke → TTL-prune cycle, asserting
+  the rows persist, reload, disappear on revoke, and are pruned past the TTL via real SQL. It **self-skips**
+  when persistence can't initialize (no driver), so it never breaks an offline build, and runs for real in
+  CI. The opt-in `Integration tests` workflow (`.github/workflows/integration.yml`) provisions sqlite-jdbc
+  so it executes on demand.
+
 ## Where to read next
 
 - [`ROADMAP.md`](../ROADMAP.md) — the full Track B plan and the ranked, individually-gated PRs.

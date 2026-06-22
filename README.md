@@ -842,8 +842,10 @@ session that approved them — one run cannot widen another's access — while t
 Grants are **durable**: they persist to the database and reload on restart, with an optional
 `agent.multi-root.grant-ttl` (seconds; `0` = never expire) after which a grant is ignored and pruned;
 `GET /admin/roots` shows each grant's age and remaining TTL, and `GET /admin/roots/audit` shows the
-grant/revoke history. See [`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the model, access levels, security
-guarantees, and persistence lifecycle, and [`docs/PORT_WALKTHROUGH.md`](docs/PORT_WALKTHROUGH.md) for a
+grant/revoke history. Durability is covered both by offline unit tests (an in-memory store double) and by a
+real-SQLite integration test that runs in the opt-in `Integration tests` workflow. See
+[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the model, access levels, security guarantees, persistence
+lifecycle, and how durability is verified, and [`docs/PORT_WALKTHROUGH.md`](docs/PORT_WALKTHROUGH.md) for a
 worked end-to-end port example.
 
 ## Codebase navigation workflow
