@@ -5347,3 +5347,29 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `scripts/integration-coverage.sh`, which parses the `[integration] … ran|skipped` markers, prints a
   one-line dependency-coverage report, and fails if any required dependency was skipped. See
   `docs/MULTI_ROOT.md` -> "CI enforcement" and CONTRIBUTING.md -> "Conventions".
+
+---
+
+# Git-gated tests — isolated repos + robust approval enrichment
+
+## 619. Approval payload always carries the staged diff (PermissionService)
+
+- **Real fix:** `PermissionService.decideRemote` builds the approval payload by serializing the enriched args
+  (which include `_staged_diff` for `git_commit`/`git_stage`). Previously the fallback to a plain rendering
+  only triggered on a serialization *exception*; if the serializer returned null/blank, the enrichment was
+  silently dropped. It now also falls back when the serialized form is null or blank, so the payload always
+  carries the staged diff. Normal-case behavior (real JSON) is unchanged.
+- **Verified:** `GitCommitApprovalFlowTest.commitApprovalShowsStagedDiffThenCommits` now passes — the parked
+  approval payload contains `_staged_diff`, names the changed file, and keeps the commit message.
+
+## 620. Git-gated tests use an isolated, self-contained repo (GitRepoFixture)
+
+- **Run:** `./mvnw -Dtest=GitCommitApprovalFlowTest,GoldenTraceWorkflowTest test` (where git is present).
+- **Convention:** git-gated tests build their repo through `GitRepoFixture`, a shared helper that `git init`s a
+  temp repo with a deterministic local identity (`user.email`/`user.name`), isolates from ambient
+  configuration (`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` -> `/dev/null`), pins `init.defaultBranch=main`, and
+  disables terminal prompts — so the tests pass in a clean environment rather than only where git happens to
+  be pre-configured. `GitRepoFixture.available()` is the gate's availability probe.
+- Both `GitCommitApprovalFlowTest` and `GoldenTraceWorkflowTest`'s edit/stage/commit trace use it and remain
+  gated through `IntegrationGate.proceed("git", …)`, so they self-skip when git is absent (or hard-fail when
+  `IMINI_REQUIRE_GIT` is set) and genuinely pass when git is present.
