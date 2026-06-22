@@ -93,7 +93,7 @@ plus `list_dir`.
    path (it is **not** auto-allowed merely by being granted — a destructive write still needs the mode's
    approval). Reads are checked against `READ`-or-better roots.
 
-4. **Project-scaffold capability (`create_project` / `write_files`).** A tool that takes a manifest
+4. **Project-scaffold capability (`create_project` / `write_files`).** ✅ **Done (PR #3 of this track).** A tool that takes a manifest
    (list of relative paths + contents under a destination root) and, under `PLAN`, returns the full tree +
    byte counts as the plan; under `ask`/`auto`, performs the writes **transactionally** (all-or-nothing,
    into a temp dir then atomic move, refusing to overwrite a non-empty destination unless the approval said
@@ -251,6 +251,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track B PR #3 — transactional `create_project`: a new `ProjectTools.create_project` tool writes a whole project from a manifest (`root` + a list of `{path, content}` files) in one approval-gated step. It is mutating (normal approval flow); `plan_only=true` returns the tree + per-file byte counts without writing; the real write is transactional (staged in a temp dir, moved all-or-nothing, rolled back on a mid-move failure) and refuses to overwrite existing files unless `overwrite=true`. Every target must resolve inside a granted `read_write` root (`WorkspaceRoots.canWrite`); path escapes (`..`/absolute) are rejected; the approval payload is summarized (root, file count, total bytes, tree) in `PermissionService.decideRemote` rather than dumping content. Covered by `ProjectToolsTest` (6 methods) + a `CreateProjectTraceTest` golden trace driving the real engine through grant → plan → write, and documented in `docs/MULTI_ROOT.md` with a worked end-to-end port example. PR #5 (the port/translate workflow) and per-session grant scoping remain.
 
 - Track B PR #2 — approval-gated grant/revoke root tools + `GET /admin/roots`: added `grant_workspace_root` (absolute `path` + `read`/`read_write` `access`) and `revoke_workspace_root` (`path`; never the default), both mutating and in a new `PermissionService.ALWAYS_CONFIRM` set so they are **never auto-approved** — even in `auto` mode or with `autoApprove` set they route to the human approval path (`plan` still records); a `deny` rule can still block them. Ordinary mutating tools (`write_marker`, `git_commit`, …) still auto-approve in `auto`, so existing golden traces are unaffected (verified offline). Grants/revokes are written to the `AuditLog`, report clearly when multi-root is disabled, and reject relative paths. A read-only `GET /admin/roots` lists the registry. Covered by `WorkspaceRootToolsTest` (4 methods) + extended `docs/MULTI_ROOT.md` with a worked TypeScript-port example. PR #3 (transactional `create_project`) is next.
 

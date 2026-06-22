@@ -831,9 +831,14 @@ registered root remain denied. With multi-root disabled, the seeds are ignored a
 Once enabled, the agent can request roots at runtime with two **always-gated** tools (never auto-approved,
 even in `auto` mode): `grant_workspace_root` (args `path`, `access`) and `revoke_workspace_root` (arg
 `path`). Granting a root always prompts for approval and is written to the audit log; the default root can't
-be revoked. Administrators can inspect the live registry read-only at `GET /admin/roots`. See
-[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the full model, access levels, and a worked example of the
-grant flow for a cross-project port.
+be revoked. Administrators can inspect the live registry read-only at `GET /admin/roots`.
+
+To scaffold a whole project, the `create_project` tool writes a manifest (`root` + a list of
+`{path, content}` files) in one approval-gated, **transactional** step (staged in a temp dir, then moved
+all-or-nothing, with rollback on failure). Every target must be inside a granted `read_write` root; the
+approval shows a summary (root, file count, total bytes, tree) rather than raw content; pass `plan_only=true`
+to preview the tree first, and `overwrite=true` to replace existing files. See
+[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the manifest format and a worked end-to-end port example.
 
 ## Codebase navigation workflow
 

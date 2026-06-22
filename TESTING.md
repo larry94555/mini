@@ -5169,3 +5169,37 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   read-only view of the current `WorkspaceRoots` registry for visibility. Wired in `AgentController`;
   compiles against the full app (127 main classes). (Endpoint body is a straight registry read; the registry
   logic itself is covered by cases 596-600.)
+
+---
+
+# Track B PR #3 — transactional create_project
+
+## 602. create_project plan_only writes nothing (ProjectToolsTest)
+
+- **Run:** `./mvnw -Dtest=ProjectToolsTest test`.
+- **`planOnlyWritesNothing`:** with `plan_only=true`, `create_project` returns a `[plan]` listing the file
+  count and tree but creates no files (including nested paths). Verified offline.
+- **`manifestParsingAndSummary`:** `parseManifest` turns the `files` list into entries with correct byte
+  counts; `summarize` yields `{root, fileCount, totalBytes, tree}` for the approval payload.
+
+## 603. create_project writes transactionally and refuses overwrite (ProjectToolsTest)
+
+- **`successfulTransactionalScaffold`:** a 3-file manifest is written under a granted `read_write` root with
+  exact content; a second identical call is refused (`already exists`) unless `overwrite=true`.
+- **`rollbackWhenAMoveFails`:** `writeTransactionally` is forced to fail mid-move (the second file's parent
+  already exists as a regular file); the earlier file is rolled back, not left behind. Deterministic offline.
+- **`pathEscapeIsRejected`:** a `../escape.txt` entry is rejected before any write.
+
+## 604. create_project confinement to granted read_write roots (ProjectToolsTest)
+
+- **`deniedWhenDestinationOutsideGrantedReadWriteRoot`:** writing into a `READ` root is `DENIED` (nothing
+  written); writing into an ungranted root is `DENIED`; writing under the default `read_write` root succeeds.
+
+## 605. Golden trace: grant → plan → write (CreateProjectTraceTest)
+
+- **`grantThenPlanThenWrite`:** a scripted model drives the real `AgentEngine` in `AUTO` through
+  `grant_workspace_root` (read source) → `grant_workspace_root` (read_write destination) → `create_project`
+  (`plan_only`) → `create_project` (write) → answer. Asserts: both grants were **gated** (routed to approval
+  via a scripted console "y", not auto-approved despite `AUTO`); the registry gained a readable source and a
+  writable destination; `create_project` wrote the files with exact content; the source root was never
+  written to. Verified offline (17/17 across the four Track B test classes).

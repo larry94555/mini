@@ -102,6 +102,55 @@ With `agent.multi-root.enabled=true`, the safe flow is:
 Until the transactional `create_project` scaffold lands (a later PR), step 3 is ordinary `write_file` calls,
 each individually approved. The grant tools and registry are what make those writes *possible and bounded*.
 
+## Creating a whole project at once (`create_project`, PR #3)
+
+`create_project` writes an entire project from a **manifest** in one approval-gated, transactional step. It
+takes:
+
+- `root` — the absolute destination directory (must be inside a granted `read_write` root);
+- `files` — the manifest: a list of `{path, content}` entries, where `path` is relative to `root` (no
+  leading slash, no `..`);
+- `plan_only` (optional) — if true, write nothing and return the planned tree + per-file byte counts;
+- `overwrite` (optional) — if true, allow replacing files that already exist.
+
+Example manifest:
+
+```json
+{
+  "root": "C:\\Users\\larry\\github\\typescript-project",
+  "files": [
+    { "path": "package.json", "content": "{ \"name\": \"typescript-project\" }" },
+    { "path": "tsconfig.json", "content": "{ \"compilerOptions\": { \"strict\": true } }" },
+    { "path": "src/index.ts", "content": "export const greet = () => \"hi\";" }
+  ]
+}
+```
+
+**Safety properties:**
+
+- Every target resolves under `root`; a `path` that escapes via `..` or an absolute value is rejected.
+- Every target must be inside a granted `read_write` root (`WorkspaceRoots.canWrite`); otherwise the whole
+  call is denied and nothing is written.
+- It is **mutating** and goes through the normal approval flow. The approval payload is a **summary** — root,
+  file count, total bytes, and the tree — not every file's full content.
+- Writes are **transactional**: all files are staged into a temp directory first, then moved into place; a
+  failure mid-move rolls back the files already written. Existing files are refused unless `overwrite=true`.
+
+**Plan-first.** Call `create_project` with `plan_only=true` to preview the tree and byte counts, review it,
+then call again without `plan_only` to write. (In the harness's `plan` permission mode the engine also
+records the call without executing it; `plan_only` is the explicit, mode-independent preview.)
+
+### End-to-end: the TypeScript port
+
+1. `grant_workspace_root {path: "…\\mini", access: "read"}` → you approve. Source readable.
+2. `grant_workspace_root {path: "…\\typescript-project", access: "read_write"}` → you approve. Destination
+   writable.
+3. The agent reads the source and assembles a `create_project` manifest for the destination.
+4. `create_project {root: "…\\typescript-project", files: [...], plan_only: true}` → you review the tree.
+5. `create_project {root: "…\\typescript-project", files: [...]}` → approved → the project is written
+   transactionally. Any path outside the granted `read_write` root is refused; the source `read` root is
+   never written to.
+
 ## Cross-platform paths
 
 Roots are stored as absolute, normalized `Path` values, so confinement uses the running JVM's path rules:
