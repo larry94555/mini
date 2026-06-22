@@ -29,7 +29,7 @@ class GoldenTraceWorkflowTest {
 
     @Test
     void editStageCommitTrace() throws Exception {
-        if (!gitAvailable()) { System.out.println("[skip] git unavailable"); return; }
+        if (!IntegrationGate.proceed("git", "GoldenTraceWorkflowTest.editStageCommit", gitAvailable())) return;
 
         // --- a real repo with an initial commit ---
         Path repo = Files.createTempDirectory("imini-golden-");
@@ -100,7 +100,7 @@ class GoldenTraceWorkflowTest {
 
     @Test
     void mcpPromptSlashCommandTrace() throws Exception {
-        if (!nodeAvailable()) { System.out.println("[skip] node unavailable; MCP slash trace skipped"); return; }
+        if (!IntegrationGate.proceed("node", "GoldenTraceWorkflowTest.mcpPromptSlashCommand", nodeAvailable())) return;
         Path stub = locateStub();
         assertNotNull(stub, "stub-server.js present");
 

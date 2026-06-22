@@ -34,7 +34,7 @@ class WorkspaceBundleRoundTripTest {
             set(db, "enabled", true);
             set(db, "dbPath", dbFile.toString());
             db.init();
-            if (!db.available()) return; // skip when persistence is unavailable
+            if (!IntegrationGate.proceed("persistence", "WorkspaceBundleRoundTripTest", db.available())) return; // skip / hard-fail per IMINI_REQUIRE_PERSISTENCE
 
             SigningService signing = new SigningService();
             set(signing, "signingSecret", "test-shared-secret-1234567890"); // HMAC signing enabled

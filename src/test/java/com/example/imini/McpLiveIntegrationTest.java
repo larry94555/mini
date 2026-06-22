@@ -28,10 +28,7 @@ class McpLiveIntegrationTest {
 
     @Test
     void discoversAndInvokesOverStdio() throws Exception {
-        if (!nodeAvailable()) {
-            System.out.println("[skip] node not on PATH; skipping stdio MCP integration test");
-            return; // self-skip, mirroring the eval harness
-        }
+        if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.discoversAndInvokesOverStdio", nodeAvailable())) return;
         Path stub = locateStub();
         assertNotNull(stub, "stub-server.js must be present in test resources");
 
@@ -102,10 +99,7 @@ class McpLiveIntegrationTest {
 
     @Test
     void twoServersNamespaceToolsAndRoutePromptsIndependently() throws Exception {
-        if (!nodeAvailable()) {
-            System.out.println("[skip] node not on PATH; skipping multi-server MCP routing test");
-            return;
-        }
+        if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.twoServersRoutePrompts", nodeAvailable())) return;
         Path stub = locateStub();
         assertNotNull(stub, "stub-server.js must be present in test resources");
 

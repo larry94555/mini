@@ -220,16 +220,26 @@ Two complementary layers, so the logic is covered offline *and* the real SQL is 
 
 ### CI enforcement
 
-So the real-DB tests can't pass *green by skipping*, the gate honors an `IMINI_REQUIRE_PERSISTENCE`
-environment variable. When it is set (`1`/`true`/`yes`) and persistence is unavailable, the persistence-backed
-tests (`GrantPersistenceIntegrationTest`, `PersistenceRoundTripTest`, `MemoryStorePersistenceTest`) **fail**
-instead of self-skipping; when it is unset (the default everywhere else), they self-skip cleanly. The opt-in
-`Integration tests` workflow sets `IMINI_REQUIRE_PERSISTENCE=1` and additionally asserts each test printed its
-"ran against real SQLite" marker, so a missing sqlite-jdbc driver surfaces as a red build. To run the job's
-checks locally:
+So the dependency-gated tests can't pass *green by skipping*, each family routes its skip decision through a
+shared `IntegrationGate` keyed by a short dependency token. When the matching `IMINI_REQUIRE_<DEP>`
+environment variable is set (`1`/`true`/`yes`) and the dependency is unavailable, those tests **fail**
+instead of self-skipping; when it is unset (the default everywhere else), they self-skip cleanly. The
+switches:
+
+- `IMINI_REQUIRE_PERSISTENCE` — the SQLite-backed tests (`GrantPersistenceIntegrationTest`,
+  `PersistenceRoundTripTest`, `MemoryStorePersistenceTest`, `WorkspaceBundleRoundTripTest`);
+- `IMINI_REQUIRE_NODE` — the stdio-MCP tests (`McpLiveIntegrationTest`, the MCP slash-command golden trace);
+- `IMINI_REQUIRE_GIT` — the git-backed traces (`GitCommitApprovalFlowTest`, the edit/stage/commit trace);
+- `IMINI_REQUIRE_MODEL` — the live-model eval gate (the `Eval gate` workflow).
+
+Each gated test prints a one-line marker — `[integration] <label> (<dep>) ran` or `… (<dep>) skipped` — and
+the opt-in `Integration tests` workflow sets the persistence/node/git switches, then runs
+`scripts/integration-coverage.sh`, which parses those markers, prints a one-line dependency-coverage report,
+and fails if any required dependency was skipped. To run a family's check locally:
 
 ```bash
 IMINI_REQUIRE_PERSISTENCE=1 ./mvnw -Dtest=GrantPersistenceIntegrationTest test
+IMINI_REQUIRE_NODE=1 ./mvnw -Dtest=McpLiveIntegrationTest test
 ```
 
 ## Where to read next

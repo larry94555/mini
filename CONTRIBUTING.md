@@ -44,5 +44,12 @@ Run the same gates CI runs:
   validated; see [`scripts/check-docs.sh`](scripts/check-docs.sh) and
   [`docs/WORKFLOW_WALKTHROUGH.md` §4](docs/WORKFLOW_WALKTHROUGH.md#4-how-each-branch-is-proven-the-golden-trace-suite).
 - New behavior gets a `TESTING.md` case and, where it's control flow, a golden-trace test.
+- **Dependency-gated tests use the shared `IntegrationGate`.** A test that needs an external dependency
+  (SQLite, Node, git, a live model) calls `IntegrationGate.proceed("<dep>", "<label>", available)` instead of
+  a bare `if (!available) return;`. By default it self-skips when the dependency is missing; in CI, setting
+  `IMINI_REQUIRE_<DEP>=1` makes a missing dependency a hard failure. Each call prints an
+  `[integration] <label> (<dep>) ran|skipped` marker that `scripts/integration-coverage.sh` audits. The
+  switches today are `IMINI_REQUIRE_PERSISTENCE`, `IMINI_REQUIRE_NODE`, `IMINI_REQUIRE_GIT`, and
+  `IMINI_REQUIRE_MODEL`.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.
