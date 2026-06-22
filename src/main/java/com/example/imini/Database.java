@@ -131,7 +131,10 @@ public class Database {
             "CREATE TABLE alert_slo_route_buckets (route TEXT NOT NULL, day INTEGER NOT NULL, "
                     + "good INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY(route, day))",
             // small key/value store for alerting state that should survive restarts (e.g. the digest baseline)
-            "CREATE TABLE alert_meta (meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL)");
+            "CREATE TABLE alert_meta (meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL)",
+            // Track B: durable per-session workspace-root grants (reloaded on startup, optional TTL)
+            "CREATE TABLE workspace_grants (session_id TEXT NOT NULL, path TEXT NOT NULL, "
+                    + "access TEXT NOT NULL, granted_at INTEGER NOT NULL, PRIMARY KEY(session_id, path))");
 
     @Value("${persistence.enabled:true}") private boolean enabled;
     @Value("${persistence.db-path:.imini/imini.db}") private String dbPath;

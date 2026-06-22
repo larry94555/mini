@@ -183,6 +183,27 @@ Track B's guarantees, in one place:
 See [`docs/PORT_WALKTHROUGH.md`](PORT_WALKTHROUGH.md) for the end-to-end task and the golden trace that
 proves it.
 
+## Persistence and lifecycle
+
+Runtime grants are **durable**: each `grant_workspace_root` is written to a `workspace_grants` table in the
+existing SQLite database (keyed by session id + path, storing the access level and a granted-at timestamp),
+and `revoke_workspace_root` deletes that row. On startup the registry **reloads** every non-expired grant,
+so an approved root survives a restart without re-approval.
+
+- **Default root is never persisted.** It is global and always present, reconstructed from configuration on
+  every boot.
+- **Optional TTL.** Set `agent.multi-root.grant-ttl` (seconds; `0` = never expire). When positive, a grant
+  older than the TTL is **ignored** — not reloaded on startup *and* not honored at access time — and pruned
+  from the store (on reload and lazily as it is encountered).
+- **Best-effort.** Persistence never blocks an approval: if the database is unavailable the grant still
+  takes effect in memory for the current process, and a DB write failure is logged, not surfaced. The
+  trade-off is that an in-memory-only grant simply won't survive a restart.
+- **Disabled mode is untouched.** With `agent.multi-root.enabled=false` the registry reads and writes the
+  table **not at all** — behavior is byte-for-byte identical to the single-workspace harness.
+
+`GET /admin/roots` reports each grant's `granted_at` and `remaining_ttl_ms` (null when unlimited).
+`GET /admin/roots/audit` lists the grant/revoke (and `create_project`) history with timestamps and outcomes.
+
 ## Where to read next
 
 - [`ROADMAP.md`](../ROADMAP.md) — the full Track B plan and the ranked, individually-gated PRs.
