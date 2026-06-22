@@ -1,11 +1,10 @@
 name: Integration tests
 
 # OPT-IN integration gate. Unlike ci.yml (which runs the whole suite on every push/PR, where driver-gated
-# tests self-skip if a prerequisite is missing), this job exists to make the real-dependency paths explicit
-# and easy to run on demand: the real-SQLite durable-grants integration test plus the persistence
-# round-trips and the golden/eval traces. sqlite-jdbc and Node are provisioned so those tests actually run
-# instead of self-skipping. Trigger manually (workflow_dispatch) or by adding the "run-integration" label
-# to a PR.
+# tests self-skip if a prerequisite is missing), this job provisions the real dependencies (sqlite-jdbc via
+# Maven, Node, git) and REQUIRES them: each IMINI_REQUIRE_* switch turns a silent self-skip into a hard
+# failure, and a summary step asserts every required dependency was actually exercised. Trigger manually
+# (workflow_dispatch) or by adding the "run-integration" label to a PR.
 on:
   workflow_dispatch:
   pull_request:
@@ -21,10 +20,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-integration'
     runs-on: ubuntu-latest
     env:
-      # Turn a silent self-skip into a hard failure: if the persistence-backed tests can't reach a real
-      # SQLite database (e.g. sqlite-jdbc missing), they fail instead of passing green. CI must run them for
-      # real. Unset everywhere else, so offline/unit builds still self-skip cleanly.
+      # Require each provisioned dependency: an unavailable dep becomes a red build instead of a green skip.
+      # Unset everywhere else (ci.yml, local/offline), so those builds still self-skip cleanly.
       IMINI_REQUIRE_PERSISTENCE: "1"
+      IMINI_REQUIRE_NODE: "1"
+      IMINI_REQUIRE_GIT: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -41,19 +41,7 @@ jobs:
         run: chmod +x mvnw
       - name: Check docs reference integrity
         run: bash scripts/check-docs.sh
-      - name: Durable-grants real-SQLite integration test
-        run: ./mvnw -B -ntp -Dmaven.test.redirectTestOutputToFile=true -Dtest=GrantPersistenceIntegrationTest test
-      - name: Persistence round-trips (real SQLite)
-        run: ./mvnw -B -ntp -Dmaven.test.redirectTestOutputToFile=true "-Dtest=PersistenceRoundTripTest,MemoryStorePersistenceTest" test
-      - name: Assert the integration tests ran against real SQLite (not skipped)
-        run: |
-          set -e
-          for t in GrantPersistenceIntegrationTest PersistenceRoundTripTest MemoryStorePersistenceTest; do
-            if ! grep -rq "$t ran against real SQLite" target/surefire-reports/; then
-              echo "::error::$t did not run against real SQLite (marker missing — it self-skipped?)"
-              exit 1
-            fi
-          done
-          echo "All durable-persistence integration tests ran against real SQLite."
-      - name: Golden + eval traces and the full suite
-        run: ./mvnw -B -ntp test
+      - name: Run the full suite (redirect test output so the integration markers are captured)
+        run: ./mvnw -B -ntp -Dmaven.test.redirectTestOutputToFile=true test
+      - name: Dependency-coverage report (fail if any required dependency was skipped)
+        run: bash scripts/integration-coverage.sh

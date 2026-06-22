@@ -5318,3 +5318,32 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   missing sqlite-jdbc driver makes them fail instead of pass. The workflow also greps the surefire output for
   each test's "ran against real SQLite" marker, so a silent skip is caught even if the gate were bypassed.
   See `docs/MULTI_ROOT.md` -> "CI enforcement".
+
+---
+
+# Integration gate — generalized to all dependency families
+
+## 617. Per-dependency require-or-skip gate (IntegrationGateTest)
+
+- **Run:** `./mvnw -Dtest=IntegrationGateTest test` (offline; no real dependency needed).
+- **What it covers:** the generalized `IntegrationGate.decide(dep, label, available, required)` core used by
+  every dependency-gated test. Available always proceeds (and prints `[integration] <label> (<dep>) ran`);
+  unavailable + not-required self-skips (`… (<dep>) skipped`); unavailable + required throws an
+  `AssertionError` naming the correct `IMINI_REQUIRE_<DEP>` switch. Also checks the env-name mapping per
+  dependency (`persistence`/`node`/`git`/`model`), that nothing is required by default, and truthy parsing.
+
+## 618. The gate is applied to every dependency family
+
+- **persistence** (`IMINI_REQUIRE_PERSISTENCE`): `GrantPersistenceIntegrationTest`,
+  `PersistenceRoundTripTest`, `MemoryStorePersistenceTest`, `WorkspaceBundleRoundTripTest`.
+- **node** (`IMINI_REQUIRE_NODE`): `McpLiveIntegrationTest` (both stdio tests) and the MCP slash-command
+  golden trace in `GoldenTraceWorkflowTest`.
+- **git** (`IMINI_REQUIRE_GIT`): `GitCommitApprovalFlowTest` and the edit/stage/commit trace in
+  `GoldenTraceWorkflowTest`.
+- **model** (`IMINI_REQUIRE_MODEL`): the live-model `Eval gate` workflow.
+
+  With the switch unset (offline/unit builds) each test self-skips exactly as before; the opt-in
+  `Integration tests` workflow sets the persistence/node/git switches and runs
+  `scripts/integration-coverage.sh`, which parses the `[integration] … ran|skipped` markers, prints a
+  one-line dependency-coverage report, and fails if any required dependency was skipped. See
+  `docs/MULTI_ROOT.md` -> "CI enforcement" and CONTRIBUTING.md -> "Conventions".

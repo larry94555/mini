@@ -71,7 +71,7 @@ class GrantPersistenceIntegrationTest {
     Database db = null;
     try {
       db = open(dbFile);
-      if (!IntegrationGate.proceed("GrantPersistenceIntegrationTest", db.available())) {
+      if (!IntegrationGate.proceed("persistence", "GrantPersistenceIntegrationTest", db.available())) {
         return; // no sqlite driver -> skip (or hard-fail when IMINI_REQUIRE_PERSISTENCE is set)
       }
 

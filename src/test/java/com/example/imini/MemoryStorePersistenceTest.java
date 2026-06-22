@@ -54,7 +54,7 @@ class MemoryStorePersistenceTest {
         Database db = null;
         try {
             db = openDb(dbFile);
-            if (!IntegrationGate.proceed("MemoryStorePersistenceTest", db.available())) return; // skip / hard-fail per IMINI_REQUIRE_PERSISTENCE
+            if (!IntegrationGate.proceed("persistence", "MemoryStorePersistenceTest", db.available())) return; // skip / hard-fail per IMINI_REQUIRE_PERSISTENCE
 
             MemoryStore m = newStore(db);
             String owner = "local";

@@ -23,10 +23,7 @@ class GitCommitApprovalFlowTest {
 
     @Test
     void commitApprovalShowsStagedDiffThenCommits() throws Exception {
-        if (!gitAvailable()) {
-            System.out.println("[skip] git not on PATH; skipping commit approval-flow test");
-            return;
-        }
+        if (!IntegrationGate.proceed("git", "GitCommitApprovalFlowTest.commitApprovalShowsStagedDiff", gitAvailable())) return;
         Path repo = Files.createTempDirectory("imini-approve-");
         git(repo, "init", "-q");
         git(repo, "config", "user.email", "t@t");
