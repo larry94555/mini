@@ -265,7 +265,8 @@ sh scripts/pin-maven-checksum.sh   # downloads, hashes, rewrites distributionSha
 CI caches the wrapper's downloaded Maven (`actions/cache` on `.maven`, keyed to the wrapper properties), so
 the no-system-Maven path doesn't re-download on every run.
 
-**Contributor setup (one time).** Enable the repo's pre-commit guard so scripts can't silently lose their
+**Contributor setup (one time).** See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full "before you push"
+checklist. Enable the repo's git guards so scripts can't silently lose their
 executable bit or pick up Windows line endings:
 
 ```sh
@@ -277,7 +278,9 @@ The guard (`.githooks/pre-commit`) blocks a commit if a required script is not e
 fix. The same `install-hooks` step also enables a **pre-push guard** (`.githooks/pre-push`) that runs
 `./run.sh check` (the docs reference/link checker plus its anchor/slug self-test) and **blocks the push if
 either fails**, so doc and script breakage — including a workflow that points at an uncommitted script — is
-caught locally instead of in CI. Bypass a single push with `git push --no-verify`. `.gitattributes` keeps
+caught locally instead of in CI. Bypass a single push with `git push --no-verify`. The hygiene check also
+requires every tracked `.githooks/*` hook to be executable (`100755`), so a hook can't silently lose its
+bit on an archive import and stop running. `.gitattributes` keeps
 line endings correct on checkout. **CI now enforces the same checks as hard failures** (Linux job in
 `smoke.yml`, plus the docs gate in `ci.yml`), and the cross-platform smoke test covers Linux, macOS, and
 Windows.

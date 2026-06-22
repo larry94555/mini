@@ -5068,3 +5068,36 @@ dropped-underscore form is flagged. The only remaining documented divergence is 
 hyphen collapse. **Verified offline:** the self-test's 16 assertions pass, perturbing the slug (dropping `_`
 again) makes it fail, and `check-docs.sh` stays green (no existing anchor relied on the dropped-underscore
 behavior).
+
+---
+
+# Hook-executable self-check, broadened workflow-script check, CONTRIBUTING.md
+
+## 593. Git hooks' executable bit self-checked (.githooks/check-scripts.sh)
+
+- **Run:** `bash .githooks/check-scripts.sh` (pre-commit hook + `smoke.yml` run it).
+- **What it adds:** beyond the fixed `EXEC_SCRIPTS` list, the check now requires **every tracked
+  `.githooks/*` file** to be mode `100755` in the git index, so a hook (notably `pre-push`, which had been
+  committed `100644`) can't silently lose its executable bit on an archive import and quietly stop running.
+  `scripts/git-mark-exec.sh` now includes `.githooks/pre-push` so the one-shot fixer covers it.
+- **Verified offline against a real git index:** staging `.githooks/pre-push` as `100644` makes the check
+  fail with the exact `git update-index --chmod=+x .githooks/pre-push` remedy and exit 1; restaging it
+  `100755` returns `script hygiene: OK`. POSIX (`sh -n`).
+
+## 594. Broadened workflow-script existence check (scripts/check-docs.sh)
+
+- **Run:** `bash scripts/check-docs.sh` / `./run.sh check-docs`.
+- **What changed:** check #5 now scans **all YAML under `.github`** (workflows and composite-action
+  `action.yml`) and recognizes more invocation shapes — `scripts/<path>.sh` anywhere, `bash <path>.sh` /
+  `sh <path>.sh` (including after a `cd`), and a direct `./<path>.sh` — failing if any referenced script is
+  missing. Globs/variables (`scripts/*.sh`, `sh -n "$f"`) are still not matched.
+- **Verified offline:** green baseline; injecting a composite-action `bash scripts/missing-composite.sh`, a
+  `cd app && sh deploy-missing.sh`, and a `./scripts/dot-missing.sh` flags all three (exit 1) with no false
+  positive on `$f` or `*.sh`.
+
+## 595. CONTRIBUTING.md "before you push" checklist (docs)
+
+A top-level `CONTRIBUTING.md` consolidates the local gates (`sh scripts/install-hooks.sh`, `./run.sh check`,
+`./run.sh check-docs`, `./mvnw test`) and the CI gates (`smoke.yml`, `ci.yml`, `eval-gate.yml`) into one
+checklist, and is linked from the README. It is included in the docs the checker scans (now 16 living docs),
+so its links and references are validated too; `bash scripts/check-docs.sh` stays green.
