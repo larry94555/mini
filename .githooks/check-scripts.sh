@@ -15,6 +15,17 @@ for f in $EXEC_SCRIPTS; do
   fi
 done
 
+# Every tracked git hook must be executable (100755) or git silently won't run it after a fresh clone +
+# install-hooks -- the bit is easily lost on an archive import. Enforce it for all of .githooks/.
+for f in $(git ls-files .githooks 2>/dev/null); do
+  mode="$(git ls-files --stage -- "$f" 2>/dev/null | awk '{print $1}')"
+  [ -n "$mode" ] || continue
+  if [ "$mode" != "100755" ]; then
+    echo "  [exec] $f is mode $mode (want 100755) -> git update-index --chmod=+x $f"
+    fail=1
+  fi
+done
+
 CR="$(printf '\r')"
 for f in $(git ls-files '*.sh' 'mvnw' 2>/dev/null); do
   if git show ":$f" 2>/dev/null | grep -q "$CR"; then

@@ -3,7 +3,7 @@
 # number that does not exist in the repo. Keeps the cross-referenced docs (README.md, docs/*.md) from
 # silently rotting when something is renamed, moved, or deleted.
 #
-# Scope: the LIVING docs only — README.md and docs/*.md EXCEPT docs/HISTORY.md, which is an archive that
+# Scope: the LIVING docs only — README.md, CONTRIBUTING.md, and docs/*.md EXCEPT docs/HISTORY.md, which is an archive that
 # intentionally names files/changes that were removed. Editor backups and hidden files are ignored.
 # Dependency-free and POSIX sh (no bash arrays/process substitution): sh + grep + find.
 #
@@ -26,6 +26,7 @@ broken="$work/broken"  # broken references, one message per line
 
 # Living docs: README.md + docs/*.md, minus the history archive.
 [ -f README.md ] && printf '%s\n' "README.md" >> "$doclist"
+[ -f CONTRIBUTING.md ] && printf '%s\n' "CONTRIBUTING.md" >> "$doclist"
 find docs -maxdepth 1 -type f -name '*.md' ! -name 'HISTORY.md' 2>/dev/null | sort >> "$doclist"
 
 if [ ! -s "$doclist" ]; then
@@ -120,18 +121,26 @@ while IFS= read -r f; do
   done
 done < "$doclist"
 
-# 5) Every script a CI workflow invokes by path must exist (catches a workflow referencing a file that was
-#    never committed -- the failure mode that broke CI before). Matches `scripts/<name>.sh` anywhere and a
-#    bare `bash <name>.sh` / `sh <name>.sh`; ignores globs/variables (e.g. `sh -n "$f"`).
-if [ -d .github/workflows ]; then
-  {
-    grep -rhoE 'scripts/[A-Za-z0-9_.-]+\.sh' .github/workflows 2>/dev/null
-    grep -rhoE '(bash|sh) +[A-Za-z0-9_.-]+\.sh' .github/workflows 2>/dev/null \
-      | sed -e 's/^bash  *//' -e 's/^sh  *//'
-  } | sort -u | while IFS= read -r s; do
-    [ -z "$s" ] && continue
-    [ -f "$s" ] || echo "workflow invokes a script that does not exist: $s" >> "$broken"
-  done
+# 5) Every script a CI workflow (or composite action) invokes by path must exist -- catches a workflow that
+#    references a file that was never committed (the failure mode that broke CI before). Scans all YAML under
+#    .github (workflows AND composite-action action.yml). Recognizes these invocation shapes, including a
+#    `run:` block that cd's first: `scripts/<path>.sh` anywhere; `bash <path>.sh` / `sh <path>.sh`; and a
+#    direct `./<path>.sh`. Globs and variables (e.g. `sh -n "$f"`, `scripts/*.sh`) are not matched.
+if [ -d .github ]; then
+  yamls="$work/yamls"
+  find .github \( -name '*.yml' -o -name '*.yaml' \) -type f 2>/dev/null > "$yamls" || true
+  if [ -s "$yamls" ]; then
+    {
+      xargs grep -rhoE 'scripts/[A-Za-z0-9_./-]+\.sh' < "$yamls" 2>/dev/null
+      xargs grep -rhoE '(bash|sh) +[A-Za-z0-9_./-]+\.sh' < "$yamls" 2>/dev/null \
+        | sed -e 's/^bash  *//' -e 's/^sh  *//'
+      xargs grep -rhoE '\./[A-Za-z0-9_./-]+\.sh' < "$yamls" 2>/dev/null | sed -e 's#^\./##'
+    } | sort -u | while IFS= read -r s; do
+      [ -z "$s" ] && continue
+      case "$s" in *'*'*|*'$'*) continue ;; esac   # skip any glob/variable that slipped through
+      [ -f "$s" ] || echo "workflow invokes a script that does not exist: $s" >> "$broken"
+    done
+  fi
 fi
 
 count="$(wc -l < "$broken" | tr -d ' ')"
