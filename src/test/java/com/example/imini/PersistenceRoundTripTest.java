@@ -40,7 +40,7 @@ class PersistenceRoundTripTest {
         Database db = null;
         try {
             db = open(dbFile);
-            if (!db.available()) return; // skip when persistence is unavailable
+            if (!IntegrationGate.proceed("PersistenceRoundTripTest", db.available())) return; // skip / hard-fail per IMINI_REQUIRE_PERSISTENCE
 
             // --- SessionStore: history + ownership + sharing ---
             SessionStore sessions = new SessionStore(db);

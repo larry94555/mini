@@ -218,6 +218,20 @@ Two complementary layers, so the logic is covered offline *and* the real SQL is 
   CI. The opt-in `Integration tests` workflow (`.github/workflows/integration.yml`) provisions sqlite-jdbc
   so it executes on demand.
 
+### CI enforcement
+
+So the real-DB tests can't pass *green by skipping*, the gate honors an `IMINI_REQUIRE_PERSISTENCE`
+environment variable. When it is set (`1`/`true`/`yes`) and persistence is unavailable, the persistence-backed
+tests (`GrantPersistenceIntegrationTest`, `PersistenceRoundTripTest`, `MemoryStorePersistenceTest`) **fail**
+instead of self-skipping; when it is unset (the default everywhere else), they self-skip cleanly. The opt-in
+`Integration tests` workflow sets `IMINI_REQUIRE_PERSISTENCE=1` and additionally asserts each test printed its
+"ran against real SQLite" marker, so a missing sqlite-jdbc driver surfaces as a red build. To run the job's
+checks locally:
+
+```bash
+IMINI_REQUIRE_PERSISTENCE=1 ./mvnw -Dtest=GrantPersistenceIntegrationTest test
+```
+
 ## Where to read next
 
 - [`ROADMAP.md`](../ROADMAP.md) — the full Track B plan and the ranked, individually-gated PRs.

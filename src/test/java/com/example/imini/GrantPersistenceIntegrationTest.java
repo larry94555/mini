@@ -71,8 +71,8 @@ class GrantPersistenceIntegrationTest {
     Database db = null;
     try {
       db = open(dbFile);
-      if (!db.available()) {
-        return; // no sqlite driver -> skip (CI has it)
+      if (!IntegrationGate.proceed("GrantPersistenceIntegrationTest", db.available())) {
+        return; // no sqlite driver -> skip (or hard-fail when IMINI_REQUIRE_PERSISTENCE is set)
       }
 
       // --- grant in "process 1" (persists real rows) ---

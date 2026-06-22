@@ -20,6 +20,11 @@ jobs:
     # On PRs, only run when the "run-integration" label is present; always run on manual dispatch.
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-integration'
     runs-on: ubuntu-latest
+    env:
+      # Turn a silent self-skip into a hard failure: if the persistence-backed tests can't reach a real
+      # SQLite database (e.g. sqlite-jdbc missing), they fail instead of passing green. CI must run them for
+      # real. Unset everywhere else, so offline/unit builds still self-skip cleanly.
+      IMINI_REQUIRE_PERSISTENCE: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -37,8 +42,18 @@ jobs:
       - name: Check docs reference integrity
         run: bash scripts/check-docs.sh
       - name: Durable-grants real-SQLite integration test
-        run: ./mvnw -B -ntp -Dtest=GrantPersistenceIntegrationTest test
+        run: ./mvnw -B -ntp -Dmaven.test.redirectTestOutputToFile=true -Dtest=GrantPersistenceIntegrationTest test
       - name: Persistence round-trips (real SQLite)
-        run: ./mvnw -B -ntp "-Dtest=PersistenceRoundTripTest,MemoryStorePersistenceTest" test
+        run: ./mvnw -B -ntp -Dmaven.test.redirectTestOutputToFile=true "-Dtest=PersistenceRoundTripTest,MemoryStorePersistenceTest" test
+      - name: Assert the integration tests ran against real SQLite (not skipped)
+        run: |
+          set -e
+          for t in GrantPersistenceIntegrationTest PersistenceRoundTripTest MemoryStorePersistenceTest; do
+            if ! grep -rq "$t ran against real SQLite" target/surefire-reports/; then
+              echo "::error::$t did not run against real SQLite (marker missing — it self-skipped?)"
+              exit 1
+            fi
+          done
+          echo "All durable-persistence integration tests ran against real SQLite."
       - name: Golden + eval traces and the full suite
         run: ./mvnw -B -ntp test
