@@ -167,6 +167,106 @@ its workflow is usable end-to-end from chat **and** has a deterministic test. St
 
 ---
 
+## Track C — World-class free web search (NEW DIRECTION)
+
+> Added because retrieval from the live web is one of the highest-leverage agent capabilities, and the
+> current `web_search` tool is a thin single-backend scraper. The goal of this track is a **world-class**
+> web search that stays **free** (no paid search API) and **token-light** (the model spends as few tokens as
+> possible — heavy lifting happens in Java, not in the context window).
+
+### Why it is limited today (honest current-state assessment)
+
+`BuiltinTools.webSearch()` issues one GET to `html.duckduckgo.com/html/`, parses a single set of CSS
+selectors (`div.result` / `a.result__a` / `.result__snippet`), and returns the top 6 title/URL/snippet
+triples. `webFetch()` pulls a page through jsoup + `HtmlExtractor`. Concretely, this means:
+
+- **Fragile.** One endpoint and one selector set: when DuckDuckGo changes its HTML, rate-limits, or serves a
+  block/CAPTCHA page, the tool silently returns `(no results)` with no fallback and no retry.
+- **Snippet-only.** It returns search-result snippets, never distilled page content, so answer quality is
+  capped at whatever the snippet happens to contain; the model must then spend tokens fetching and reading
+  whole pages itself.
+- **No fusion or ranking.** Single source, no dedup, no cross-engine re-ranking, no canonical-URL cleanup
+  beyond `decodeDdg`.
+- **No recency / site / language controls**, no provenance (which engine, fetched when), and no citations.
+- **No caching**, so repeated or similar queries re-hit the network and re-spend tokens every time.
+- **Reusable parts already exist and are unused here:** `CircuitBreaker` (per-engine health),
+  `RetrievalService` (BM25/embedding ranking for passage selection), `Database` (a cache store), and
+  `Redact`/`RedactingJsonEncoder` (scrubbing untrusted fetched text). The output is already flagged
+  *untrusted*, which is the right starting point.
+
+So this is **not** as good as it can be — there is a clear, free, token-light path to a much stronger tool.
+
+### Design principles (free and token-light are the hard constraints)
+
+- **Free.** No paid search APIs, ever. Use free endpoints (DuckDuckGo HTML/Lite, Wikipedia/Wikidata REST,
+  the DuckDuckGo Instant Answer API, Mojeek/Marginalia where ToS-permitting) plus an optional
+  **operator-run, self-hosted SearXNG** as a first-class engine. The engine set is configurable.
+- **Token-light.** All ranking, dedup, fusion, and distillation run in **Java (zero LLM tokens)**; only the
+  distilled result reaches the model. Return compact structured results by default; fetch full content only
+  on explicit request; cache aggressively so repeats cost neither network nor tokens.
+- **Trustworthy.** Every result carries provenance (source engine + fetch timestamp) and a citable URL;
+  prefer primary/high-reputation sources; scrub fetched content for prompt-injection before it enters the
+  context.
+- **Robust.** Multi-engine fallback behind a circuit breaker, retries with backoff, polite headers, and
+  explicit block/CAPTCHA detection so failures degrade gracefully instead of returning silent emptiness.
+- **Deterministic + testable.** Parsing/fusion/ranking are pure and covered by golden tests over **recorded
+  HTML fixtures** (offline); live network calls are gated as their own integration family (mirroring
+  `IntegrationGate("node"|"json"|…)`), so CI can require them while offline/unit builds self-skip.
+
+### Ranked changes (each shippable as its own approval-gated PR)
+
+1. **Search-engine abstraction + DuckDuckGo hardening.** Introduce a `SearchEngine` interface
+   (`query -> List<Result{title,url,snippet,sourceEngine,fetchedAt}>`) with the current DDG scraper as the
+   first implementation, but resilient: multiple selector strategies (incl. the simpler, stabler DDG-Lite
+   table), block/CAPTCHA detection, retries with backoff, and `User-Agent`/`Accept-Language` headers.
+2. **Multi-engine fallback + result fusion.** Run a configurable ordered set of free engines behind the
+   existing `CircuitBreaker`; merge with reciprocal-rank fusion, dedup by canonical URL (strip trackers /
+   AMP / redirects), and return a single ranked list with per-result provenance. One engine being
+   down/blocked never yields empty results.
+3. **Result caching (free + token-saving).** Cache normalized `query -> results` in SQLite (via `Database`,
+   in-memory fallback) keyed by a time bucket with a TTL, so repeated/similar queries are served without a
+   network hit or new tokens. Disabled-mode is byte-identical to today.
+4. **Direct, cited answers from structured free sources.** For factual/lookup queries, consult the
+   DuckDuckGo Instant Answer API and Wikipedia/Wikidata REST first to return a short, **cited** answer when
+   one is confidently available — falling back to ranked results otherwise.
+5. **Query controls.** Recency/time-range, `site:`/domain scoping, and language/region passthrough, with
+   safe operator handling — so the agent can ask precise questions instead of post-filtering.
+6. **Content-distillation pipeline (the biggest answer-quality jump, still token-light).** Optionally fetch
+   the top-N results via `webFetch` + `HtmlExtractor`, chunk them, rank passages with `RetrievalService`
+   (BM25/embeddings — no LLM), and return only the few best passages **with citations**. The model receives
+   distilled evidence, not raw pages.
+7. **Trust & safety.** A domain allow/deny list + a lightweight reputation signal (HTTPS, primary-source
+   preference, SEO-spam down-ranking), tracking-redirect stripping, and prompt-injection scrubbing of
+   untrusted fetched text via `Redact` before it reaches the context.
+8. **Self-hosted SearXNG backend.** A first-class `SearchEngine` for an operator-run SearXNG instance
+   (configurable URL) for privacy, reliability, and breadth — entirely free.
+9. **Evals + observability.** A small fixture-based web-search eval suite (offline) scoring result relevance
+   and citation correctness, plus markers/metrics for which engine answered and cache hit-rate; a live
+   "network" integration family gated like the others.
+10. **Tests + docs (mandatory, same PRs).** Golden traces over recorded HTML/JSON fixtures for parsing,
+    fusion, dedup, caching, distillation, and block-detection fallback; a `docs/WEB_SEARCH.md` walkthrough;
+    network-gated live tests; README/TESTING/CONTRIBUTING updates.
+
+### Acceptance (world-class, free, token-light)
+
+- A factual query returns a **direct, cited** answer from a high-trust source when one exists; otherwise a
+  **fused, deduped, re-ranked** result set with per-result provenance.
+- The tool **survives an engine being down or blocked** (fallback + circuit breaker) — never a silent empty
+  result.
+- Repeated queries are served from **cache**; only **distilled** passages/results reach the model, keeping
+  token cost bounded and predictable.
+- **No paid API anywhere**; the engine set is configurable and supports a self-hosted SearXNG.
+- All deterministic logic (parse, fuse, dedup, rank, distill) is **offline-testable from fixtures**; live
+  calls are gated as their own integration family.
+
+### Build order note
+
+Items **1-3** deliver immediate reliability (fallback + cache); **4-6** deliver the biggest jump in answer
+quality (cited structured answers + distilled passages); **7-9** deliver trust and measurability. Ship in
+that order, each as its own approval-gated PR with golden tests.
+
+---
+
 ## North-star priority
 
 When choosing the next implementation task, prefer features that are:
@@ -251,6 +351,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Roadmap added for world-class free web search (Track C): an honest assessment of the current single-backend DuckDuckGo HTML scraper in `BuiltinTools.webSearch()` (fragile, snippet-only, no fallback/fusion/cache/recency/citations) and a ranked, free, token-light path to fix it — a `SearchEngine` abstraction with DDG hardening, multi-engine fallback + reciprocal-rank fusion behind the existing `CircuitBreaker`, SQLite result caching, direct cited answers from free structured sources, query controls, a `RetrievalService`-powered content-distillation pipeline, trust/safety scrubbing via `Redact`, an optional self-hosted SearXNG backend, and fixture-based evals with a network-gated live family. ROADMAP-only change (no code yet); the heavy lifting stays in Java so the model spends minimal tokens, and no paid API is introduced.
 
 - Offline JSON support for verification: documented and proved that the JSON-dependent MCP discovery tests run end to end offline. A faithful minimal JSON mapper (real recursive-descent parser/serializer over the `ObjectMapper`/`JsonNode` surface the code uses) supplied by the verification scaffold makes `JsonProbe.realMapperAvailable()` true so `McpManager` parses JSON-RPC for real; the previously-skipped stdio/HTTP/SSE/keep-alive discovery tests and the golden MCP slash trace then pass offline (markers `(node) ran` + `(json) ran`). The `IntegrationGate("json", …)` gating is unchanged, so environments without a real mapper still self-skip. The mapper is a scaffold artifact and is deliberately NOT committed to `src/` (it would shadow the real Jackson the app gets via Spring Boot). New `docs/OFFLINE_JSON.md`; honest offline-vs-CI census in TESTING cases 625-626.
 
