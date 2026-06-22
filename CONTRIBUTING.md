@@ -55,5 +55,9 @@ Run the same gates CI runs:
   global/system git config) so they pass in a clean checkout, not only where git is pre-configured.
 - **Node/MCP-gated tests locate the stub via `McpStubFixture`** (loads `/mcp/stub-server.js` from the test
   classpath, so it resolves regardless of working directory) and gate through `IntegrationGate("node", …)`.
+- **JSON/discovery-gated tests probe for a real mapper** via `JsonProbe.realMapperAvailable()` and gate
+  through `IntegrationGate("json", …)`, since `McpManager` parses JSON-RPC with `ObjectMapper` (a no-op in
+  the offline scaffold). The full switch set is `IMINI_REQUIRE_PERSISTENCE`, `_NODE`, `_GIT`, `_JSON`,
+  `_MODEL`.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

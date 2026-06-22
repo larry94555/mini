@@ -29,6 +29,7 @@ class McpLiveIntegrationTest {
     @Test
     void discoversAndInvokesOverStdio() throws Exception {
         if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.discoversAndInvokesOverStdio", McpStubFixture.available())) return;
+        if (!IntegrationGate.proceed("json", "McpLiveIntegrationTest.discoversAndInvokesOverStdio", JsonProbe.realMapperAvailable())) return;
 
         McpManager mcp = new McpManager();
         setTimeout(mcp, 30);
@@ -41,6 +42,7 @@ class McpLiveIntegrationTest {
 
     @Test
     void discoversAndInvokesOverHttp() throws Exception {
+        if (!IntegrationGate.proceed("json", "McpLiveIntegrationTest.discoversAndInvokesOverHttp", JsonProbe.realMapperAvailable())) return;
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/rpc", ex -> {
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
@@ -66,6 +68,7 @@ class McpLiveIntegrationTest {
 
     @Test
     void discoversAndInvokesOverStreamingSse() throws Exception {
+        if (!IntegrationGate.proceed("json", "McpLiveIntegrationTest.discoversAndInvokesOverStreamingSse", JsonProbe.realMapperAvailable())) return;
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/rpc", ex -> {
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
@@ -98,6 +101,7 @@ class McpLiveIntegrationTest {
     @Test
     void twoServersNamespaceToolsAndRoutePromptsIndependently() throws Exception {
         if (!IntegrationGate.proceed("node", "McpLiveIntegrationTest.twoServersRoutePrompts", McpStubFixture.available())) return;
+        if (!IntegrationGate.proceed("json", "McpLiveIntegrationTest.twoServersRoutePrompts", JsonProbe.realMapperAvailable())) return;
 
         McpManager mcp = new McpManager();
         setTimeout(mcp, 30);
@@ -125,6 +129,7 @@ class McpLiveIntegrationTest {
 
     @Test
     void consumesUnboundedKeepAliveSseStream() throws Exception {
+        if (!IntegrationGate.proceed("json", "McpLiveIntegrationTest.consumesUnboundedKeepAliveSseStream", JsonProbe.realMapperAvailable())) return;
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/rpc", ex -> {
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);

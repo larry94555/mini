@@ -5400,3 +5400,30 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `tools/list`, `prompts/list`, and `prompts/get` with valid JSON-RPC (the `review` prompt renders
   "review A.java"). The full in-Java discovery assertions need a real JSON mapper at runtime, so under the
   offline stub mapper the slash-command trace self-skips after connecting; it asserts fully in CI.
+
+---
+
+# JSON/real-mapper-gated tests
+
+## 623. Real-mapper probe + json gate (JsonProbeTest)
+
+- **Run:** `./mvnw -Dtest=JsonProbeTest test` (offline; no real Jackson needed).
+- **Probe:** `JsonProbe.realMapperAvailable()` round-trips a known JSON string through
+  `ObjectMapper.readTree` and checks the parsed value; the pure `JsonProbe.interpret(...)` step is tested
+  directly (recovers `ok` -> true; null/empty/wrong -> false), so the gate logic is covered without a real
+  mapper. Under the offline stub `ObjectMapper` (no-op `readTree`/`readValue`) the probe returns false.
+- **Gate:** `IntegrationGate` gains a `json` family (`IMINI_REQUIRE_JSON` -> `IMINI_REQUIRE_JSON`): available
+  -> proceed, unavailable + not required -> skip, unavailable + required -> hard fail naming the switch.
+
+## 624. MCP discovery tests gate on a real JSON mapper
+
+- `McpManager` parses JSON-RPC via `ObjectMapper`, so MCP discovery needs a real mapper at runtime. The
+  transport tests now gate on it: `McpLiveIntegrationTest.discoversAndInvokesOverHttp`,
+  `discoversAndInvokesOverStreamingSse`, and `consumesUnboundedKeepAliveSseStream` gate on
+  `IntegrationGate.proceed("json", …)`; the stdio tests and `GoldenTraceWorkflowTest.mcpPromptSlashCommandTrace`
+  gate on both `node` and `json`.
+- Offline (stub mapper) they **self-skip** cleanly (`[integration] … (json) skipped`) instead of failing on
+  `echo tool discovered; have []`. In CI the `Integration tests` workflow sets `IMINI_REQUIRE_JSON=1` (Jackson
+  is on the classpath), so they run, and `scripts/integration-coverage.sh` fails the build if any json test
+  skipped. This replaces the previous ad-hoc "needs real Jackson" inline skip in the golden trace with a
+  uniform, CI-enforced gate.
