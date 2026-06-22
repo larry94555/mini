@@ -113,10 +113,12 @@ public class CreateProjectTraceTest {
     long grantDecisions = perms.decisions.stream().filter(s -> s.startsWith("grant_workspace_root=")).count();
     assertEquals(2L, grantDecisions, "both grants were gated: " + perms.decisions);
 
-    // 2) the registry now has the default + the two granted roots, with the right access.
-    assertTrue(registry.canRead(source.resolve("Main.java").toString()), "source readable after grant");
-    assertFalse(registry.canWrite(source.resolve("x").toString()), "source NOT writable (read grant)");
-    assertTrue(registry.canWrite(dest.resolve("x").toString()), "destination writable (read_write grant)");
+    // 2) the registry now has the granted roots FOR THIS SESSION, with the right access (and they are
+    //    scoped to "port-trace" — a different session would not see them).
+    assertTrue(registry.canRead("port-trace", source.resolve("Main.java").toString()), "source readable after grant");
+    assertFalse(registry.canWrite("port-trace", source.resolve("x").toString()), "source NOT writable (read grant)");
+    assertTrue(registry.canWrite("port-trace", dest.resolve("x").toString()), "destination writable (read_write grant)");
+    assertFalse(registry.canWrite("other-session", dest.resolve("x").toString()), "another session does NOT see the grant");
 
     // 3) create_project ran (AUTO auto-approves a normal mutating tool) and the files exist with content.
     assertTrue(perms.decisions.contains("create_project=ALLOW"), "create_project gated+allowed: " + perms.decisions);

@@ -5203,3 +5203,33 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   via a scripted console "y", not auto-approved despite `AUTO`); the registry gained a readable source and a
   writable destination; `create_project` wrote the files with exact content; the source root was never
   written to. Verified offline (17/17 across the four Track B test classes).
+
+---
+
+# Track B — per-session grant scoping
+
+## 606. Grants are scoped per session; the default root is shared (WorkspaceRootsTest)
+
+- **Run:** `./mvnw -Dtest=WorkspaceRootsTest test`.
+- **`grantsAreScopedPerSessionButDefaultIsShared`:** session A grants itself a `read_write` root and session
+  B grants a different one; A can read/write only its own grant (not B's) and vice-versa; the default root is
+  writable from A, B, and any never-seen session; an unknown session sees no grants; revoking in A does not
+  affect B. This proves one run cannot widen another run's access.
+- **Verified offline** via the explicit session-id overloads (`add`/`remove`/`canRead`/`canWrite` taking a
+  sessionId).
+
+## 607. Legacy (no-session) calls resolve via SessionContext (default outside a run)
+
+- The no-session overloads (`canRead(path)`, `canWrite(path)`, `add`, `remove`, `roots()`) resolve the
+  session from `SessionContext.sessionId()`, which is `"default"` when no run is active. So `Sandbox`,
+  `PermissionService`, and `ProjectTools` — which call the no-session forms on the engine's tool-dispatch
+  thread — become session-scoped automatically with no signature change, and behavior is byte-identical when
+  multi-root is disabled (cases 596-598 still pass unchanged).
+
+## 608. Capstone: the port walkthrough is proven end to end
+
+- `CreateProjectTraceTest.grantThenPlanThenWrite` (case 605) is the capstone: it drives the real engine
+  through grant(read source) → grant(read_write destination) → `create_project`(plan_only) →
+  `create_project`(write) → answer, now also asserting the grants are scoped to the run's session
+  (`canWrite("other-session", dest)` is false). `docs/PORT_WALKTHROUGH.md` documents the same flow and its
+  safety properties; `GET /admin/roots` now reports per-session grants (`{enabled, default, sessions:{…}}`).

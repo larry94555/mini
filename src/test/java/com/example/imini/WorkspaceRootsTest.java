@@ -165,6 +165,41 @@ public class WorkspaceRootsTest {
   }
 
   @Test
+  void grantsAreScopedPerSessionButDefaultIsShared() throws Exception {
+    Path base = Files.createTempDirectory("wr-session");
+    Path def = Files.createDirectories(base.resolve("default"));
+    Path projA = Files.createDirectories(base.resolve("projA"));
+    Path projB = Files.createDirectories(base.resolve("projB"));
+
+    WorkspaceRoots w = roots(true, def.toString(), "");
+
+    // Session A grants itself a read_write root; session B grants a different one.
+    assertNotNull(w.add("A", projA, WorkspaceRoots.Access.READ_WRITE), "A grants projA");
+    assertNotNull(w.add("B", projB, WorkspaceRoots.Access.READ_WRITE), "B grants projB");
+
+    // A sees its own grant, not B's; B sees its own, not A's.
+    assertTrue(w.canWrite("A", projA.resolve("f").toString()), "A can write its own grant");
+    assertFalse(w.canWrite("A", projB.resolve("f").toString()), "A CANNOT write B's grant");
+    assertTrue(w.canWrite("B", projB.resolve("f").toString()), "B can write its own grant");
+    assertFalse(w.canWrite("B", projA.resolve("f").toString()), "B CANNOT write A's grant");
+
+    // Reads are equally isolated.
+    assertTrue(w.canRead("A", projA.resolve("f").toString()));
+    assertFalse(w.canRead("A", projB.resolve("f").toString()), "A cannot even read B's grant");
+
+    // The default root is shared by every session (and an unknown session).
+    assertTrue(w.canWrite("A", def.resolve("x").toString()), "default writable from A");
+    assertTrue(w.canWrite("B", def.resolve("x").toString()), "default writable from B");
+    assertTrue(w.canWrite("never-seen", def.resolve("x").toString()), "default writable from any session");
+    assertFalse(w.canWrite("never-seen", projA.resolve("x").toString()), "unknown session sees no grants");
+
+    // Revoking in A doesn't touch B.
+    assertTrue(w.remove("A", projA), "A revokes its grant");
+    assertFalse(w.canWrite("A", projA.resolve("f").toString()), "after revoke A loses access");
+    assertTrue(w.canWrite("B", projB.resolve("f").toString()), "B is unaffected by A's revoke");
+  }
+
+  @Test
   void accessTokenParsing() {
     assertEquals(WorkspaceRoots.Access.READ_WRITE, WorkspaceRoots.parseAccess("read_write"));
     assertEquals(WorkspaceRoots.Access.READ_WRITE, WorkspaceRoots.parseAccess("RW"));
