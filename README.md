@@ -739,7 +739,9 @@ a named subagent that runs its own loop and whose result returns into the parent
 duplicate guard) surfacing cleanly to the parent covered by `SubAgentFailureTraceTest`. All share the
 `ScriptedAgent` test fixture (scripted
 model + real-engine builder), which `FakeModelHarnessTest` also uses. CI installs Node so the stdio MCP
-integration tests run rather than self-skip. Git-gated tests build their repo through `GitRepoFixture`, a
+integration tests run rather than self-skip. Node/MCP-gated tests locate the bundled stub server through
+`McpStubFixture` (loaded from the test classpath, so it resolves regardless of working directory). Git-gated
+tests build their repo through `GitRepoFixture`, a
 helper that creates an isolated repo with a deterministic identity (isolated from ambient git config) so they
 pass in a clean checkout, not only where git is pre-configured.
 

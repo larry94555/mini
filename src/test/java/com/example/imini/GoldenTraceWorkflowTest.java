@@ -95,17 +95,16 @@ class GoldenTraceWorkflowTest {
 
     @Test
     void mcpPromptSlashCommandTrace() throws Exception {
-        if (!IntegrationGate.proceed("node", "GoldenTraceWorkflowTest.mcpPromptSlashCommand", nodeAvailable())) return;
-        Path stub = locateStub();
-        assertNotNull(stub, "stub-server.js present");
+        if (!IntegrationGate.proceed("node", "GoldenTraceWorkflowTest.mcpPromptSlashCommand", McpStubFixture.available())) return;
 
         McpManager mcp = new McpManager();
         ScriptedAgent.setField(mcp, McpManager.class, "toolTimeoutSeconds", 30);
-        mcp.connect("stub", Map.of("command", "node", "args", List.of(stub.toString())));
+        mcp.connect("stub", McpStubFixture.command());
 
-        // Offline (stub Jackson no-op) the round-trip yields nothing -> nothing to assert; self-skip.
+        // MCP discovery parses the stub server's JSON-RPC responses; that needs a real JSON mapper at
+        // runtime. Under the offline stub mapper (no-op readTree) discovery yields nothing -> self-skip.
         if (!mcp.isPromptCommand("/mcp__stub__review")) {
-            System.out.println("[skip] MCP discovery produced no prompt (needs real Jackson at runtime)");
+            System.out.println("[skip] MCP discovery produced no prompt (offline stub JSON mapper; runs fully in CI)");
             return;
         }
 
@@ -126,22 +125,6 @@ class GoldenTraceWorkflowTest {
     }
 
     // ---------------- test-local helpers (git/process/resources) ----------------
-
-    private static boolean nodeAvailable() { return cmdOk("node", "--version"); }
-
-    private static boolean cmdOk(String... cmd) {
-        try { return new ProcessBuilder(cmd).start().waitFor() == 0; } catch (Exception e) { return false; }
-    }
-
-
-
-    private static Path locateStub() {
-        for (String c : new String[]{"src/test/resources/mcp/stub-server.js", "target/test-classes/mcp/stub-server.js"}) {
-            Path p = Path.of(c);
-            if (Files.exists(p)) return p.toAbsolutePath();
-        }
-        return null;
-    }
 
     @SuppressWarnings("unchecked")
     private static void addHook(HookService hooks, String field, String match, String command) throws Exception {
