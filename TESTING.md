@@ -5296,3 +5296,25 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `GrantPersistenceIntegrationTest` (case 613) against a temp SQLite database. The opt-in
   `.github/workflows/integration.yml` provisions sqlite-jdbc (and Node) so the real-dependency tests run on
   demand instead of self-skipping. See `docs/MULTI_ROOT.md` → "How durability is verified".
+
+---
+
+# Track B — CI enforcement of the integration tests
+
+## 615. The integration gate: require-or-skip (IntegrationGateTest)
+
+- **Run:** `./mvnw -Dtest=IntegrationGateTest test` (offline; no database needed).
+- **What it covers:** the pure `IntegrationGate.decide(label, available, required)` core used by the
+  driver-gated persistence tests. `available` always proceeds (and prints the "ran against real SQLite"
+  marker); unavailable + not-required self-skips (prints "skipped (no driver)"); unavailable + required
+  throws an `AssertionError` naming `IMINI_REQUIRE_PERSISTENCE`. Also checks the default env is not required
+  and the truthy parsing (`1`/`true`/`yes`).
+
+## 616. Persistence tests fail loudly in CI when the driver is missing
+
+- `GrantPersistenceIntegrationTest`, `PersistenceRoundTripTest`, and `MemoryStorePersistenceTest` now route
+  their skip decision through `IntegrationGate.proceed(...)`. With `IMINI_REQUIRE_PERSISTENCE` unset (offline,
+  unit builds) they self-skip exactly as before; with it set (the opt-in `Integration tests` workflow) a
+  missing sqlite-jdbc driver makes them fail instead of pass. The workflow also greps the surefire output for
+  each test's "ran against real SQLite" marker, so a silent skip is caught even if the gate were bypassed.
+  See `docs/MULTI_ROOT.md` -> "CI enforcement".

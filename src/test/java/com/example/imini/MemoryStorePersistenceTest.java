@@ -54,7 +54,7 @@ class MemoryStorePersistenceTest {
         Database db = null;
         try {
             db = openDb(dbFile);
-            if (!db.available()) return; // persistence unavailable here -> skip (e.g. offline w/o driver)
+            if (!IntegrationGate.proceed("MemoryStorePersistenceTest", db.available())) return; // skip / hard-fail per IMINI_REQUIRE_PERSISTENCE
 
             MemoryStore m = newStore(db);
             String owner = "local";
