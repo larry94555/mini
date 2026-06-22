@@ -568,22 +568,26 @@ public class AgentController {
     }
 
     /** JSON backing the overview page's live auto-refresh. Admin only. */
-    /** The current workspace-roots registry (Track B): id, path, and access level. Admin only, read-only. */
+    /** The current workspace-roots registry (Track B): default root + per-session grants. Admin only. */
     @GetMapping("/admin/roots")
     public Map<String, Object> adminRoots() {
         requireAdmin();
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("enabled", workspaceRoots.enabled());
         out.put("default", workspaceRoots.defaultRoot().toString());
-        java.util.List<Map<String, Object>> rs = new java.util.ArrayList<>();
-        for (WorkspaceRoots.Root r : workspaceRoots.roots()) {
-            Map<String, Object> m = new java.util.LinkedHashMap<>();
-            m.put("id", r.id());
-            m.put("path", r.path().toString());
-            m.put("access", r.access().toString());
-            rs.add(m);
+        Map<String, Object> sessions = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, java.util.List<WorkspaceRoots.Root>> e : workspaceRoots.bySession().entrySet()) {
+            java.util.List<Map<String, Object>> rs = new java.util.ArrayList<>();
+            for (WorkspaceRoots.Root r : e.getValue()) {
+                Map<String, Object> m = new java.util.LinkedHashMap<>();
+                m.put("id", r.id());
+                m.put("path", r.path().toString());
+                m.put("access", r.access().toString());
+                rs.add(m);
+            }
+            sessions.put(e.getKey(), rs);
         }
-        out.put("roots", rs);
+        out.put("sessions", sessions);
         return out;
     }
 

@@ -837,8 +837,10 @@ To scaffold a whole project, the `create_project` tool writes a manifest (`root`
 `{path, content}` files) in one approval-gated, **transactional** step (staged in a temp dir, then moved
 all-or-nothing, with rollback on failure). Every target must be inside a granted `read_write` root; the
 approval shows a summary (root, file count, total bytes, tree) rather than raw content; pass `plan_only=true`
-to preview the tree first, and `overwrite=true` to replace existing files. See
-[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the manifest format and a worked end-to-end port example.
+to preview the tree first, and `overwrite=true` to replace existing files. Runtime grants are scoped to the
+session that approved them — one run cannot widen another's access — while the default root is shared. See
+[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the model, access levels, and security guarantees, and
+[`docs/PORT_WALKTHROUGH.md`](docs/PORT_WALKTHROUGH.md) for a worked end-to-end port example.
 
 ## Codebase navigation workflow
 

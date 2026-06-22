@@ -159,6 +159,30 @@ POSIX, case-sensitive `/home/...` paths. The registry logic itself is platform-a
 `isWithin`, which uses `Path.resolve(...).normalize().startsWith(...)`. The offline tests run on POSIX;
 Windows drive-letter semantics are exercised by the JVM's own path implementation rather than re-simulated.
 
+## Security model
+
+Track B's guarantees, in one place:
+
+- **Default-closed.** Multi-root is off unless `agent.multi-root.enabled=true`. While off, the registry holds
+  exactly the one default `read_write` root and every check reduces to the historical single-workspace
+  behavior.
+- **Per-path, per-access.** Each additional root is granted at a specific absolute path with an explicit
+  access level (`read` or `read_write`). A `read` root permits reads but denies writes.
+- **Per-session.** Runtime grants are scoped to the session that approved them; a root granted in one run is
+  invisible to other sessions, so one run cannot widen another's access. The default root is the only shared
+  root, and it can never be removed or downgraded.
+- **Approval at the boundary.** The grant/revoke tools are always-confirm — never auto-approved, even in
+  `auto` mode (in `plan` mode they record). `create_project` goes through the normal approval with a
+  *summary* payload (root, file count, total bytes, tree), not raw file content. A write inside a granted
+  root is not a blanket auto-approve — it still goes through the normal per-write approval.
+- **Confined & transactional.** Every write must resolve inside a granted `read_write` root; path escapes
+  (`..`/absolute) are rejected. `create_project` writes all-or-nothing with rollback and refuses to
+  overwrite existing files unless asked.
+- **Audited.** Every grant, revoke, and `create_project` is written to the audit log.
+
+See [`docs/PORT_WALKTHROUGH.md`](PORT_WALKTHROUGH.md) for the end-to-end task and the golden trace that
+proves it.
+
 ## Where to read next
 
 - [`ROADMAP.md`](../ROADMAP.md) — the full Track B plan and the ranked, individually-gated PRs.
