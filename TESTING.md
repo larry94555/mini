@@ -5270,3 +5270,29 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   unlimited), built from `WorkspaceRoots.allGrants()`. `GET /admin/roots/audit` returns the grant/revoke (and
   `create_project`) history newest-first from the audit log. Both compile against the full app (129 main
   classes); the underlying grant/TTL logic is covered by cases 609-611.
+
+---
+
+# Track B — durable grants: real-database integration test
+
+## 613. Real-SQLite grant persist/reload/revoke/prune (GrantPersistenceIntegrationTest)
+
+- **Run:** `./mvnw -Dtest=GrantPersistenceIntegrationTest test` (or the opt-in `Integration tests`
+  workflow).
+- **What it does:** boots a real `Database` on a temp SQLite file, runs the migrations so
+  `workspace_grants` exists, then drives `WorkspaceRoots` (over a real `GrantStore`) through:
+  grant in "process 1" (asserts rows exist via a real `SELECT COUNT(*)`), reload in "process 2" over the
+  same database (asserts the grants reload, the read grant stays read-only, and cross-session isolation
+  survives), revoke (asserts the row is deleted via real SQL and does not reload), and a TTL cycle (asserts
+  an aged grant is pruned from the table on reload).
+- **Self-skips** when persistence can't initialize (no sqlite-jdbc driver) by returning early after
+  `db.available()` is false — so it never fails an offline build — and cleans up its temp database. Runs for
+  real in CI.
+
+## 614. How durability is verified (two layers)
+
+- The persist/reload/TTL/revoke **logic** is pinned offline by `GrantPersistenceTest` (cases 609-611) using
+  an in-memory `GrantStore` double + a settable clock; the **real SQL** is exercised by
+  `GrantPersistenceIntegrationTest` (case 613) against a temp SQLite database. The opt-in
+  `.github/workflows/integration.yml` provisions sqlite-jdbc (and Node) so the real-dependency tests run on
+  demand instead of self-skipping. See `docs/MULTI_ROOT.md` → "How durability is verified".
