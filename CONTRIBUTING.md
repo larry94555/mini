@@ -51,5 +51,7 @@ Run the same gates CI runs:
   `[integration] <label> (<dep>) ran|skipped` marker that `scripts/integration-coverage.sh` audits. The
   switches today are `IMINI_REQUIRE_PERSISTENCE`, `IMINI_REQUIRE_NODE`, `IMINI_REQUIRE_GIT`, and
   `IMINI_REQUIRE_MODEL`.
+- **Git-gated tests build an isolated repo via `GitRepoFixture`** (deterministic local identity, isolated from
+  global/system git config) so they pass in a clean checkout, not only where git is pre-configured.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

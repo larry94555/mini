@@ -206,6 +206,11 @@ public class PermissionService {
     try {
       argsJson = mapper.writeValueAsString(enriched);
     } catch (Exception e) {
+      argsJson = null;
+    }
+    // Fall back to a readable rendering if serialization failed OR yielded nothing — so the approval payload
+    // always carries the enrichment (e.g. _staged_diff) rather than silently dropping it.
+    if (argsJson == null || argsJson.isBlank()) {
       argsJson = String.valueOf(enriched);
     }
 

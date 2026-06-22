@@ -29,16 +29,11 @@ class GoldenTraceWorkflowTest {
 
     @Test
     void editStageCommitTrace() throws Exception {
-        if (!IntegrationGate.proceed("git", "GoldenTraceWorkflowTest.editStageCommit", gitAvailable())) return;
+        if (!IntegrationGate.proceed("git", "GoldenTraceWorkflowTest.editStageCommit", GitRepoFixture.available())) return;
 
-        // --- a real repo with an initial commit ---
-        Path repo = Files.createTempDirectory("imini-golden-");
-        git(repo, "init", "-q");
-        git(repo, "config", "user.email", "t@t");
-        git(repo, "config", "user.name", "t");
-        Files.writeString(repo.resolve("app.txt"), "status: draft\n");
-        git(repo, "add", "-A");
-        git(repo, "commit", "-qm", "chore: seed");
+        // --- a real repo with an initial commit (isolated from ambient git config) ---
+        GitRepoFixture gitRepo = GitRepoFixture.initWithCommit("imini-golden-", "app.txt", "status: draft\n");
+        Path repo = gitRepo.path();
 
         // --- real components rooted at the repo ---
         Sandbox sandbox = new Sandbox();
@@ -79,7 +74,7 @@ class GoldenTraceWorkflowTest {
 
         // 1) tool dispatch actually happened: file changed + a new commit exists
         assertEquals("status: final\n", Files.readString(repo.resolve("app.txt")));
-        assertEquals("feat: finalize app.txt", capture(repo, "log", "-1", "--pretty=%s").trim(),
+        assertEquals("feat: finalize app.txt", gitRepo.git("log", "-1", "--pretty=%s").trim(),
                 "the commit landed on HEAD");
 
         // 2) the permission decision was made for each mutating tool, and allowed
@@ -132,31 +127,13 @@ class GoldenTraceWorkflowTest {
 
     // ---------------- test-local helpers (git/process/resources) ----------------
 
-    private static boolean gitAvailable() { return cmdOk("git", "--version"); }
     private static boolean nodeAvailable() { return cmdOk("node", "--version"); }
 
     private static boolean cmdOk(String... cmd) {
         try { return new ProcessBuilder(cmd).start().waitFor() == 0; } catch (Exception e) { return false; }
     }
 
-    private static void git(Path dir, String... args) throws Exception {
-        List<String> cmd = new ArrayList<>();
-        cmd.add("git");
-        cmd.addAll(List.of(args));
-        Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
-        p.getInputStream().readAllBytes();
-        p.waitFor();
-    }
 
-    private static String capture(Path dir, String... args) throws Exception {
-        List<String> cmd = new ArrayList<>();
-        cmd.add("git");
-        cmd.addAll(List.of(args));
-        Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
-        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        p.waitFor();
-        return out;
-    }
 
     private static Path locateStub() {
         for (String c : new String[]{"src/test/resources/mcp/stub-server.js", "target/test-classes/mcp/stub-server.js"}) {

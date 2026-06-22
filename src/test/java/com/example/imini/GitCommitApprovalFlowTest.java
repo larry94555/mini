@@ -23,17 +23,12 @@ class GitCommitApprovalFlowTest {
 
     @Test
     void commitApprovalShowsStagedDiffThenCommits() throws Exception {
-        if (!IntegrationGate.proceed("git", "GitCommitApprovalFlowTest.commitApprovalShowsStagedDiff", gitAvailable())) return;
-        Path repo = Files.createTempDirectory("imini-approve-");
-        git(repo, "init", "-q");
-        git(repo, "config", "user.email", "t@t");
-        git(repo, "config", "user.name", "t");
-        Files.writeString(repo.resolve("hello.txt"), "first\n");
-        git(repo, "add", "-A");
-        git(repo, "commit", "-qm", "feat: init");
+        if (!IntegrationGate.proceed("git", "GitCommitApprovalFlowTest.commitApprovalShowsStagedDiff", GitRepoFixture.available())) return;
+        GitRepoFixture gitRepo = GitRepoFixture.initWithCommit("imini-approve-", "hello.txt", "first\n");
+        Path repo = gitRepo.path();
         // make a new change and stage it -> there is a staged diff to surface
-        Files.writeString(repo.resolve("hello.txt"), "first\nsecond\n");
-        git(repo, "add", "-A");
+        gitRepo.write("hello.txt", "first\nsecond\n");
+        gitRepo.stageAll();
 
         Sandbox sandbox = new Sandbox();
         setField(sandbox, Sandbox.class, "root", repo);
@@ -93,23 +88,6 @@ class GitCommitApprovalFlowTest {
             Thread.sleep(20);
         }
         return approvals.list(session);
-    }
-
-    private static boolean gitAvailable() {
-        try {
-            return new ProcessBuilder("git", "--version").start().waitFor() == 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static void git(Path dir, String... args) throws Exception {
-        java.util.List<String> cmd = new java.util.ArrayList<>();
-        cmd.add("git");
-        cmd.addAll(List.of(args));
-        Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
-        new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        p.waitFor();
     }
 
     private static void setField(Object target, Class<?> cls, String name, Object value) throws Exception {
