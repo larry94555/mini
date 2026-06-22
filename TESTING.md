@@ -5427,3 +5427,37 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   is on the classpath), so they run, and `scripts/integration-coverage.sh` fails the build if any json test
   skipped. This replaces the previous ad-hoc "needs real Jackson" inline skip in the golden trace with a
   uniform, CI-enforced gate.
+
+---
+
+# Offline JSON support — honest pass/skip/fail census
+
+## 625. JSON-dependent tests run offline with a faithful mapper
+
+- The MCP discovery tests parse JSON-RPC via `ObjectMapper`. With a real mapper present they run; with the
+  offline no-op mapper they self-skip (see case 624 and `docs/OFFLINE_JSON.md`). Verified offline with a
+  faithful minimal mapper supplied by the verification scaffold (a real recursive-descent parser/serializer;
+  NOT committed to `src/`, since it would shadow the application's real Jackson): `JsonProbe`
+  `realMapperAvailable()` returns true and the following execute end to end and pass —
+  `McpLiveIntegrationTest.discoversAndInvokesOverStdio`, `discoversAndInvokesOverHttp`,
+  `discoversAndInvokesOverStreamingSse`, `twoServersNamespaceToolsAndRoutePromptsIndependently`,
+  `consumesUnboundedKeepAliveSseStream`, and `GoldenTraceWorkflowTest.mcpPromptSlashCommandTrace` (markers
+  show `(node) ran` + `(json) ran`).
+
+## 626. Offline-vs-CI census (for the JSON/MCP path)
+
+| Test | Offline (no-op mapper) | Offline (faithful mapper) | CI (real Jackson) |
+| --- | --- | --- | --- |
+| `JsonProbe.realMapperAvailable()` | false | true | true |
+| MCP discovery: stdio | skip (`node`/`json`) | pass | pass |
+| MCP discovery: HTTP | skip (`json`) | pass | pass |
+| MCP discovery: streaming SSE | skip (`json`) | pass | pass |
+| MCP discovery: keep-alive SSE | skip (`json`) | pass | pass |
+| golden MCP slash trace | skip (`node`/`json`) | pass | pass |
+| `JsonProbeTest` (pure probe + gate logic) | pass | pass | pass |
+| `GoldenTraceWorkflowTest.editStageCommitTrace` (git) | pass (git present) | pass | pass |
+
+  Notes: the faithful mapper is the verification scaffold's, exercised with `IMINI_REQUIRE_JSON=1`
+  `IMINI_REQUIRE_NODE=1` and the test resources on the classpath. The `node`/`git` families self-skip when
+  those tools are absent. The faithful mapper is faithful-enough, not byte-identical to Jackson (no
+  annotations/polymorphism/custom serializers); see `docs/OFFLINE_JSON.md`.

@@ -59,5 +59,7 @@ Run the same gates CI runs:
   through `IntegrationGate("json", …)`, since `McpManager` parses JSON-RPC with `ObjectMapper` (a no-op in
   the offline scaffold). The full switch set is `IMINI_REQUIRE_PERSISTENCE`, `_NODE`, `_GIT`, `_JSON`,
   `_MODEL`.
+  These tests run offline against a faithful minimal mapper supplied by the verification scaffold (not
+  committed to `src/`, to avoid shadowing real Jackson); see [`docs/OFFLINE_JSON.md`](docs/OFFLINE_JSON.md).
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.
