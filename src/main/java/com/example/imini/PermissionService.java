@@ -80,6 +80,13 @@ public class PermissionService {
 
   private Path root;
 
+  /**
+   * Track B workspace-roots registry. Optional: injected in production, null when {@code PermissionService}
+   * is constructed directly (tests), in which case write confinement falls back to the single {@link #root}.
+   */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private WorkspaceRoots workspaceRoots;
+
   public PermissionService(Approvals approvals, GitInspector git, HookService hooks) {
     this.approvals = approvals;
     this.git = git;
@@ -275,7 +282,15 @@ public class PermissionService {
       return false;
     }
     Object path = args.get("path");
-    return path != null && !isWithin(root, String.valueOf(path));
+    if (path == null) {
+      return false;
+    }
+    if (workspaceRoots != null) {
+      // Outside iff the path is not within any READ_WRITE root. (Being inside a granted root does NOT
+      // auto-approve the write — it merely lets it proceed to the normal approval path below.)
+      return !workspaceRoots.canWrite(String.valueOf(path));
+    }
+    return !isWithin(root, String.valueOf(path));
   }
 
   /** True if {@code candidate}, resolved against {@code root}, stays inside {@code root}. */

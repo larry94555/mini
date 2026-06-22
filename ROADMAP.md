@@ -75,10 +75,10 @@ plus `list_dir`.
 
 ### Ranked changes (each shippable as its own approval-gated PR)
 
-1. **Multi-root model (`WorkspaceRoots` service).** Replace the single `root` with a registry of roots, each
-   with an id, absolute path, and access level (`READ`, `READ_WRITE`). The default root (CWD) is always
-   present and `READ_WRITE`. `Sandbox`/`PermissionService`/`RetrievalService` consult the registry instead of
-   a single field. New config `agent.multi-root.enabled` (default **false**).
+1. **Multi-root model (`WorkspaceRoots` service).** ✅ **Done (PR #1).** Replace the single `root` with a
+   registry of roots, each with an id, absolute path, and access level (`READ`, `READ_WRITE`). The default
+   root (CWD) is always present and `READ_WRITE`. `Sandbox`/`PermissionService`/`RetrievalService` consult the
+   registry instead of a single field. New config `agent.multi-root.enabled` (default **false**).
 
 2. **Approval-gated root grants.** A `grant_workspace_root` tool (mutating, always gated — never auto-approved
    even in `AUTO`) that requests the user authorize an absolute path at a given access level. On approval the
@@ -249,6 +249,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track B PR #1 — WorkspaceRoots registry + wiring (multi-root, default-closed): replaced the single workspace root with a `WorkspaceRoots` registry (id + absolute path + `READ`/`READ_WRITE` access; default root always present and `READ_WRITE`), behind `agent.multi-root.enabled` (default false) with optional `agent.multi-root.roots` seeds. `Sandbox`, `PermissionService`, and `RetrievalService` consult the registry via an optional injected field that falls back to the historical single-root logic when absent — so plain construction (and the test fixtures) are unchanged and, with multi-root disabled, behavior is byte-for-byte identical (verified: `canRead`/`canWrite` reduce to `isWithin(defaultRoot)`). A `READ` root permits reads but denies writes; a write inside a granted `READ_WRITE` root is not auto-allowed — it still goes through the normal approval. Covered by `WorkspaceRootsTest` (6 methods) + `docs/MULTI_ROOT.md`. The grant/scaffold tools are deliberately deferred to PR #2 (this PR is the registry + wiring only).
 
 - ROADMAP direction — Track B (multi-root project work): added a new roadmap track defining how the harness can safely perform real-world cross-project tasks (e.g. "create a TypeScript project at B that ports the code at A") behind explicit, scoped, audited user approvals — an honest current-state assessment of why it's blocked today (single workspace root; reads/writes confined; writes outside the root hard-denied before approval; no project-scaffold capability), safety design principles (default-closed, explicit per-path grants with access levels, approval at the destination-root boundary, plan-mode-first manifests, audited + capability-scoped), and six ranked approval-gated PRs (multi-root registry, grant/revoke-root tools, `writesOutsideGrantedRoots`, transactional `create_project`/`write_files`, the port workflow, and mandatory golden traces + docs incl. Windows path handling). Docs-only; no code change yet.
 

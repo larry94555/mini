@@ -63,7 +63,7 @@ No cloud API key is required.
 | File tools | `read_file`, `view`, `list_dir`, `write_file`, `edit_file`, `apply_patch` |
 | Codebase navigation | `glob`, `grep`, `repo_tree`, `read_many`, `outline`, `find_symbol`, `find_references` |
 | Git awareness | read: `git_status`, `git_diff`, `git_log`, `git_blame`; **write: `git_stage`, `git_commit`, `git_branch`** (mutating, approval-gated) |
-| Safety | Permission modes, workspace confinement, command screening, optional container command wrapper |
+| Safety | Permission modes, workspace confinement (multi-root registry, default-closed — see [`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md)), command screening, optional container command wrapper |
 | Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), persist/resume, and per-session history, coding profile guidance |
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
@@ -810,6 +810,25 @@ disable edit verification entirely with `agent.verify-edits=false`.
 | `ask` | Prompt before mutating tools. This is the default. |
 | `auto` | Approve mutating tools automatically, while still applying policy and path confinement. |
 | `plan` | Record mutating actions as a plan. Do not execute them. |
+
+### Workspace roots (multi-root, default-off)
+
+By default imini confines every read and write to a single workspace root (the current directory, or
+`agent.workspace-root`). For real cross-project tasks — e.g. *"create a TypeScript project at B that ports
+the code at A"* — a registry of roots can be enabled, each with an access level:
+
+```properties
+# Off by default: with this false, behavior is byte-for-byte the single-workspace harness.
+agent.multi-root.enabled=true
+# CSV of path|access entries, honored only when enabled (access is read or read_write):
+agent.multi-root.roots=/home/larry/github/mini|read, /home/larry/github/typescript-project|read_write
+```
+
+The default root is always present and `read_write`; a `read` root permits reads but **denies writes**; a
+`read_write` root permits both (writes still go through the normal approval). Reads/writes outside every
+registered root remain denied. With multi-root disabled, the seeds are ignored and nothing changes. See
+[`docs/MULTI_ROOT.md`](docs/MULTI_ROOT.md) for the full model, access levels, and the (forthcoming)
+approval-gated grant flow.
 
 ## Codebase navigation workflow
 
