@@ -78,6 +78,44 @@ public class WebSearchObservabilityTest {
     assertTrue(engines.containsKey("duckduckgo"), "engine recorded as ran: " + engines);
   }
 
+  @Test
+  void serviceRecordsWhichEnginesAnswered() {
+    SearchEngine ddg = new SearchEngine() {
+      @Override public String name() { return "duckduckgo"; }
+      @Override public List<SearchResult> search(String q) {
+        return List.of(new SearchResult("R", "https://e/1", "s", "duckduckgo", 1L));
+      }
+    };
+    SearchEngine moj = new SearchEngine() {
+      @Override public String name() { return "mojeek"; }
+      @Override public List<SearchResult> search(String q) {
+        return List.of(new SearchResult("R2", "https://e/2", "s", "mojeek", 1L));
+      }
+    };
+    SearchEngine quiet = new SearchEngine() {
+      @Override public String name() { return "searxng"; }
+      @Override public List<SearchResult> search(String q) { return List.of(); } // answers nothing
+    };
+    WebSearchService svc = new WebSearchService(List.of(ddg, moj, quiet), null);
+    svc.search("q");
+    @SuppressWarnings("unchecked")
+    List<String> answered = (List<String>) svc.metrics().snapshot().get("last_engines_answered");
+    assertTrue(answered.contains("duckduckgo") && answered.contains("mojeek"),
+        "engines that returned results are recorded: " + answered);
+    assertFalse(answered.contains("searxng"), "an engine that answered nothing is not listed: " + answered);
+  }
+
+  @Test
+  void distinctSourceEnginesIsPure() {
+    List<SearchResult> results = List.of(
+        new SearchResult("a", "https://x/1", "", "duckduckgo", 1L),
+        new SearchResult("b", "https://x/2", "", "mojeek", 1L),
+        new SearchResult("c", "https://x/3", "", "duckduckgo", 1L));
+    assertEquals(List.of("duckduckgo", "mojeek"), WebSearchEval.distinctSourceEngines(results),
+        "distinct, sorted source engines");
+    assertTrue(WebSearchEval.distinctSourceEngines(null).isEmpty(), "null-safe");
+  }
+
   // ---- pure relevance eval scorers ----
 
   @Test

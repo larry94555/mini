@@ -5596,3 +5596,25 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   so the engine is gracefully absent unless configured. `WebSearchService` honors `agent.web-search.engines`
   for subset/order (`mojeek,duckduckgo` puts Mojeek first); unknown names and unconfigured engines (SearXNG
   with no base URL) are skipped without error.
+
+---
+
+# Web search — live smoke test + engines-answered (Track C, step 7)
+
+## 639. Live end-to-end smoke test (WebSearchLiveTest, network-gated)
+
+- **Run locally:** `IMINI_REQUIRE_NETWORK=1 ./mvnw -Dtest=WebSearchLiveTest test` (self-skips offline). Add
+  `-Dagent.web-search.searxng-base-url=https://searx.example` to include SearXNG in the live run.
+- `liveQueryReturnsFusedResultsWithProvenance` runs a real query through the full default engine set and
+  asserts non-empty fused results, every result carrying a real http(s) URL and a source engine, at least one
+  distinct source engine, and that `last_engines_answered` is populated in the metrics snapshot.
+- `liveInstantAnswerIsConfidentWhenAvailable` runs a factual query and, if an `instant` result is present,
+  asserts it cites a real URL and a non-blank answer; if none is returned it degrades gracefully (skips, does
+  not fail). Both gate on the `network` family; CI sets `IMINI_REQUIRE_NETWORK=1`.
+
+## 640. Engines-answered metric + distinct source engines (offline, pure)
+
+- `WebSearchService` records which engines actually returned results on the last query, surfaced as
+  `last_engines_answered` in `GET /admin/web-search`; verified offline with fake engines (an engine that
+  answers nothing is excluded). `WebSearchEval.distinctSourceEngines` is a pure, null-safe, sorted-distinct
+  helper, unit-tested directly.

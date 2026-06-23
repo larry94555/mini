@@ -261,6 +261,7 @@ public class WebSearchService {
     lastRan = ran;
     lastSkipped = skipped;
     lastInstant = !instant.isEmpty();
+    metrics.recordAnswered(WebSearchEval.distinctSourceEngines(fused));
     return fused;
   }
 

@@ -66,4 +66,17 @@ public final class WebSearchEval {
     }
     return false;
   }
+
+  /** The distinct source engines present in a result list, sorted — i.e. which engines actually answered. */
+  public static java.util.List<String> distinctSourceEngines(List<SearchResult> results) {
+    java.util.TreeSet<String> set = new java.util.TreeSet<>();
+    if (results != null) {
+      for (SearchResult r : results) {
+        if (r != null && r.sourceEngine() != null && !r.sourceEngine().isBlank()) {
+          set.add(r.sourceEngine());
+        }
+      }
+    }
+    return new java.util.ArrayList<>(set);
+  }
 }
