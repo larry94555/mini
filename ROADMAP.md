@@ -336,6 +336,11 @@ When asked to pick the next task, follow this order:
 
 ## Later / lower-priority (after "Build next")
 
+- **Meta-skill enablers (optional; the `skill-builder`/`tool-builder` skills work without these):**
+  (a) plan-lifecycle hooks so a skill can be invoked automatically at the prepare / review / sub-plan /
+  tool-select / goal-eval / post-mortem stages rather than only on relevance match; (b) an MCP hot-reload
+  tool (e.g. `reload_mcp`) so a newly installed MCP server becomes available without restarting mini.
+
 These remain valuable but rank below the workflow gaps and the educational core:
 
 - **Educational completeness:** more trace documents, a richer glossary, "how to add a tool /
@@ -348,6 +353,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
   workflow coverage.
 
 ## Recently completed
+
+- Bundled two meta-skills (drop-in, no code change): `skill-builder` — when a plan would benefit from external best practices, research them with the `web_search`/`web_fetch` tools and capture them as a new topic-named skill via `save_skill` for reuse across the plan lifecycle; and `tool-builder` — before settling for built-in tools, research a better-fit locally installable tool (MCP-biased), get explicit user permission, install via the sandboxed exec tool, and register it in `mcp.json` for discovery. Placed under `skills/skill-builder/` and `skills/tool-builder/` like the other bundled skills (auto-indexed, `load_skill`/`search_skills`-discoverable; verified to parse, index, and lex-select correctly). Two optional future enhancements would make them first-class (see Later/lower-priority): plan-lifecycle hooks so `skill-builder` is applied at each planning stage, and an MCP hot-reload tool so `tool-builder` does not require a restart after install.
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
