@@ -5557,3 +5557,22 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   recorded page fixture containing an injection attempt (`page-injection.txt`); with `scrubInjections=false`
   the raw text is left as-is (documenting the flag). `WebSearchService` passes
   `agent.web-search.scrub-injections` (default true).
+
+---
+
+# Web search — observability + relevance eval (Track C, step 5)
+
+## 635. Per-query metrics (WebSearchObservabilityTest)
+
+- **Run:** `./mvnw -Dtest=WebSearchObservabilityTest test` (offline; pure).
+- `WebSearchMetrics` aggregates total queries, cache hits + hit-rate, instant-surfaced count, and a
+  per-engine ran/skipped breakdown, with a one-line query `marker()`; `WebSearchService` records one accurate
+  metric per query (engines ran/skipped, cache hit, instant surfaced, result count, distilled-passage count),
+  verified with fake engines. Exposed at `GET /admin/web-search` (admin-gated).
+
+## 636. Fixture relevance eval (WebSearchEval)
+
+- Pure scorers — `topNContainsUrl`, `topNContainsDomain`, `passagesContainToken` — always run offline. The
+  fixture-driven eval parses recorded engine HTML (`ddg-html.html`, `mojeek.html`), fuses, and asserts the
+  expected URL is in the fused top-N; it gates through `IntegrationGate.proceed("html", …)`, self-skipping
+  under the no-op jsoup stub and running in CI (verified end-to-end against real jsoup).
