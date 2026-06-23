@@ -235,7 +235,7 @@ So this is **not** as good as it can be — there is a clear, free, token-light 
    the top-N results via `webFetch` + `HtmlExtractor`, chunk them, rank passages with `RetrievalService`
    (BM25/embeddings — no LLM), and return only the few best passages **with citations**. The model receives
    distilled evidence, not raw pages.
-7. **Trust & safety.** A domain allow/deny list + a lightweight reputation signal (HTTPS, primary-source
+7. **Trust & safety.** ✅ **Done.** A domain allow/deny list + a lightweight reputation signal (HTTPS, primary-source
    preference, SEO-spam down-ranking), tracking-redirect stripping, and prompt-injection scrubbing of
    untrusted fetched text via `Redact` before it reaches the context.
 8. **Self-hosted SearXNG backend.** A first-class `SearchEngine` for an operator-run SearXNG instance
@@ -351,6 +351,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track C step 4 — trust & safety: distilled web passages are now scrubbed for prompt-injection before entering the context — a new pure `SearchSafety.neutralizeInjections` turns directives ("ignore previous instructions", `system:`/`assistant:` role lines, `<|…|>`/`<system>` tags) into a `[redacted-instruction]` marker, composed with the existing `Redact.scrubPii` for secrets, applied per passage in `SearchDistiller` (on by default, `agent.web-search.scrub-injections`). Added a default-neutral domain-trust re-rank (`SearchSafety.applyTrust` + `parsePenalties`/`trustDelta`): a no-op unless `agent.web-search.trust-penalties` lists `host=penalty` entries, which sink SEO-spam/low-quality hosts (and sub-domains) below trusted ones with an https tie-breaker. Alt 1: generalized result-level redirect unwrapping in `SearchUrls.unwrapRedirect` (DuckDuckGo `uddg=` + generic `url=`/`q=` wrappers) feeding `clean()`. Alt 2: `docs/WEB_SEARCH.md` "trust & safety" note, README, golden fixtures + `SearchSafetyTest`/distiller scrubbing tests (TESTING 633-634). All pure, free, no LLM tokens; verified offline (24 web-search tests pass).
 
 - Track C step 3 — content distillation: added `SearchDistiller`, which turns the top fused results into the few best cited passages — it fetches each page (reusing `HtmlExtractor.mainText`), splits the text into bounded passages, scores them against the query with `RetrievalService`'s lexical ranker (BM25-style, no LLM tokens), removes near-duplicate passages across sources (token-Jaccard), and returns the best ones tagged with source URLs. Wired into `WebSearchService.searchText` behind `agent.web-search.distill` (+ `distill-top-n`/`distill-max-passages`), off by default so behavior is unchanged; the page fetcher is injected and null offline so distillation self-skips. Split/score/dedup are pure and unit-tested offline (`SearchDistillerTest`, golden page-text fixtures, TESTING 631-632). Alt 1: near-duplicate passage dedup across sources (pure). Alt 2: `docs/WEB_SEARCH.md` "content distillation" note + README. Verified offline: 22 web-search tests pass; distillation returns cited passages and self-skips with no fetcher.
 

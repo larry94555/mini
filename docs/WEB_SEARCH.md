@@ -78,6 +78,27 @@ splitting/scoring/dedup is pure and unit-tested offline; only the page fetch tou
 fetcher is null offline so distillation self-skips. Distillation is **off by default**, so behavior is
 unchanged unless enabled.
 
+## Trust & safety
+
+Because distillation feeds untrusted external page text to the model, the pipeline defends against two risks
+(both pure, no network, no LLM):
+
+- **Prompt-injection scrubbing (on by default).** Each distilled passage is run through
+  `SearchSafety.neutralizeInjections` (which neutralizes directives like "ignore all previous instructions",
+  `system:`/`assistant:` role lines, and `<|…|>`/`<system>` tags into a `[redacted-instruction]` marker) and
+  the existing `Redact.scrubPii` (secrets/PII), before it enters the context. Toggle with
+  `agent.web-search.scrub-injections` (default `true`); the patterns are conservative to avoid mangling
+  ordinary prose.
+- **Domain-trust re-ranking (default-neutral).** `SearchSafety.applyTrust` stably re-ranks fused results using
+  a small configurable host penalty list (`agent.web-search.trust-penalties`, comma-separated
+  `host=penalty`, matching sub-domains) with an https tie-breaker. With no penalties configured it is a
+  **no-op** (ordering byte-identical), so you opt in by listing the SEO-spam/low-quality hosts you want
+  down-ranked.
+
+Result URLs are also normalized at the result level: `SearchUrls.unwrapRedirect` unwraps DuckDuckGo
+(`uddg=`) and generic `url=`/`q=` redirect wrappers (Google/Bing/aggregators) and strips tracking params, so
+returned/deduped URLs point at the real target.
+
 ## Testing
 
 - **Pure logic (offline, always runs):** `SearchFusionTest` covers redirect-unwrapping, tracking-param

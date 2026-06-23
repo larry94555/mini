@@ -69,5 +69,8 @@ Run the same gates CI runs:
 - **Content distillation logic is pure** (`SearchDistiller` split/score/dedup, reusing
   `RetrievalService.lexicalScore`) and unit-tested offline; only page fetching touches the network (injected
   fetcher, null offline). See [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
+- **Untrusted fetched text is scrubbed for prompt-injection** (`SearchSafety.neutralizeInjections` +
+  `Redact.scrubPii`) before distilled passages enter the context; domain-trust re-ranking
+  (`SearchSafety.applyTrust`) is default-neutral and opt-in via a host penalty list. All pure/offline-tested.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

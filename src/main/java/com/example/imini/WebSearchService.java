@@ -48,6 +48,10 @@ public class WebSearchService {
   int distillTopN = 3;
   @Value("${agent.web-search.distill-max-passages:3}")
   int distillMaxPassages = 3;
+  @Value("${agent.web-search.scrub-injections:true}")
+  boolean scrubInjections = true;
+  @Value("${agent.web-search.trust-penalties:}")
+  String trustPenaltiesCsv = "";
 
   /** Page fetcher (url -> clean text) for distillation; null offline so distillation self-skips. */
   java.util.function.Function<String, String> pageFetcher;
@@ -181,6 +185,8 @@ public class WebSearchService {
     }
 
     List<SearchResult> ranked = SearchFusion.fuse(perEngine);
+    // Trust re-rank (default-neutral: a no-op unless agent.web-search.trust-penalties is configured).
+    ranked = SearchSafety.applyTrust(ranked, SearchSafety.parsePenalties(trustPenaltiesCsv));
     // Prepend the instant answer, deduped against the ranked list by canonical URL.
     List<SearchResult> combined = new ArrayList<>();
     java.util.Set<String> seen = new java.util.HashSet<>();
@@ -209,7 +215,7 @@ public class WebSearchService {
     List<SearchResult> results = search(query);
     if (distill && pageFetcher != null && !results.isEmpty()) {
       List<SearchDistiller.Passage> passages =
-          SearchDistiller.distill(query, results, pageFetcher, distillTopN, distillMaxPassages);
+          SearchDistiller.distill(query, results, pageFetcher, distillTopN, distillMaxPassages, scrubInjections);
       String distilled = SearchDistiller.render(passages);
       if (!distilled.isBlank()) {
         // Distilled cited evidence first, then the compact result list for navigation.

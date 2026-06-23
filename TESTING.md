@@ -5532,3 +5532,28 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   Page fetching is the only impure step; offline the fetcher is null so distillation self-skips. Passage
   splitting/scoring/dedup were verified offline against recorded page-text fixtures
   (`src/test/resources/websearch/page-*.txt`).
+
+---
+
+# Web search — trust & safety (Track C, step 4)
+
+## 633. Prompt-injection scrubbing + domain trust (SearchSafetyTest)
+
+- **Run:** `./mvnw -Dtest=SearchSafetyTest test` (offline; pure — no network/jsoup/LLM).
+- **Injection neutralization:** `SearchSafety.neutralizeInjections` turns directives ("ignore all previous
+  instructions", `system:`/`assistant:` role lines, `<|…|>`/`<system>` tags, "you are now …") into a
+  `[redacted-instruction]` marker while preserving ordinary prose; `looksLikeInjection` does not flag normal
+  "system of equations" text.
+- **Domain trust:** `parsePenalties` reads `host=penalty` entries; `applyTrust` is a no-op with no/empty
+  penalties (order unchanged) and sinks penalized hosts (incl. sub-domains) below trusted ones when a list is
+  configured; `trustDelta` penalizes sub-domains of a penalized host.
+- **Redirect unwrapping:** `SearchUrls.unwrapRedirect` unwraps DuckDuckGo `uddg=` and generic `url=` wrappers
+  to the real target.
+
+## 634. Distiller scrubbing integration
+
+- `SearchDistiller.distill(..., scrubInjections=true)` neutralizes injection patterns (via `SearchSafety`)
+  and scrubs secrets (via `Redact.scrubPii`) in each fetched passage before ranking, verified against a
+  recorded page fixture containing an injection attempt (`page-injection.txt`); with `scrubInjections=false`
+  the raw text is left as-is (documenting the flag). `WebSearchService` passes
+  `agent.web-search.scrub-injections` (default true).
