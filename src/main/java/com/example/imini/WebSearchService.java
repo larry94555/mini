@@ -34,8 +34,8 @@ public class WebSearchService {
   private final Database db; // may be null / unavailable
   private final Map<String, CacheEntry> memCache = new ConcurrentHashMap<>();
 
-  @Value("${agent.web-search.engines:duckduckgo,mojeek}")
-  private String enginesCsv = "duckduckgo,mojeek";
+  @Value("${agent.web-search.engines:duckduckgo,mojeek,searxng}")
+  private String enginesCsv = "duckduckgo,mojeek,searxng";
   @Value("${agent.web-search.max-results:6}")
   private int maxResults = 6;
   @Value("${agent.web-search.cache-ttl-seconds:0}")
@@ -52,6 +52,8 @@ public class WebSearchService {
   boolean scrubInjections = true;
   @Value("${agent.web-search.trust-penalties:}")
   String trustPenaltiesCsv = "";
+  @Value("${agent.web-search.searxng-base-url:}")
+  String searxngBaseUrl = "";
 
   /** Page fetcher (url -> clean text) for distillation; null offline so distillation self-skips. */
   java.util.function.Function<String, String> pageFetcher;
@@ -92,7 +94,8 @@ public class WebSearchService {
         .followRedirects(HttpClient.Redirect.NORMAL)
         .connectTimeout(Duration.ofSeconds(15))
         .build();
-    this.engines = List.of(new InstantAnswerEngine(http), new DuckDuckGoEngine(http), new MojeekEngine(http));
+    this.engines = List.of(new InstantAnswerEngine(http), new DuckDuckGoEngine(http), new MojeekEngine(http),
+        new SearxngEngine(http, () -> searxngBaseUrl));
     // Real page fetcher for distillation: fetch + extract main text (reusing HtmlExtractor).
     this.pageFetcher = url -> {
       try {
@@ -118,6 +121,11 @@ public class WebSearchService {
     this.db = db;
   }
 
+  /** Test hook: override the configured engine order/subset. */
+  void setEnginesCsvForTest(String csv) {
+    this.enginesCsv = csv;
+  }
+
   private long now() {
     return nowOverrideMs >= 0 ? nowOverrideMs : System.currentTimeMillis();
   }
@@ -125,9 +133,14 @@ public class WebSearchService {
   private List<SearchEngine> enabledEngines() {
     Map<String, SearchEngine> byName = new LinkedHashMap<>();
     for (SearchEngine e : engines) {
-      if (!"instant".equalsIgnoreCase(e.name())) { // instant is surfaced separately, not fused
-        byName.put(e.name().toLowerCase(Locale.ROOT), e);
+      if ("instant".equalsIgnoreCase(e.name())) {
+        continue; // instant is surfaced separately, not fused
       }
+      // Gracefully omit an engine that has no configuration (e.g. SearXNG with no base URL).
+      if (e instanceof SearxngEngine sx && !sx.configured()) {
+        continue;
+      }
+      byName.put(e.name().toLowerCase(Locale.ROOT), e);
     }
     if (enginesCsv == null || enginesCsv.isBlank()) {
       return new ArrayList<>(byName.values());

@@ -436,7 +436,10 @@ the model, fetched passages are scrubbed for prompt-injection (e.g. "ignore prev
 tags) and secrets by default (`agent.web-search.scrub-injections`); you can also down-rank SEO-spam hosts
 with a configurable `agent.web-search.trust-penalties` list (`host=penalty`, default neutral). Per-query
 metrics — engines run/skipped, cache hit-rate, instant-answer and distillation counts — are available at the
-admin endpoint `GET /admin/web-search` (and emitted as a one-line log/trace marker). See
+admin endpoint `GET /admin/web-search` (and emitted as a one-line log/trace marker). To add breadth and
+privacy you can point it at your own free, self-hosted SearXNG instance with
+`agent.web-search.searxng-base-url` (absent by default); the engine set and order are configurable via
+`agent.web-search.engines` (default `duckduckgo,mojeek,searxng`). See
 [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
 
 **Audit-log viewer.** `GET /admin/audit.html` (admin) renders a filterable HTML view over the audit table — the same data as `GET /audit`, but browsable. Filter by user, action, and target, and now also by **time range** (`since`/`until`, accepting an ISO-8601 instant, a `YYYY-MM-DD` date, or epoch millis) via the form, which round-trips to query params. Results are **paginated** — the page shows "Showing X–Y of Z" with Prev/Next links that preserve the active filters (`offset`/`limit` params) — so it stays usable on a busy deployment. Capability denials, spend alerts, and tool rate-limit rejections are highlighted. Raw JSON remains at `/audit`, and CSV/JSON export at `/audit/export`.

@@ -135,3 +135,22 @@ A small **offline relevance eval** scores the pipeline from recorded fixtures wi
 passage. The fixture-parse portion gates on a real HTML parser (`IntegrationGate("html", …)`), so it
 self-skips under the no-op jsoup stub and runs in CI; the scorers themselves are pure and always run. See
 TESTING cases 635-636.
+
+## Self-hosted SearXNG
+
+For more breadth and privacy, point the pipeline at your own [SearXNG](https://searxng.org) instance — a
+free, operator-run metasearch engine (no paid API). Set:
+
+```
+agent.web-search.searxng-base-url = https://searx.example.org
+```
+
+`SearxngEngine` then queries `GET {base}/search?q=…&format=json` and parses the `results` array (title, url,
+content) into the standard `SearchResult` shape (`sourceEngine="searxng"`). It is a first-class member of the
+ordered engine set (behind the same per-engine circuit breaker, fused with the others). When the base URL is
+**blank (the default) the engine is simply absent** — no engine, no error.
+
+The engine set itself is config-driven: `agent.web-search.engines` (default `duckduckgo,mojeek,searxng`)
+chooses the subset and order; names with no configuration (e.g. `searxng` without a base URL) or unknown
+names are skipped gracefully. SearXNG's JSON parsing is pure (`SearxngEngine.parse`), unit-tested offline and
+gated on a real JSON mapper via `IntegrationGate("json", …)`.
