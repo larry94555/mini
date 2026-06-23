@@ -87,5 +87,8 @@ Run the same gates CI runs:
   registry-delta (`serversToStop`/`serversToStart`, prune by `<server>_` prefix) are pure and offline-tested;
   `reload_mcp` / `POST /admin/mcp/reload` relaunch changed servers without a restart. Tests that spawn a real
   MCP child gate on the `node` family. The live reload path is proven end to end by `McpHotReloadIntegrationTest` (node+json-gated), which asserts the live tool set via the production `ToolRegistry.republishMcp`.
+- **Plan-lifecycle hooks** bind skills to planning stages via `skills.lifecycle`; the stage model, binding
+  parser, and selector (`PlanLifecycle`) are pure and offline-tested, an empty registry is a no-op, and the
+  selector reuses `SkillLibrary.select`. See [`docs/PLAN_LIFECYCLE.md`](docs/PLAN_LIFECYCLE.md).
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

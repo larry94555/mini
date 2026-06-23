@@ -5705,3 +5705,23 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
 - `ToolRegistry.republishMcp` (pure) removes stale MCP tool names from a live map, adds the current MCP tools,
   and returns the new name set — built-ins untouched. `McpConfig.toolCountsByServer`/`toolPrefix` (pure)
   compute per-server tool counts for diagnostics. Both always run offline.
+
+---
+
+# Plan-lifecycle hooks (completes the skill-builder meta-skill)
+
+## 648. Pure plan-lifecycle model (PlanLifecycleTest)
+
+- **Run:** `./mvnw -Dtest=PlanLifecycleTest test` (offline; pure — no model/IO).
+- **Covers:** stage id round-trip (`fromId`/`id`); binding parse (`prepare=a,b; review=c`, unknown stages
+  ignored, `asIdMap` omits empty stages); **empty registry is a no-op**; the selector returns only
+  bound-and-present skills, ordered by the existing lexical/BM25 scorer over the plan text, with
+  bound-but-unmatched skills retained in binding order; and the `k` cap.
+
+## 649. Lifecycle wiring (SkillService + plan run + diagnostics)
+
+- `SkillService.lifecycleAddendum(stage, planText, sessionId)` returns the bound skills' bodies for a stage
+  (or "" when disabled / nothing bound — so behavior is unchanged unless `skills.lifecycle` is set). The plan
+  run injects it at three stages: **prepare** (plan drafting), **sub-plan** (each step), and **goal-eval**
+  (synthesis). `GET /admin/skills/lifecycle` exposes the active stage->skill bindings
+  (`SkillService.lifecycleBindings`). Unbound-skill surfacing (the index + auto-load) is untouched.
