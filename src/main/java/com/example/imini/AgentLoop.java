@@ -352,6 +352,7 @@ public class AgentLoop {
         if (slash.isHelp(goal)) return slash.help();
         final String g = slash.expand(goal);
         recorder.beginRun(sessionId); // fresh transcript for this plan
+        skills.resetLifecycleRecord();   // fresh per-run lifecycle record
 
         sink.log("plan: drafting steps");
         // planning is read-only (PLAN mode) and should not call tools; we just want the step list

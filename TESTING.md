@@ -5725,3 +5725,30 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   run injects it at three stages: **prepare** (plan drafting), **sub-plan** (each step), and **goal-eval**
   (synthesis). `GET /admin/skills/lifecycle` exposes the active stage->skill bindings
   (`SkillService.lifecycleBindings`). Unbound-skill surfacing (the index + auto-load) is untouched.
+
+---
+
+# Plan-lifecycle hooks — live end-to-end (closes the live-wiring gap)
+
+## 650. Deterministic marker injection (PlanLifecycleTest additions, offline)
+
+- A marker skill bound to a stage is selected by `PlanLifecycle.selectForStage` and its body (carrying a unique
+  token) survives `SkillLibrary.format` — the same selection+format the production `lifecycleAddendum`
+  performs; an empty registry selects nothing. `PlanLifecycle.appliedNames` (pure) lists the applied skills.
+  Proves the binding (not the model) drives the marker into a stage prompt. Always runs offline.
+
+## 651. Live plan-run influence (PlanLifecycleLiveTest, model-gated)
+
+- **Run locally:** `IMINI_REQUIRE_MODEL=1 ./mvnw -Dtest=PlanLifecycleLiveTest test` (self-skips unless a model
+  is reachable, i.e. `llama.serverContext() > 0`).
+- A `@SpringBootTest` binds a marker skill to the prepare + sub-plan stages and drives the production
+  `AgentLoop.runPlan`; it asserts the run surfaces the marker token and that `GET /admin/skills/lifecycle`
+  records the prepare stage as fired — then a control run with an empty registry must NOT surface the marker
+  (proving the binding, not the model, caused it). CI's eval-gate job provisions a tiny model and runs this
+  test with `IMINI_REQUIRE_MODEL=1`.
+
+## 652. Last-applied diagnostics
+
+- `SkillService` records which stages fired and which skills were applied during the most recent plan run
+  (reset at the start of each `runPlan`), exposed as `last_applied` in `GET /admin/skills/lifecycle`
+  alongside the configured `bindings`.

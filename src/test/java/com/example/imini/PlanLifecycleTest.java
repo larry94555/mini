@@ -79,4 +79,40 @@ public class PlanLifecycleTest {
     List<SkillLibrary.Skill> all = List.of(skill("a", "", ""), skill("b", "", ""), skill("c", "", ""));
     assertEquals(2, PlanLifecycle.selectForStage(PlanLifecycle.Stage.PREPARE, b, all, "x", 2).size());
   }
+
+  @Test
+  void appliedNamesListsPickedSkills() {
+    List<SkillLibrary.Skill> picks = List.of(skill("api-design", "", ""), skill("db-migration", "", ""));
+    assertEquals(List.of("api-design", "db-migration"), PlanLifecycle.appliedNames(picks));
+    assertTrue(PlanLifecycle.appliedNames(null).isEmpty(), "null-safe");
+  }
+
+  /**
+   * Deterministic proof (offline) that a bound skill's distinctive guidance reaches the stage prompt: when a
+   * marker skill is bound to a stage, it is selected and its body — including the unique marker — survives
+   * formatting for injection; with an empty registry nothing is selected, so the marker is absent. This is the
+   * same selection+format the production lifecycleAddendum performs; the live model-gated counterpart is
+   * PlanLifecycleLiveTest.
+   */
+  @Test
+  void boundMarkerSkillBodyReachesStageAddendum() {
+    String marker = "LIFECYCLE_MARKER_7Q";
+    SkillLibrary.Skill markerSkill = new SkillLibrary.Skill(
+        "lifecycle-marker", "a deterministic marker skill", "Always include " + marker + " in your output.",
+        "when planning", "", List.of(), "");
+    List<SkillLibrary.Skill> all = List.of(markerSkill, skill("noise", "unrelated", ""));
+
+    PlanLifecycle.Bindings bound = PlanLifecycle.Bindings.parse("prepare=lifecycle-marker; sub-plan=lifecycle-marker");
+    for (PlanLifecycle.Stage stage : List.of(PlanLifecycle.Stage.PREPARE, PlanLifecycle.Stage.SUB_PLAN)) {
+      List<SkillLibrary.Skill> picks = PlanLifecycle.selectForStage(stage, bound, all, "draft a plan", 2);
+      assertEquals(List.of("lifecycle-marker"), PlanLifecycle.appliedNames(picks), "marker bound at " + stage.id());
+      String body = SkillLibrary.format(picks.get(0), 4000);
+      assertTrue(body.contains(marker), "the marker reaches the injected body at " + stage.id() + ": " + body);
+    }
+
+    // Control: empty registry -> no skills selected -> the marker cannot reach any stage prompt.
+    PlanLifecycle.Bindings empty = PlanLifecycle.Bindings.parse("");
+    assertTrue(PlanLifecycle.selectForStage(PlanLifecycle.Stage.PREPARE, empty, all, "draft a plan", 2).isEmpty(),
+        "empty registry injects nothing (the binding, not the model, causes the marker)");
+  }
 }
