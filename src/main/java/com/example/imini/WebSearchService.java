@@ -40,6 +40,8 @@ public class WebSearchService {
   private int maxResults = 6;
   @Value("${agent.web-search.cache-ttl-seconds:0}")
   long cacheTtlSeconds = 0; // 0 disables caching (byte-identical to no cache)
+  @Value("${agent.web-search.instant-answers:true}")
+  boolean instantAnswers = true;
 
   /** Settable clock for tests. */
   long nowOverrideMs = -1;
@@ -51,7 +53,7 @@ public class WebSearchService {
         .followRedirects(HttpClient.Redirect.NORMAL)
         .connectTimeout(Duration.ofSeconds(15))
         .build();
-    this.engines = List.of(new DuckDuckGoEngine(http), new MojeekEngine(http));
+    this.engines = List.of(new InstantAnswerEngine(http), new DuckDuckGoEngine(http), new MojeekEngine(http));
   }
 
   /** Test constructor: explicit engines + database, no real HTTP. */
@@ -65,28 +67,36 @@ public class WebSearchService {
   }
 
   private List<SearchEngine> enabledEngines() {
-    if (enginesCsv == null || enginesCsv.isBlank()) {
-      return engines;
-    }
-    List<String> order = new ArrayList<>();
-    for (String s : enginesCsv.split(",")) {
-      String t = s.trim().toLowerCase(Locale.ROOT);
-      if (!t.isEmpty()) {
-        order.add(t);
-      }
-    }
     Map<String, SearchEngine> byName = new LinkedHashMap<>();
     for (SearchEngine e : engines) {
-      byName.put(e.name().toLowerCase(Locale.ROOT), e);
+      if (!"instant".equalsIgnoreCase(e.name())) { // instant is surfaced separately, not fused
+        byName.put(e.name().toLowerCase(Locale.ROOT), e);
+      }
+    }
+    if (enginesCsv == null || enginesCsv.isBlank()) {
+      return new ArrayList<>(byName.values());
     }
     List<SearchEngine> out = new ArrayList<>();
-    for (String n : order) {
-      SearchEngine e = byName.get(n);
+    for (String s : enginesCsv.split(",")) {
+      SearchEngine e = byName.get(s.trim().toLowerCase(Locale.ROOT));
       if (e != null) {
         out.add(e);
       }
     }
-    return out.isEmpty() ? engines : out;
+    return out.isEmpty() ? new ArrayList<>(byName.values()) : out;
+  }
+
+  /** The special "instant" engine (direct cited answers), if configured; surfaced ahead of ranked results. */
+  private SearchEngine instantEngine() {
+    if (!instantAnswers) {
+      return null;
+    }
+    for (SearchEngine e : engines) {
+      if ("instant".equalsIgnoreCase(e.name())) {
+        return e;
+      }
+    }
+    return null;
   }
 
   private CircuitBreaker breakerFor(String name) {
@@ -106,6 +116,26 @@ public class WebSearchService {
     }
 
     List<List<SearchResult>> perEngine = new ArrayList<>();
+
+    // Direct cited answer first (if available + confident), behind its own circuit breaker.
+    List<SearchResult> instant = List.of();
+    SearchEngine ia = instantEngine();
+    if (ia != null) {
+      CircuitBreaker cb = breakerFor(ia.name());
+      if (cb.allowCall()) {
+        try {
+          List<SearchResult> r = ia.search(query);
+          cb.recordSuccess();
+          if (r != null && !r.isEmpty()) {
+            instant = r;
+          }
+        } catch (Exception e) {
+          cb.recordFailure();
+          log.info("[web-search] instant answer failed: {}", e.getMessage());
+        }
+      }
+    }
+
     for (SearchEngine engine : enabledEngines()) {
       CircuitBreaker cb = breakerFor(engine.name());
       if (!cb.allowCall()) {
@@ -124,7 +154,21 @@ public class WebSearchService {
       }
     }
 
-    List<SearchResult> fused = SearchFusion.fuse(perEngine);
+    List<SearchResult> ranked = SearchFusion.fuse(perEngine);
+    // Prepend the instant answer, deduped against the ranked list by canonical URL.
+    List<SearchResult> combined = new ArrayList<>();
+    java.util.Set<String> seen = new java.util.HashSet<>();
+    for (SearchResult r : instant) {
+      if (seen.add(SearchUrls.canonicalKey(r.url()))) {
+        combined.add(r);
+      }
+    }
+    for (SearchResult r : ranked) {
+      if (seen.add(SearchUrls.canonicalKey(r.url()))) {
+        combined.add(r);
+      }
+    }
+    List<SearchResult> fused = combined;
     if (fused.size() > maxResults) {
       fused = new ArrayList<>(fused.subList(0, maxResults));
     }

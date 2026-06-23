@@ -425,7 +425,9 @@ the engine order with `agent.web-search.engines` (e.g. `duckduckgo,mojeek`) and 
 `agent.web-search.max-results`. Optional **result caching** avoids re-hitting the network (and re-spending
 tokens) for repeated queries: set `agent.web-search.cache-ttl-seconds` to a positive TTL to cache fused
 results in SQLite (via the shared database, with an in-memory fallback); `0` (the default) disables caching.
-See [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
+For factual queries it can also return a **direct, cited answer** ahead of the ranked results, drawn from
+free structured sources (the DuckDuckGo Instant Answer API and the Wikipedia REST summary) — toggle with
+`agent.web-search.instant-answers` (default on). See [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
 
 **Audit-log viewer.** `GET /admin/audit.html` (admin) renders a filterable HTML view over the audit table — the same data as `GET /audit`, but browsable. Filter by user, action, and target, and now also by **time range** (`since`/`until`, accepting an ISO-8601 instant, a `YYYY-MM-DD` date, or epoch millis) via the form, which round-trips to query params. Results are **paginated** — the page shows "Showing X–Y of Z" with Prev/Next links that preserve the active filters (`offset`/`limit` params) — so it stays usable on a busy deployment. Capability denials, spend alerts, and tool rate-limit rejections are highlighted. Raw JSON remains at `/audit`, and CSV/JSON export at `/audit/export`.
 

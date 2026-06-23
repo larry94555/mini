@@ -39,6 +39,29 @@ disabled and behavior is byte-identical to no cache.
 Every engine is free and key-less. To add breadth/privacy you can run your own SearXNG and add it to the
 engine list (a future Track C step); nothing here calls a paid search API.
 
+## Instant answers (direct, cited)
+
+For factual/lookup queries, an `InstantAnswerEngine` consults two free structured sources and, when it finds a
+confident match, returns a single direct answer that `WebSearchService` surfaces **ahead** of the ranked
+results (deduped against them by canonical URL):
+
+- the **DuckDuckGo Instant Answer API** (`AbstractText` + `AbstractURL`), confident only when both a direct
+  answer and a citable source URL are present;
+- the **Wikipedia REST summary** endpoint (`extract` + `content_urls.desktop.page`), skipping disambiguation
+  pages.
+
+The result uses the normal `SearchResult` shape with `sourceEngine="instant"`, so it is cited and token-light
+like any other hit. The engine sits behind its own circuit breaker and falls back to ranked results when no
+confident answer exists. Toggle with `agent.web-search.instant-answers` (default `true`). Response parsing is
+pure (`parseDuckDuckGo`/`parseWikipedia`), so it is golden-tested from recorded JSON fixtures (gated on a real
+JSON mapper via `IntegrationGate("json", …)`).
+
+## Live integration test
+
+`WebSearchLiveTest` performs a real end-to-end query and asserts non-empty fused results with provenance. It
+gates on the `network` family, self-skipping unless `IMINI_REQUIRE_NETWORK` is set; the `Integration tests`
+workflow sets it so the live path is exercised in CI.
+
 ## Testing
 
 - **Pure logic (offline, always runs):** `SearchFusionTest` covers redirect-unwrapping, tracking-param
