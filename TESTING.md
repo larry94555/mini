@@ -5487,3 +5487,26 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `HtmlProbe.interpret` + `IntegrationGate.envVar("html")` mapping.
 - The full pipeline (both DuckDuckGo layouts + Mojeek, fusion, dedup, cache) was also verified end to end
   offline against **real jsoup** compiled from source: all parser tests pass with `(html) ran`.
+
+---
+
+# Web search — instant answers + live integration (Track C, step 2)
+
+## 629. Instant-answer parsing (InstantAnswerTest)
+
+- **Run:** `./mvnw -Dtest=InstantAnswerTest test`.
+- **Gated on a real JSON mapper** (`IntegrationGate.proceed("json", …)` via `JsonProbe`): the pure
+  `InstantAnswerEngine.parseDuckDuckGo` / `parseWikipedia` are exercised against recorded JSON fixtures under
+  `src/test/resources/websearch/` — a confident DuckDuckGo abstract (answer + source URL), a no-abstract
+  payload (not confident -> empty), a Wikipedia summary (confident), and a disambiguation page (rejected).
+  They self-skip under the offline no-op mapper and run in CI (`IMINI_REQUIRE_JSON=1`).
+- **Always-on integration (pure, fake engines):** an instant answer is surfaced ahead of ranked results;
+  it dedups against ranked results by canonical URL; and ranked results are still returned when there is no
+  confident instant answer.
+
+## 630. Live web search (WebSearchLiveTest, network-gated)
+
+- Performs a real end-to-end query through the full engine set and asserts non-empty fused results with
+  provenance. Gates on the `network` family: it self-skips unless `IMINI_REQUIRE_NETWORK` is set, and the
+  `Integration tests` workflow sets it so the live path runs in CI. `scripts/integration-coverage.sh` now
+  includes `network`, so a required-but-skipped live test fails the build.
