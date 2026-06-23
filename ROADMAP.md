@@ -215,15 +215,15 @@ So this is **not** as good as it can be — there is a clear, free, token-light 
 
 ### Ranked changes (each shippable as its own approval-gated PR)
 
-1. **Search-engine abstraction + DuckDuckGo hardening.** Introduce a `SearchEngine` interface
+1. **Search-engine abstraction + DuckDuckGo hardening.** ✅ **Done.** Introduce a `SearchEngine` interface
    (`query -> List<Result{title,url,snippet,sourceEngine,fetchedAt}>`) with the current DDG scraper as the
    first implementation, but resilient: multiple selector strategies (incl. the simpler, stabler DDG-Lite
    table), block/CAPTCHA detection, retries with backoff, and `User-Agent`/`Accept-Language` headers.
-2. **Multi-engine fallback + result fusion.** Run a configurable ordered set of free engines behind the
+2. **Multi-engine fallback + result fusion.** ✅ **Done.** Run a configurable ordered set of free engines behind the
    existing `CircuitBreaker`; merge with reciprocal-rank fusion, dedup by canonical URL (strip trackers /
    AMP / redirects), and return a single ranked list with per-result provenance. One engine being
    down/blocked never yields empty results.
-3. **Result caching (free + token-saving).** Cache normalized `query -> results` in SQLite (via `Database`,
+3. **Result caching (free + token-saving).** ✅ **Done.** Cache normalized `query -> results` in SQLite (via `Database`,
    in-memory fallback) keyed by a time bucket with a TTL, so repeated/similar queries are served without a
    network hit or new tokens. Disabled-mode is byte-identical to today.
 4. **Direct, cited answers from structured free sources.** For factual/lookup queries, consult the
@@ -351,6 +351,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track C step 1 — multi-engine web search: introduced a `SearchEngine` abstraction returning structured `SearchResult`s (title, url, snippet, sourceEngine, fetchedAt); hardened the DuckDuckGo backend (`DuckDuckGoEngine`: HTML + stabler DDG-Lite layouts, block/anomaly detection, retries, browser headers) and added a second free engine (`MojeekEngine`). A new `WebSearchService` runs a configurable ordered engine set behind per-engine `CircuitBreaker`s and fuses results with reciprocal-rank fusion (`SearchFusion`) + canonical-URL dedup (`SearchUrls`, tracker/redirect stripping), so one engine being blocked never yields empty results; `BuiltinTools.web_search` now delegates to it and returns compact results with provenance. Alt 1: optional SQLite result caching (`web_search_cache`, in-memory fallback, TTL via `agent.web-search.cache-ttl-seconds`, disabled-by-default byte-identical) using a pure `SearchCodec`. Alt 2: golden tests over recorded HTML fixtures (`SearchFusionTest`, `WebSearchParseTest`, gated through `IntegrationGate("html", …)`), `docs/WEB_SEARCH.md`, README, and TESTING cases 627-628; `integration.yml`/`integration-coverage.sh` require the `html` family. All fusion/dedup/ranking runs in Java (no model tokens); no paid API. Verified offline against real jsoup compiled from source.
 
 - Roadmap added for world-class free web search (Track C): an honest assessment of the current single-backend DuckDuckGo HTML scraper in `BuiltinTools.webSearch()` (fragile, snippet-only, no fallback/fusion/cache/recency/citations) and a ranked, free, token-light path to fix it — a `SearchEngine` abstraction with DDG hardening, multi-engine fallback + reciprocal-rank fusion behind the existing `CircuitBreaker`, SQLite result caching, direct cited answers from free structured sources, query controls, a `RetrievalService`-powered content-distillation pipeline, trust/safety scrubbing via `Redact`, an optional self-hosted SearXNG backend, and fixture-based evals with a network-gated live family. ROADMAP-only change (no code yet); the heavy lifting stays in Java so the model spends minimal tokens, and no paid API is introduced.
 

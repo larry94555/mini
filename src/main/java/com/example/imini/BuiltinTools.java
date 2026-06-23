@@ -1,14 +1,10 @@
 package com.example.imini;
 
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -47,16 +43,24 @@ public class BuiltinTools {
     private final Sandbox sandbox;
     private final RetrievalService retrieval;
     private final PreviewStore previews;
+    private final WebSearchService webSearch;
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
 
     public BuiltinTools(CheckpointStore checkpoints, TodoStore todos, Sandbox sandbox,
                         RetrievalService retrieval, PreviewStore previews) {
+        this(checkpoints, todos, sandbox, retrieval, previews, new WebSearchService((Database) null));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BuiltinTools(CheckpointStore checkpoints, TodoStore todos, Sandbox sandbox,
+                        RetrievalService retrieval, PreviewStore previews, WebSearchService webSearch) {
         this.checkpoints = checkpoints;
         this.todos = todos;
         this.sandbox = sandbox;
         this.retrieval = retrieval;
         this.previews = previews;
+        this.webSearch = webSearch;
     }
 
     /** Tools available to the main agent. */
@@ -675,32 +679,12 @@ public class BuiltinTools {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("query", strProp("Search query."));
         return new Tool("web_search",
-                "Search the web (DuckDuckGo) and return the top results with titles, URLs, and snippets.",
+                "Search the web across multiple free engines (DuckDuckGo, Mojeek) with automatic fallback, "
+                        + "returning fused, deduped results with titles, URLs, snippets, and the source engine.",
                 schema(props, "query"), false, true /* untrusted output */, args -> {
             try {
                 String q = str(args, "query");
-                String url = "https://html.duckduckgo.com/html/?q="
-                        + URLEncoder.encode(q, StandardCharsets.UTF_8);
-                HttpResponse<String> resp = http.send(get(url), HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() / 100 != 2) {
-                    return "ERROR: HTTP " + resp.statusCode() + " from the search endpoint.";
-                }
-
-                Document doc = Jsoup.parse(resp.body(), url);
-                List<String> out = new ArrayList<>();
-                int rank = 1;
-                for (Element result : doc.select("div.result")) {
-                    Element link = result.selectFirst("a.result__a");
-                    if (link == null) continue;
-                    String title = link.text().trim();
-                    String href = decodeDdg(link.attr("href"));
-                    Element snip = result.selectFirst(".result__snippet");
-                    String snippet = snip == null ? "" : snip.text().trim();
-                    out.add(rank + ". " + title + "\n   " + href
-                            + (snippet.isBlank() ? "" : "\n   " + snippet));
-                    if (rank++ >= 6) break;
-                }
-                return out.isEmpty() ? "(no results)" : String.join("\n\n", out);
+                return webSearch.searchText(q);
             } catch (Exception e) {
                 return "ERROR: " + e.getMessage();
             }
@@ -720,19 +704,6 @@ public class BuiltinTools {
                 .build();
     }
 
-    private static String decodeDdg(String href) {
-        if (href == null) return "";
-        int i = href.indexOf("uddg=");
-        if (i < 0) return href;
-        String enc = href.substring(i + 5);
-        int amp = enc.indexOf('&');
-        if (amp >= 0) enc = enc.substring(0, amp);
-        try {
-            return URLDecoder.decode(enc, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return href;
-        }
-    }
 
     private static int countOccurrences(String haystack, String needle) {
         int n = 0, from = 0, idx;

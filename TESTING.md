@@ -5461,3 +5461,29 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `IMINI_REQUIRE_NODE=1` and the test resources on the classpath. The `node`/`git` families self-skip when
   those tools are absent. The faithful mapper is faithful-enough, not byte-identical to Jackson (no
   annotations/polymorphism/custom serializers); see `docs/OFFLINE_JSON.md`.
+
+---
+
+# Web search — multi-engine fusion (Track C, step 1)
+
+## 627. Pure web-search logic (SearchFusionTest)
+
+- **Run:** `./mvnw -Dtest=SearchFusionTest test` (offline; no network, jsoup, or JSON mapper).
+- **Covers:** DuckDuckGo `uddg=` redirect unwrapping, tracking-param/`www`/trailing-slash cleanup, canonical
+  dedup keys, Reciprocal Rank Fusion across engines (shared top result ranks first; blank snippet backfilled
+  from another engine; one empty/null engine still yields results), query normalization for cache keys, the
+  `SearchCodec` tab/newline-escaping round trip, and compact provenance rendering.
+
+## 628. Engine parsers + cache + gate (WebSearchParseTest)
+
+- **Run:** `./mvnw -Dtest=WebSearchParseTest test`.
+- **Parser golden tests (gated on a real HTML parser):** parse recorded fixtures under
+  `src/test/resources/websearch/` — the DuckDuckGo HTML layout (with redirect unwrapping), the DDG-Lite table
+  layout, and Mojeek — asserting titles/URLs/provenance. They gate through `IntegrationGate.proceed("html", …)`
+  (`HtmlProbe.realMapperAvailable`-style probe), so they self-skip under the no-op jsoup stub and run in CI
+  (`IMINI_REQUIRE_HTML=1`).
+- **Always-on (pure):** TTL cache hit-within-window / miss-after-expiry and disabled-cache-never-stores via a
+  fake counting engine and a settable clock; `DuckDuckGoEngine.looksBlocked` anomaly detection; and the pure
+  `HtmlProbe.interpret` + `IntegrationGate.envVar("html")` mapping.
+- The full pipeline (both DuckDuckGo layouts + Mojeek, fusion, dedup, cache) was also verified end to end
+  offline against **real jsoup** compiled from source: all parser tests pass with `(html) ran`.
