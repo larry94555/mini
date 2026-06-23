@@ -74,5 +74,8 @@ Run the same gates CI runs:
   (`SearchSafety.applyTrust`) is default-neutral and opt-in via a host penalty list. All pure/offline-tested.
 - **Web search records pure per-query metrics** (`WebSearchMetrics`, exposed at `GET /admin/web-search` and a
   log/trace marker) and ships a fixture relevance eval (`WebSearchEval`, fixture-parse gated on `html`).
+- **A self-hosted SearXNG engine** (`SearxngEngine`) is config-driven (`agent.web-search.searxng-base-url`,
+  absent by default) with pure JSON parsing gated on `json`; the engine set/order is configurable via
+  `agent.web-search.engines` and skips unknown/unconfigured engines gracefully.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

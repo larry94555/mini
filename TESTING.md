@@ -5576,3 +5576,23 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   fixture-driven eval parses recorded engine HTML (`ddg-html.html`, `mojeek.html`), fuses, and asserts the
   expected URL is in the fused top-N; it gates through `IntegrationGate.proceed("html", …)`, self-skipping
   under the no-op jsoup stub and running in CI (verified end-to-end against real jsoup).
+
+---
+
+# Web search — self-hosted SearXNG (Track C, step 6)
+
+## 637. SearXNG JSON parsing (SearxngTest, json-gated)
+
+- **Run:** `./mvnw -Dtest=SearxngTest test`.
+- **Gated on a real JSON mapper** (`IntegrationGate.proceed("json", …)` via `JsonProbe`): `SearxngEngine.parse`
+  is exercised against recorded fixtures (`searxng.json`, `searxng-empty.json`) — parsing the `results` array
+  (title/url/content) into `SearchResult`s with `sourceEngine="searxng"`, and yielding nothing for an empty
+  results array. Self-skips under the offline no-op mapper; runs in CI (`IMINI_REQUIRE_JSON=1`). Verified
+  end-to-end against the vendored mini-mapper.
+
+## 638. Graceful absence + config-driven engine set (pure)
+
+- `SearxngEngine.configured()` is false with a blank base URL and `search` then returns empty (never throws),
+  so the engine is gracefully absent unless configured. `WebSearchService` honors `agent.web-search.engines`
+  for subset/order (`mojeek,duckduckgo` puts Mojeek first); unknown names and unconfigured engines (SearXNG
+  with no base URL) are skipped without error.
