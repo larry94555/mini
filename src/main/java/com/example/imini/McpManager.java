@@ -62,6 +62,28 @@ public class McpManager {
     // Slash-command name (mcp__server__prompt) -> the prompt's callable tool, for /-dispatch.
     private final Map<String, Tool> promptCommands = new LinkedHashMap<>();
 
+    // Hot-reload state: the running spec per server, a name->transport map for targeted stop, the last
+    // reload result for diagnostics, and a hook the tool registry sets to re-publish tools after a reload.
+    private final Map<String, McpConfig.ServerSpec> currentSpecs = new LinkedHashMap<>();
+    private final Map<String, Transport> transportByName = new LinkedHashMap<>();
+    private volatile Map<String, Object> lastReload = Map.of("ran", false);
+    private volatile Runnable reloadHook = () -> {};
+
+    /** Set by the tool registry so a reload can re-publish MCP tools into the live tool set. */
+    public void setReloadHook(Runnable hook) {
+        if (hook != null) this.reloadHook = hook;
+    }
+
+    /** Diagnostics: the last reload result (added/removed/restarted/failed + tool count), and live state. */
+    public synchronized Map<String, Object> diagnostics() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("enabled", !currentSpecs.isEmpty() || Files.exists(CONFIG));
+        m.put("servers_running", new ArrayList<>(currentSpecs.keySet()));
+        m.put("tool_count", tools.size());
+        m.put("last_reload", lastReload);
+        return m;
+    }
+
     @Value("${agent.tool-timeout-seconds:60}")
     private int toolTimeoutSeconds;
 
@@ -175,6 +197,99 @@ public class McpManager {
         startServer(name, conf);
     }
 
+    /**
+     * Hot-reload: re-read mcp.json, diff it against the running servers, stop removed/changed servers and
+     * launch added/changed ones, re-discover their tools, and re-publish the live tool set via the reload
+     * hook — without dropping in-flight requests. Idempotent: a no-op when nothing changed. Returns the
+     * reload summary (also retained for {@link #diagnostics()}).
+     */
+    public synchronized Map<String, Object> reload() {
+        Map<String, McpConfig.ServerSpec> desired = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> desiredConf = new LinkedHashMap<>();
+        if (Files.exists(CONFIG)) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> cfg = mapper.readValue(Files.readAllBytes(CONFIG), Map.class);
+                @SuppressWarnings("unchecked")
+                Map<String, Object> defs = (Map<String, Object>) cfg.getOrDefault("mcpServers", Map.of());
+                for (Map.Entry<String, Object> e : defs.entrySet()) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> conf = (Map<String, Object>) e.getValue();
+                    desiredConf.put(e.getKey(), conf);
+                    desired.put(e.getKey(), McpConfig.spec(conf));
+                }
+            } catch (Exception ex) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("ran", true);
+                err.put("error", "could not read mcp.json: " + ex.getMessage());
+                lastReload = err;
+                return err;
+            }
+        }
+
+        McpConfig.ReloadPlan plan = McpConfig.diff(currentSpecs, desired);
+        List<String> failed = new ArrayList<>();
+        if (!plan.isNoOp()) {
+            // Stop removed + changed servers first (prune their tools/resources/prompts).
+            List<String> toStop = new ArrayList<>(plan.removed());
+            toStop.addAll(plan.restarted());
+            for (String name : toStop) {
+                stopServer(name);
+            }
+            // Launch added + changed servers (re-discover their tools).
+            List<String> toStart = new ArrayList<>(plan.added());
+            toStart.addAll(plan.restarted());
+            for (String name : toStart) {
+                int before = tools.size();
+                startServer(name, desiredConf.get(name));
+                if (!currentSpecs.containsKey(name) && tools.size() == before) {
+                    failed.add(name);
+                }
+            }
+            reloadHook.run(); // re-publish the live tool set
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>(plan.summary());
+        result.put("ran", true);
+        result.put("failed", failed);
+        result.put("tool_count", tools.size());
+        lastReload = result;
+        log.info("[mcp] reload: added=" + plan.added() + " removed=" + plan.removed()
+                + " restarted=" + plan.restarted() + " failed=" + failed + " -> " + tools.size() + " tool(s)");
+        return result;
+    }
+
+    /** Stop one server: close its transport, forget it, and prune its tools/resources/prompts. */
+    private synchronized void stopServer(String name) {
+        Transport t = transportByName.remove(name);
+        if (t != null) {
+            try {
+                t.close();
+            } catch (Exception ignore) {
+                // best-effort
+            }
+            transports.remove(t);
+        }
+        servers.removeIf(s -> s.name.equals(name));
+        currentSpecs.remove(name);
+        String prefix = sanitize(name) + "_";
+        tools.removeIf(tool -> tool.name.startsWith(prefix));
+        resources.removeIf(r -> name.equals(r.get("server")));
+        prompts.removeIf(p -> name.equals(p.get("server")));
+        promptCommands.keySet().removeIf(k -> k.startsWith("mcp__" + name + "__"));
+    }
+
+    /** A {@code reload_mcp} tool that re-reads mcp.json and republishes MCP tools (mutating; admin-gated). */
+    public Tool reloadTool() {
+        return new Tool("reload_mcp",
+                "Re-read mcp.json and hot-reload MCP servers (launch added/changed, stop removed) so newly "
+                        + "installed MCP tools become available without restarting. Returns the reload summary.",
+                Map.of("type", "object", "properties", Map.of()), true, false, args -> {
+            Map<String, Object> r = reload();
+            return r.toString();
+        });
+    }
+
     @SuppressWarnings("unchecked")
     private void startServer(String name, Map<String, Object> conf) {
         try {
@@ -208,6 +323,8 @@ public class McpManager {
                 t = srv;
             }
             transports.add(t);
+            transportByName.put(name, t);
+            currentSpecs.put(name, McpConfig.spec(conf));
             discover(name, t);
         } catch (Exception ex) {
             log.warn("[mcp] server '" + name + "' failed: " + ex.getMessage());

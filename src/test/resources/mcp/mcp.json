@@ -1,0 +1,4 @@
+{"mcpServers":{
+  "fs":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"],"env":{}},
+  "web":{"transport":"http","url":"https://mcp.example.org/sse"}
+}}

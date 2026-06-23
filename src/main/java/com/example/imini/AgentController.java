@@ -80,6 +80,8 @@ public class AgentController {
     private final Tracer tracer;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private WebSearchService webSearch;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private McpManager mcp;
     private final CostService cost;
     private final EvalHarness eval;
     private final CapabilityService capabilities;
@@ -505,6 +507,24 @@ public class AgentController {
     }
 
     /** Alert deliveries that exhausted their retries (newest first). Admin only. */
+    @PostMapping("/admin/mcp/reload")
+    public Map<String, Object> adminMcpReload() {
+        requireAdmin();
+        if (mcp == null) {
+            return Map.of("enabled", false);
+        }
+        return mcp.reload(); // republishes MCP tools via the reload hook set by ToolRegistry
+    }
+
+    @GetMapping("/admin/mcp")
+    public Map<String, Object> adminMcp() {
+        requireAdmin();
+        if (mcp == null) {
+            return Map.of("enabled", false);
+        }
+        return mcp.diagnostics();
+    }
+
     @GetMapping("/admin/web-search")
     public Map<String, Object> adminWebSearch() {
         requireAdmin();
