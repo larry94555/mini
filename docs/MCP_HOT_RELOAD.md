@@ -33,3 +33,24 @@ config are *added*.
 
 The diff/spec/registry-delta logic is pure and unit-tested offline; tests that spawn a real MCP child gate on
 the `node` integration family. See TESTING cases 644-645.
+
+## Verifying hot-reload
+
+The pure config-diff and registry-delta logic is unit-tested in `McpConfigTest` (always offline). The full
+live path is proven by `McpHotReloadIntegrationTest`, which drives the production `reload()` against the
+bundled MCP stub server and asserts the **live** tool set (republished via the same
+`ToolRegistry.republishMcp` the production hook uses): one server's tools appear; adding a second leaves the
+first intact; removing a server prunes its tools; and an unchanged reload is a byte-identical no-op.
+
+It is gated on the `node` family (it spawns a child process) and `json` (discovery parses JSON-RPC), so it
+self-skips offline. To run it:
+
+```
+# locally (needs node on PATH)
+IMINI_REQUIRE_NODE=1 ./mvnw -Dtest=McpHotReloadIntegrationTest test
+```
+
+In CI the `Integration tests` workflow sets `IMINI_REQUIRE_NODE=1` (and a real JSON mapper is present), so the
+live reload path runs there; `scripts/integration-coverage.sh` already requires the `node` family, so a
+silently-skipping test fails the build. `GET /admin/mcp` reports a per-server tool count (`tools_by_server`)
+so a reload's effect on each server is observable.

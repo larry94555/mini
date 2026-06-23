@@ -80,6 +80,11 @@ public class McpManager {
         m.put("enabled", !currentSpecs.isEmpty() || Files.exists(CONFIG));
         m.put("servers_running", new ArrayList<>(currentSpecs.keySet()));
         m.put("tool_count", tools.size());
+        List<String> toolNames = new ArrayList<>();
+        for (Tool t : tools) {
+            toolNames.add(t.name);
+        }
+        m.put("tools_by_server", McpConfig.toolCountsByServer(toolNames, currentSpecs.keySet()));
         m.put("last_reload", lastReload);
         return m;
     }
@@ -272,7 +277,7 @@ public class McpManager {
         }
         servers.removeIf(s -> s.name.equals(name));
         currentSpecs.remove(name);
-        String prefix = sanitize(name) + "_";
+        String prefix = McpConfig.toolPrefix(name);
         tools.removeIf(tool -> tool.name.startsWith(prefix));
         resources.removeIf(r -> name.equals(r.get("server")));
         prompts.removeIf(p -> name.equals(p.get("server")));

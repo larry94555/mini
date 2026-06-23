@@ -77,6 +77,33 @@ public class McpConfigTest {
     assertEquals("stdio", s.transport(), "defaults to stdio");
   }
 
+  @Test
+  void toolCountsByServerIsPure() {
+    List<String> toolNames = List.of("one_echo", "one_read_resource", "two_echo", "reload_mcp", "grep");
+    Map<String, Integer> counts = McpConfig.toolCountsByServer(toolNames, List.of("one", "two"));
+    assertEquals(Integer.valueOf(2), counts.get("one"), "one contributes 2 tools");
+    assertEquals(Integer.valueOf(1), counts.get("two"), "two contributes 1 tool");
+    assertEquals("one_", McpConfig.toolPrefix("one"));
+  }
+
+  @Test
+  void republishMcpSwapsMcpToolsKeepingBuiltins() {
+    java.util.Map<String, Tool> live = new java.util.LinkedHashMap<>();
+    live.put("grep", tool("grep"));            // a built-in, must survive
+    live.put("one_echo", tool("one_echo"));    // a stale MCP tool from a previous publish
+    java.util.Set<String> old = new java.util.LinkedHashSet<>(List.of("one_echo"));
+
+    java.util.Set<String> now = ToolRegistry.republishMcp(live, old, List.of(tool("two_echo"), tool("two_ping")));
+    assertTrue(live.containsKey("grep"), "built-in preserved");
+    assertFalse(live.containsKey("one_echo"), "stale MCP tool removed");
+    assertTrue(live.containsKey("two_echo") && live.containsKey("two_ping"), "current MCP tools added");
+    assertEquals(java.util.Set.of("two_echo", "two_ping"), now, "returns the new MCP name set");
+  }
+
+  private static Tool tool(String name) {
+    return new Tool(name, "", Map.of("type", "object", "properties", Map.of()), false, false, a -> "");
+  }
+
   // ---- JSON parsing of mcp.json (gated on a real mapper) ----
 
   @Test

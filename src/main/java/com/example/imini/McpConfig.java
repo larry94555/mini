@@ -142,4 +142,36 @@ public final class McpConfig {
   private static String str(Object o) {
     return o == null ? "" : String.valueOf(o);
   }
+
+  /** Pure: the same name sanitization McpManager uses when exposing a server's tools. */
+  public static String sanitize(String s) {
+    return s == null ? "" : s.replaceAll("[^a-zA-Z0-9_]", "_");
+  }
+
+  /** Pure: the tool-name prefix for a server ({@code <sanitized-name>_}). */
+  public static String toolPrefix(String server) {
+    return sanitize(server) + "_";
+  }
+
+  /** Pure: per-server tool counts (how many tools each server contributes), sorted by server name. */
+  public static Map<String, Integer> toolCountsByServer(java.util.Collection<String> toolNames,
+                                                        java.util.Collection<String> serverNames) {
+    Map<String, Integer> out = new java.util.TreeMap<>();
+    if (serverNames == null) {
+      return out;
+    }
+    for (String server : serverNames) {
+      String prefix = toolPrefix(server);
+      int n = 0;
+      if (toolNames != null) {
+        for (String t : toolNames) {
+          if (t != null && t.startsWith(prefix)) {
+            n++;
+          }
+        }
+      }
+      out.put(server, n);
+    }
+    return out;
+  }
 }
