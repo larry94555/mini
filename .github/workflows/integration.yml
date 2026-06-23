@@ -26,6 +26,7 @@ jobs:
       IMINI_REQUIRE_NODE: "1"
       IMINI_REQUIRE_GIT: "1"
       IMINI_REQUIRE_JSON: "1"
+      IMINI_REQUIRE_HTML: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21

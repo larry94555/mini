@@ -17,7 +17,7 @@ fi
 markers="$(grep -rho '\[integration\] .* (.*) \(ran\|skipped\)' "$REPORTS" 2>/dev/null || true)"
 
 # Dependencies to inspect. Keep in sync with the IMINI_REQUIRE_* switches.
-deps="persistence node git json model"
+deps="persistence node git json html model"
 
 status=0
 summary=""

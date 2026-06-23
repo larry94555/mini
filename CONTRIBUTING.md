@@ -61,5 +61,8 @@ Run the same gates CI runs:
   `_MODEL`.
   These tests run offline against a faithful minimal mapper supplied by the verification scaffold (not
   committed to `src/`, to avoid shadowing real Jackson); see [`docs/OFFLINE_JSON.md`](docs/OFFLINE_JSON.md).
+- **Web-search parser tests gate on a real HTML parser** via `HtmlProbe.realParserAvailable()` and
+  `IntegrationGate("html", …)` (the no-op jsoup stub can't parse), while the fusion/dedup/cache logic is pure
+  and always runs offline; see [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.
