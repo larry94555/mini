@@ -5510,3 +5510,25 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   provenance. Gates on the `network` family: it self-skips unless `IMINI_REQUIRE_NETWORK` is set, and the
   `Integration tests` workflow sets it so the live path runs in CI. `scripts/integration-coverage.sh` now
   includes `network`, so a required-but-skipped live test fails the build.
+
+---
+
+# Web search — content distillation (Track C, step 3)
+
+## 631. Passage split / score / dedup (SearchDistillerTest)
+
+- **Run:** `./mvnw -Dtest=SearchDistillerTest test` (offline; no network, jsoup, or LLM).
+- **Covers (pure):** `SearchDistiller.splitPassages` produces bounded, whitespace-collapsed passages;
+  `rankAndDedup` keeps only passages sharing query terms (scored via `RetrievalService.lexicalScore`) and the
+  on-topic passage ranks first; near-identical passages across sources collapse to one (token-Jaccard ≥ 0.8).
+- **Orchestration (fake fetcher):** `distill` fetches the top-N results, returns cited passages tagged with
+  their source URL, and renders them with citations; it self-skips with a null fetcher; and
+  `WebSearchService.searchText` emits distilled passages plus a `— sources —` list when
+  `agent.web-search.distill=true`.
+
+## 632. Distillation is off by default and gated for fetching
+
+- With `agent.web-search.distill=false` (default) `searchText` is byte-identical to the fused result list.
+  Page fetching is the only impure step; offline the fetcher is null so distillation self-skips. Passage
+  splitting/scoring/dedup were verified offline against recorded page-text fixtures
+  (`src/test/resources/websearch/page-*.txt`).

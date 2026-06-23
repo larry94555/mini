@@ -1,0 +1,3 @@
+Alan Turing was an English mathematician and computer scientist. He was highly influential in the development of theoretical computer science, providing a formalisation of the concepts of algorithm and computation with the Turing machine.
+
+Some other site boilerplate that nobody cares about and shares no query terms whatsoever lorem ipsum dolor sit amet consectetur.

@@ -66,5 +66,8 @@ Run the same gates CI runs:
   and always runs offline; see [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
 - **Live web-search tests gate on the `network` family** (`IMINI_REQUIRE_NETWORK`) so they self-skip offline
   and run in CI; instant-answer JSON parsing gates on `json` like the other discovery tests.
+- **Content distillation logic is pure** (`SearchDistiller` split/score/dedup, reusing
+  `RetrievalService.lexicalScore`) and unit-tested offline; only page fetching touches the network (injected
+  fetcher, null offline). See [`docs/WEB_SEARCH.md`](docs/WEB_SEARCH.md).
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

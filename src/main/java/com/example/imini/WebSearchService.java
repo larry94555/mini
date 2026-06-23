@@ -42,6 +42,15 @@ public class WebSearchService {
   long cacheTtlSeconds = 0; // 0 disables caching (byte-identical to no cache)
   @Value("${agent.web-search.instant-answers:true}")
   boolean instantAnswers = true;
+  @Value("${agent.web-search.distill:false}")
+  boolean distill = false;
+  @Value("${agent.web-search.distill-top-n:3}")
+  int distillTopN = 3;
+  @Value("${agent.web-search.distill-max-passages:3}")
+  int distillMaxPassages = 3;
+
+  /** Page fetcher (url -> clean text) for distillation; null offline so distillation self-skips. */
+  java.util.function.Function<String, String> pageFetcher;
 
   /** Settable clock for tests. */
   long nowOverrideMs = -1;
@@ -54,6 +63,23 @@ public class WebSearchService {
         .connectTimeout(Duration.ofSeconds(15))
         .build();
     this.engines = List.of(new InstantAnswerEngine(http), new DuckDuckGoEngine(http), new MojeekEngine(http));
+    // Real page fetcher for distillation: fetch + extract main text (reusing HtmlExtractor).
+    this.pageFetcher = url -> {
+      try {
+        java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+            .header("User-Agent", "Mozilla/5.0 (compatible; mini-agent/0.4)")
+            .header("Accept", "text/html,application/xhtml+xml")
+            .timeout(java.time.Duration.ofSeconds(20))
+            .GET().build();
+        java.net.http.HttpResponse<String> resp = http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() / 100 != 2) {
+          return "";
+        }
+        return HtmlExtractor.mainText(resp.body(), url);
+      } catch (Exception e) {
+        return "";
+      }
+    };
   }
 
   /** Test constructor: explicit engines + database, no real HTTP. */
@@ -180,7 +206,17 @@ public class WebSearchService {
 
   /** Compact, token-light text rendering with provenance (what the tool returns to the model). */
   public String searchText(String query) {
-    return SearchFusion.render(search(query), maxResults);
+    List<SearchResult> results = search(query);
+    if (distill && pageFetcher != null && !results.isEmpty()) {
+      List<SearchDistiller.Passage> passages =
+          SearchDistiller.distill(query, results, pageFetcher, distillTopN, distillMaxPassages);
+      String distilled = SearchDistiller.render(passages);
+      if (!distilled.isBlank()) {
+        // Distilled cited evidence first, then the compact result list for navigation.
+        return distilled + "\n\n— sources —\n" + SearchFusion.render(results, maxResults);
+      }
+    }
+    return SearchFusion.render(results, maxResults);
   }
 
   // ----- caching (TTL); SQLite via Database with in-memory fallback; disabled when ttl <= 0 -----

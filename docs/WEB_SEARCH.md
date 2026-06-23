@@ -62,6 +62,22 @@ JSON mapper via `IntegrationGate("json", …)`).
 gates on the `network` family, self-skipping unless `IMINI_REQUIRE_NETWORK` is set; the `Integration tests`
 workflow sets it so the live path is exercised in CI.
 
+## Content distillation (cited passages)
+
+For higher answer quality at *lower* token cost, `web_search` can return the few best **cited passages**
+instead of just result snippets. When `agent.web-search.distill=true`, `SearchDistiller`:
+
+1. fetches the top `agent.web-search.distill-top-n` results' pages (reusing `HtmlExtractor.mainText`);
+2. splits each page's clean text into bounded passages (pure);
+3. scores passages against the query with `RetrievalService`'s lexical scorer (BM25-style, **no LLM tokens**);
+4. removes near-duplicate passages across sources (token-Jaccard ≥ 0.8, pure);
+5. returns the top `agent.web-search.distill-max-passages` passages, each tagged with its source URL.
+
+The tool then emits the distilled passages followed by a compact `— sources —` list for navigation. All
+splitting/scoring/dedup is pure and unit-tested offline; only the page fetch touches the network, and the
+fetcher is null offline so distillation self-skips. Distillation is **off by default**, so behavior is
+unchanged unless enabled.
+
 ## Testing
 
 - **Pure logic (offline, always runs):** `SearchFusionTest` covers redirect-unwrapping, tracking-param
