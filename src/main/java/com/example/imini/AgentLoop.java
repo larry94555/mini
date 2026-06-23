@@ -355,7 +355,8 @@ public class AgentLoop {
 
         sink.log("plan: drafting steps");
         // planning is read-only (PLAN mode) and should not call tools; we just want the step list
-        String planText = engine.run(systemPrompt() + Planner.PLAN_SYSTEM_PROMPT, Planner.planRequest(g),
+        String planText = engine.run(systemPrompt() + Planner.PLAN_SYSTEM_PROMPT
+                + skills.lifecycleAddendum(PlanLifecycle.Stage.PREPARE, g, sessionId), Planner.planRequest(g),
                 registry.tools(), Mode.PLAN, "plan", sessionId, RunSink.NOOP);
         List<String> steps = Planner.parsePlan(planText);
         if (steps.isEmpty()) {
@@ -370,7 +371,8 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return finishPlan(sessionId, g, engine.run(systemPromptFor(sessionId), Planner.synthesisPrompt(g, results),
+        return finishPlan(sessionId, g, engine.run(systemPromptFor(sessionId)
+                + skills.lifecycleAddendum(PlanLifecycle.Stage.GOAL_EVAL, g, sessionId), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
@@ -394,7 +396,8 @@ public class AgentLoop {
                 planSuggester(sink));
 
         sink.log("plan: synthesizing final answer");
-        return finishPlan(sessionId, g, engine.run(systemPromptFor(sessionId), Planner.synthesisPrompt(g, results),
+        return finishPlan(sessionId, g, engine.run(systemPromptFor(sessionId)
+                + skills.lifecycleAddendum(PlanLifecycle.Stage.GOAL_EVAL, g, sessionId), Planner.synthesisPrompt(g, results),
                 registry.tools(), mode, "main", sessionId, sink), mode, sink);
     }
 
@@ -405,7 +408,8 @@ public class AgentLoop {
             java.util.Set<String> beforePaths = planStepDiff ? recorder.changedPaths(sessionId) : java.util.Set.of();
             String beforeTree = (planStepDiff && planStepSnapshot) ? git.snapshotTree() : "";
             try {
-                String out = engine.run(systemPromptFor(sessionId), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
+                String out = engine.run(systemPromptFor(sessionId)
+                        + skills.lifecycleAddendum(PlanLifecycle.Stage.SUB_PLAN, stepPrompt, sessionId), stepPrompt, registry.tools(), mode, "main", sessionId, sink);
                 if (planStepDiff) {
                     java.util.List<String> delta;
                     String stat;

@@ -516,6 +516,14 @@ public class AgentController {
         return mcp.reload(); // republishes MCP tools via the reload hook set by ToolRegistry
     }
 
+    @GetMapping("/admin/skills/lifecycle")
+    public Map<String, Object> adminSkillsLifecycle() {
+        requireAdmin();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("bindings", skills.lifecycleBindings());
+        return out;
+    }
+
     @GetMapping("/admin/mcp")
     public Map<String, Object> adminMcp() {
         requireAdmin();

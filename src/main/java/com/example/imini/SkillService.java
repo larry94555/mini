@@ -36,6 +36,8 @@ public class SkillService {
     @Value("${skills.repos-on-start:true}") private boolean reposOnStart;
     @Value("${skills.registry:}") private String registryPath;
     @Value("${skills.disabled:}") private String disabledConfig;
+    @Value("${skills.lifecycle:}") private String lifecycleConfig;
+    private volatile PlanLifecycle.Bindings lifecycle = PlanLifecycle.Bindings.parse("");
 
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
     private final java.util.Set<String> disabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -238,6 +240,7 @@ public class SkillService {
 
     public synchronized void reload() {
         skills.clear();
+        lifecycle = PlanLifecycle.Bindings.parse(lifecycleConfig);
         if (!enabled) return;
         List<List<SkillLibrary.Skill>> sources = new ArrayList<>();
         sources.add(scanDir(dir())); // local skills take precedence over remote
@@ -361,6 +364,28 @@ public class SkillService {
         List<SkillLibrary.Skill> top = SkillLibrary.select(active, query, 1);
         if (top.isEmpty()) return "";
         return "\n\n" + SkillLibrary.format(top.get(0), maxBody);
+    }
+
+    /**
+     * Plan-lifecycle hook: the bodies of the skills bound to {@code stage} (via {@code skills.lifecycle}),
+     * ranked for the current plan/goal text, ready to append to the stage's system prompt. Returns "" when
+     * skills are disabled or no skills are bound to the stage — so behavior is unchanged unless configured.
+     */
+    public synchronized String lifecycleAddendum(PlanLifecycle.Stage stage, String planText, String sessionId) {
+        if (!enabled || lifecycle.isEmpty()) return "";
+        List<SkillLibrary.Skill> active = enabledSkillsFor(sessionId);
+        List<SkillLibrary.Skill> picks = PlanLifecycle.selectForStage(stage, lifecycle, active, planText, 2);
+        if (picks.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n\n--- Plan-lifecycle skills (" + stage.id() + ") ---\n");
+        for (SkillLibrary.Skill s : picks) {
+            sb.append(SkillLibrary.format(s, maxBody)).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /** Diagnostics: the configured stage -> bound skill-name bindings (only non-empty stages). */
+    public synchronized Map<String, List<String>> lifecycleBindings() {
+        return lifecycle.asIdMap();
     }
 
     private synchronized SkillLibrary.Skill byName(String name) {

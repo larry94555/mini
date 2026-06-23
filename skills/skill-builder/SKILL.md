@@ -42,5 +42,6 @@ Work in order; do not skip the "is this worth it" check.
 Keep the skill focused on ONE topic. If the research spans several distinct topics, prefer several small
 skills over one sprawling skill. Be honest in the body about anything uncertain or context-dependent.
 
-Note: mini surfaces skills by relevance and invokes them via load_skill; it has no formal plan-lifecycle
-hooks yet, so apply the skill deliberately at each stage above rather than assuming it fires automatically.
+Note: skills surface by relevance (load_skill). To have a skill applied automatically at a specific planning
+stage, bind it via `skills.lifecycle` (e.g. `prepare=<this-skill>`); stages are prepare, review, sub-plan,
+tool-select, goal-eval, post-mortem. See docs/PLAN_LIFECYCLE.md.
