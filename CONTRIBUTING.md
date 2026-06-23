@@ -72,5 +72,7 @@ Run the same gates CI runs:
 - **Untrusted fetched text is scrubbed for prompt-injection** (`SearchSafety.neutralizeInjections` +
   `Redact.scrubPii`) before distilled passages enter the context; domain-trust re-ranking
   (`SearchSafety.applyTrust`) is default-neutral and opt-in via a host penalty list. All pure/offline-tested.
+- **Web search records pure per-query metrics** (`WebSearchMetrics`, exposed at `GET /admin/web-search` and a
+  log/trace marker) and ships a fixture relevance eval (`WebSearchEval`, fixture-parse gated on `html`).
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

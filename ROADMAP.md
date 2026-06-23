@@ -240,7 +240,7 @@ So this is **not** as good as it can be — there is a clear, free, token-light 
    untrusted fetched text via `Redact` before it reaches the context.
 8. **Self-hosted SearXNG backend.** A first-class `SearchEngine` for an operator-run SearXNG instance
    (configurable URL) for privacy, reliability, and breadth — entirely free.
-9. **Evals + observability.** A small fixture-based web-search eval suite (offline) scoring result relevance
+9. **Evals + observability.** ✅ **Done.** A small fixture-based web-search eval suite (offline) scoring result relevance
    and citation correctness, plus markers/metrics for which engine answered and cache hit-rate; a live
    "network" integration family gated like the others.
 10. **Tests + docs (mandatory, same PRs).** Golden traces over recorded HTML/JSON fixtures for parsing,
@@ -351,6 +351,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track C step 5 — observability + relevance eval: `WebSearchService` now records pure, in-memory per-query metrics (`WebSearchMetrics`) — engines run vs skipped (circuit open), instant-answer surfaced, cache hit/miss + hit-rate, result count, distilled-passage count — exposed at admin endpoint `GET /admin/web-search` (field-injected, so no controller constructor change) and emitted as a one-line `[web-search] …` log/trace marker (Alt 1). Added a fixture-based offline relevance eval (`WebSearchEval` pure scorers: expected URL/domain in fused top-N, expected token in a distilled passage), with the fixture-parse portion gated through `IntegrationGate("html", …)`. Alt 2: `docs/WEB_SEARCH.md` "observability and evals" note, README, `WebSearchObservabilityTest`, TESTING cases 635-636. All pure, free, no LLM tokens; verified offline (metrics/eval pure pass; fixture eval passes against real jsoup, self-skips under the stub).
 
 - Track C step 4 — trust & safety: distilled web passages are now scrubbed for prompt-injection before entering the context — a new pure `SearchSafety.neutralizeInjections` turns directives ("ignore previous instructions", `system:`/`assistant:` role lines, `<|…|>`/`<system>` tags) into a `[redacted-instruction]` marker, composed with the existing `Redact.scrubPii` for secrets, applied per passage in `SearchDistiller` (on by default, `agent.web-search.scrub-injections`). Added a default-neutral domain-trust re-rank (`SearchSafety.applyTrust` + `parsePenalties`/`trustDelta`): a no-op unless `agent.web-search.trust-penalties` lists `host=penalty` entries, which sink SEO-spam/low-quality hosts (and sub-domains) below trusted ones with an https tie-breaker. Alt 1: generalized result-level redirect unwrapping in `SearchUrls.unwrapRedirect` (DuckDuckGo `uddg=` + generic `url=`/`q=` wrappers) feeding `clean()`. Alt 2: `docs/WEB_SEARCH.md` "trust & safety" note, README, golden fixtures + `SearchSafetyTest`/distiller scrubbing tests (TESTING 633-634). All pure, free, no LLM tokens; verified offline (24 web-search tests pass).
 

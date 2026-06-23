@@ -113,3 +113,25 @@ returned/deduped URLs point at the real target.
   (`IMINI_REQUIRE_NETWORK`) so it self-skips offline.
 
 See TESTING.md (cases 627-628), CONTRIBUTING.md, and ROADMAP Track C.
+
+## Observability and evals
+
+The pipeline records lightweight, in-memory per-query metrics (pure Java, no LLM tokens, no new dependency):
+which engines ran vs were skipped (circuit open), whether an instant answer was surfaced, cache hit/miss,
+result count, and distilled-passage count. Aggregates plus a small ring buffer of recent queries are exposed
+at the admin endpoint:
+
+```
+GET /admin/web-search    # admin-gated, like the other /admin routes
+```
+
+It returns `total_queries`, `cache_hits` + `cache_hit_rate`, `instant_surfaced`, a per-engine
+`ran`/`skipped` breakdown, and the recent-query list. Each query also emits a one-line
+`[web-search] q-len=… ran=[…] skipped=[…] instant=… cache=… results=… passages=…` marker to the logs/trace
+path, so a run's web-search behavior is visible without the endpoint.
+
+A small **offline relevance eval** scores the pipeline from recorded fixtures with pure checks
+(`WebSearchEval`): does the expected URL/domain appear in the fused top-N, or an expected token in a distilled
+passage. The fixture-parse portion gates on a real HTML parser (`IntegrationGate("html", …)`), so it
+self-skips under the no-op jsoup stub and runs in CI; the scorers themselves are pure and always run. See
+TESTING cases 635-636.

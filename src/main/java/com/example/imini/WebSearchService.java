@@ -56,6 +56,32 @@ public class WebSearchService {
   /** Page fetcher (url -> clean text) for distillation; null offline so distillation self-skips. */
   java.util.function.Function<String, String> pageFetcher;
 
+  private final WebSearchMetrics metrics = new WebSearchMetrics();
+  // Last-query components stashed by searchInternal so the public entry points can record one accurate metric.
+  private List<String> lastRan = List.of();
+  private List<String> lastSkipped = List.of();
+  private boolean lastInstant = false;
+  private boolean lastCacheHit = false;
+
+  /** Observability snapshot for the /admin/web-search endpoint. */
+  public WebSearchMetrics metrics() {
+    return metrics;
+  }
+
+  private void recordMetric(String query, int resultCount, int passages) {
+    WebSearchMetrics.Query q = new WebSearchMetrics.Query(
+        query, lastRan, lastSkipped, lastInstant, lastCacheHit, resultCount, passages);
+    metrics.record(q);
+    log.info("{}", q.marker()); // emit to logs/trace path (Alt 1)
+  }
+
+  /** Fused, deduped, ranked results across the enabled engines (with caching when enabled). */
+  public List<SearchResult> search(String query) {
+    List<SearchResult> fused = searchInternal(query);
+    recordMetric(query, fused.size(), 0);
+    return fused;
+  }
+
   /** Settable clock for tests. */
   long nowOverrideMs = -1;
 
@@ -134,7 +160,7 @@ public class WebSearchService {
   }
 
   /** Fused, deduped, ranked results across the enabled engines (with caching when enabled). */
-  public List<SearchResult> search(String query) {
+  private List<SearchResult> searchInternal(String query) {
     if (query == null || query.isBlank()) {
       return List.of();
     }
@@ -142,10 +168,17 @@ public class WebSearchService {
 
     List<SearchResult> cached = cacheGet(key);
     if (cached != null) {
+      lastRan = List.of();
+      lastSkipped = List.of();
+      lastInstant = false;
+      lastCacheHit = true;
       return cached;
     }
+    lastCacheHit = false;
 
     List<List<SearchResult>> perEngine = new ArrayList<>();
+    List<String> ran = new ArrayList<>();
+    List<String> skipped = new ArrayList<>();
 
     // Direct cited answer first (if available + confident), behind its own circuit breaker.
     List<SearchResult> instant = List.of();
@@ -156,6 +189,7 @@ public class WebSearchService {
         try {
           List<SearchResult> r = ia.search(query);
           cb.recordSuccess();
+          ran.add(ia.name());
           if (r != null && !r.isEmpty()) {
             instant = r;
           }
@@ -163,6 +197,8 @@ public class WebSearchService {
           cb.recordFailure();
           log.info("[web-search] instant answer failed: {}", e.getMessage());
         }
+      } else {
+        skipped.add(ia.name());
       }
     }
 
@@ -170,11 +206,13 @@ public class WebSearchService {
       CircuitBreaker cb = breakerFor(engine.name());
       if (!cb.allowCall()) {
         log.info("[web-search] skipping {} (circuit open)", engine.name());
+        skipped.add(engine.name());
         continue;
       }
       try {
         List<SearchResult> r = engine.search(query);
         cb.recordSuccess();
+        ran.add(engine.name());
         if (r != null && !r.isEmpty()) {
           perEngine.add(r);
         }
@@ -207,22 +245,30 @@ public class WebSearchService {
     if (!fused.isEmpty()) {
       cachePut(key, fused);
     }
+    lastRan = ran;
+    lastSkipped = skipped;
+    lastInstant = !instant.isEmpty();
     return fused;
   }
 
   /** Compact, token-light text rendering with provenance (what the tool returns to the model). */
   public String searchText(String query) {
-    List<SearchResult> results = search(query);
+    List<SearchResult> results = searchInternal(query);
+    int passages = 0;
+    String body;
     if (distill && pageFetcher != null && !results.isEmpty()) {
-      List<SearchDistiller.Passage> passages =
+      List<SearchDistiller.Passage> ps =
           SearchDistiller.distill(query, results, pageFetcher, distillTopN, distillMaxPassages, scrubInjections);
-      String distilled = SearchDistiller.render(passages);
-      if (!distilled.isBlank()) {
-        // Distilled cited evidence first, then the compact result list for navigation.
-        return distilled + "\n\n— sources —\n" + SearchFusion.render(results, maxResults);
-      }
+      passages = ps.size();
+      String distilled = SearchDistiller.render(ps);
+      body = distilled.isBlank()
+          ? SearchFusion.render(results, maxResults)
+          : distilled + "\n\n— sources —\n" + SearchFusion.render(results, maxResults);
+    } else {
+      body = SearchFusion.render(results, maxResults);
     }
-    return SearchFusion.render(results, maxResults);
+    recordMetric(query, results.size(), passages);
+    return body;
   }
 
   // ----- caching (TTL); SQLite via Database with in-memory fallback; disabled when ttl <= 0 -----

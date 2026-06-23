@@ -78,6 +78,8 @@ public class AgentController {
     private final Database db;
     private final SessionReaper reaper;
     private final Tracer tracer;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private WebSearchService webSearch;
     private final CostService cost;
     private final EvalHarness eval;
     private final CapabilityService capabilities;
@@ -503,6 +505,18 @@ public class AgentController {
     }
 
     /** Alert deliveries that exhausted their retries (newest first). Admin only. */
+    @GetMapping("/admin/web-search")
+    public Map<String, Object> adminWebSearch() {
+        requireAdmin();
+        if (webSearch == null) {
+            return Map.of("enabled", false);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("enabled", true);
+        out.putAll(webSearch.metrics().snapshot());
+        return out;
+    }
+
     @GetMapping("/admin/alerts/failed")
     public Map<String, Object> adminAlertsFailed(
             @RequestParam(name = "action", defaultValue = "") String action,
