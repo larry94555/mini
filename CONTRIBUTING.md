@@ -80,5 +80,8 @@ Run the same gates CI runs:
 - **A network-gated live smoke test** (`WebSearchLiveTest`, `IMINI_REQUIRE_NETWORK`) proves the real engine
   path end to end and self-skips offline; the per-query "engines that answered" signal
   (`WebSearchEval.distinctSourceEngines` -> `last_engines_answered`) is pure and offline-tested.
+- **Retrieval ranking uses a pure BM25 scorer** (`Bm25`) in lexical mode, shared by `RetrievalService` and the
+  web-search distiller, behind `retrieval.bm25` (default on) with a tf-log fallback; see
+  [`docs/RETRIEVAL.md`](docs/RETRIEVAL.md).
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

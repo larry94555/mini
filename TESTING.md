@@ -5618,3 +5618,23 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `last_engines_answered` in `GET /admin/web-search`; verified offline with fake engines (an engine that
   answers nothing is excluded). `WebSearchEval.distinctSourceEngines` is a pure, null-safe, sorted-distinct
   helper, unit-tested directly.
+
+---
+
+# Retrieval — BM25 ranking (Track D, step 1)
+
+## 641. Pure BM25 scorer (Bm25Test)
+
+- **Run:** `./mvnw -Dtest=Bm25Test test` (offline; pure — no network/LLM).
+- **Covers:** corpus stats (doc count, average length, distinct-per-doc document frequencies); a rare term
+  outranking a corpus-wide common term (IDF); a shorter document outscoring a longer one with the same term
+  count (length normalization); term-frequency saturation (4× occurrences scores more than 1× but less than
+  4×); missing/empty cases scoring zero; and IDF being higher for rarer terms.
+
+## 642. BM25 wired into retrieval + distiller
+
+- `RetrievalService.search`/`rankTexts` use BM25 in lexical mode when `retrieval.bm25=true` (default), with a
+  fallback to the legacy tf-log scorer when off; `retrieval.bm25-k1`/`retrieval.bm25-b` are configurable, and
+  `rankerInfo()` reports the active mode (logged at startup). `SearchDistiller.rankAndDedup` ranks distilled
+  passages with the same BM25 scorer — verified by the existing `SearchDistillerTest` (relevant passage ranks
+  first; near-duplicates deduped) which continues to pass under BM25.

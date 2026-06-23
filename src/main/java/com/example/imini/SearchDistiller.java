@@ -57,13 +57,35 @@ public final class SearchDistiller {
 
   /** Pure: score passages against the query, drop near-duplicates, return the top {@code maxPassages}. */
   public static List<Passage> rankAndDedup(String query, List<Passage> passages, int maxPassages) {
+    return rankAndDedup(query, passages, maxPassages, true);
+  }
+
+  /**
+   * As {@link #rankAndDedup(String, List, int)}, with explicit control over the ranker: BM25 (default) treats
+   * the candidate passages as the corpus (so rare query terms and shorter on-topic passages win), or the
+   * legacy term-frequency-log lexical scorer when {@code useBm25} is false.
+   */
+  public static List<Passage> rankAndDedup(String query, List<Passage> passages, int maxPassages,
+                                           boolean useBm25) {
     List<String> qt = RetrievalService.tokenize(query == null ? "" : query);
     record Scored(Passage p, double score, Set<String> tokens) {}
     List<Scored> scored = new ArrayList<>();
+
+    Bm25.Corpus corpus = null;
+    if (useBm25) {
+      List<List<String>> docs = new ArrayList<>(passages.size());
+      for (Passage p : passages) {
+        docs.add(RetrievalService.tokenize(p.text()));
+      }
+      corpus = Bm25.Corpus.of(docs);
+    }
     for (Passage p : passages) {
-      double s = RetrievalService.lexicalScore(qt, p.text());
+      List<String> docTokens = RetrievalService.tokenize(p.text());
+      double s = useBm25
+          ? Bm25.score(qt, docTokens, corpus)
+          : RetrievalService.lexicalScore(qt, p.text());
       if (s > 0) {
-        scored.add(new Scored(p, s, new HashSet<>(RetrievalService.tokenize(p.text()))));
+        scored.add(new Scored(p, s, new HashSet<>(docTokens)));
       }
     }
     scored.sort((a, b) -> Double.compare(b.score(), a.score()));

@@ -59,6 +59,9 @@ public class RetrievalService {
     @Value("${retrieval.extensions:.java,.md,.txt,.json,.xml,.yml,.yaml,.properties,.csv,.html,.js,.ts,.py,.kt,.gradle,.sql,.sh,.bat}")
     private String extensionsCfg;
     @Value("${retrieval.embeddings:false}") private boolean useEmbeddings;
+    @Value("${retrieval.bm25:true}") private boolean useBm25;
+    @Value("${retrieval.bm25-k1:1.2}") private double bm25K1;
+    @Value("${retrieval.bm25-b:0.75}") private double bm25B;
     @Value("${retrieval.embed-base-url:}") private String embedBaseUrl;
     @Value("${retrieval.embed-model:nomic-embed-text}") private String embedModel;
     @Value("${llama.port:8081}") private int llamaPort;
@@ -87,7 +90,8 @@ public class RetrievalService {
         }
         exts = new LinkedHashSet<>();
         for (String e : extensionsCfg.split(",")) if (!e.isBlank()) exts.add(e.trim().toLowerCase(Locale.ROOT));
-        log.info("[retrieval] root=" + root + "; mode=" + (useEmbeddings ? "embeddings" : "lexical"));
+        log.info("[retrieval] root=" + root + "; mode=" + (useEmbeddings ? "embeddings" : "lexical")
+                + "; ranker=" + rankerInfo());
     }
 
     // --- tools ---------------------------------------------------------------
@@ -315,9 +319,22 @@ public class RetrievalService {
             }
         } else {
             List<String> qt = tokenize(query);
-            for (Chunk c : chunks) {
-                double s = lexicalScore(qt, c.text()) + symbolBoost(qt, c.symbols(), symbolBoostWeight);
-                if (s > 0) scored.add(new Scored(c, s));
+            if (useBm25) {
+                List<List<String>> corpusDocs = new ArrayList<>(chunks.size());
+                for (Chunk c : chunks) {
+                    corpusDocs.add(tokenize(c.text()));
+                }
+                Bm25.Corpus corpus = Bm25.Corpus.of(corpusDocs);
+                for (Chunk c : chunks) {
+                    double s = Bm25.score(qt, tokenize(c.text()), corpus, bm25K1, bm25B)
+                            + symbolBoost(qt, c.symbols(), symbolBoostWeight);
+                    if (s > 0) scored.add(new Scored(c, s));
+                }
+            } else {
+                for (Chunk c : chunks) {
+                    double s = lexicalScore(qt, c.text()) + symbolBoost(qt, c.symbols(), symbolBoostWeight);
+                    if (s > 0) scored.add(new Scored(c, s));
+                }
             }
         }
         scored.sort(Comparator.comparingDouble(Scored::score).reversed());
@@ -361,9 +378,30 @@ public class RetrievalService {
         }
         List<String> qt = tokenize(q);
         if (!qt.isEmpty()) {
-            in.sort((a, b) -> Double.compare(lexicalScore(qt, b), lexicalScore(qt, a)));
+            if (useBm25) {
+                List<List<String>> corpusDocs = new ArrayList<>(in.size());
+                for (String t : in) {
+                    corpusDocs.add(tokenize(t));
+                }
+                Bm25.Corpus corpus = Bm25.Corpus.of(corpusDocs);
+                java.util.IdentityHashMap<String, Double> score = new java.util.IdentityHashMap<>();
+                for (String t : in) {
+                    score.put(t, Bm25.score(qt, tokenize(t), corpus, bm25K1, bm25B));
+                }
+                in.sort((a, b) -> Double.compare(score.get(b), score.get(a)));
+            } else {
+                in.sort((a, b) -> Double.compare(lexicalScore(qt, b), lexicalScore(qt, a)));
+            }
         }
         return in;
+    }
+
+    /** Human-readable description of the active ranking mode + parameters (for diagnostics/admin). */
+    public String rankerInfo() {
+        if (useEmbeddings) {
+            return "embeddings(model=" + embedModel + ")";
+        }
+        return useBm25 ? ("bm25(k1=" + bm25K1 + ",b=" + bm25B + ")") : "lexical(tf-log)";
     }
 
     /** Pure lexical score: distinct query terms found in the text, weighted by occurrence. */
