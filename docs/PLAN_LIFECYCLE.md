@@ -40,3 +40,24 @@ Inspect the active bindings at `GET /admin/skills/lifecycle` (admin).
 `PlanLifecycle` is pure and offline-tested: `Stage` (with stable ids), `Bindings.parse` (the config grammar),
 and `selectForStage(stage, bindings, skills, planText, k)` (reuses `SkillLibrary.select`; an empty registry
 returns an empty list). See TESTING cases 648-649.
+
+## Verifying lifecycle hooks
+
+Two layers prove the hooks work:
+
+- **Deterministic (offline, always runs):** `PlanLifecycleTest` proves a marker skill bound to a stage is
+  selected and that its body — including a unique marker token — survives formatting for injection, while an
+  empty registry selects nothing. This is the exact selection+format the production `lifecycleAddendum`
+  performs, so it shows the *binding* (not the model) puts the marker into a stage prompt.
+- **Live, end-to-end (model-gated):** `PlanLifecycleLiveTest` binds a marker skill to the prepare + sub-plan
+  stages and drives a real `runPlan` through the production path; it asserts the run surfaces the marker, and
+  that a control run with an empty registry does not. It self-skips unless a model is reachable:
+
+  ```
+  IMINI_REQUIRE_MODEL=1 ./mvnw -Dtest=PlanLifecycleLiveTest test \
+    -Dllama.manage-server=false -Dllama.client-host=127.0.0.1 -Dllama.port=8081
+  ```
+
+  CI's opt-in eval-gate job provisions a tiny model and runs this test (it sets `IMINI_REQUIRE_MODEL=1`).
+  `GET /admin/skills/lifecycle` reports which stages fired and which skills were applied on the last plan run
+  (`last_applied`), so the hooks' effect is observable.

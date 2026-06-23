@@ -521,6 +521,7 @@ public class AgentController {
         requireAdmin();
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("bindings", skills.lifecycleBindings());
+        out.put("last_applied", skills.lifecycleLastApplied());
         return out;
     }
 

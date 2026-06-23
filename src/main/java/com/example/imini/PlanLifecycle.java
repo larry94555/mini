@@ -142,4 +142,17 @@ public final class PlanLifecycle {
     }
     return out;
   }
+
+  /** Pure: the names of the skills applied at a stage (for diagnostics / "which skills fired"). */
+  public static List<String> appliedNames(List<SkillLibrary.Skill> picks) {
+    List<String> names = new ArrayList<>();
+    if (picks != null) {
+      for (SkillLibrary.Skill s : picks) {
+        if (s != null) {
+          names.add(s.name());
+        }
+      }
+    }
+    return names;
+  }
 }

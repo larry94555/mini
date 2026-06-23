@@ -38,6 +38,8 @@ public class SkillService {
     @Value("${skills.disabled:}") private String disabledConfig;
     @Value("${skills.lifecycle:}") private String lifecycleConfig;
     private volatile PlanLifecycle.Bindings lifecycle = PlanLifecycle.Bindings.parse("");
+    // Diagnostics: which stages fired and which skills were applied during the most recent plan run.
+    private final java.util.Map<String, List<String>> lastLifecycle = new java.util.LinkedHashMap<>();
 
     private final List<SkillLibrary.Skill> skills = new ArrayList<>();
     private final java.util.Set<String> disabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -376,6 +378,7 @@ public class SkillService {
         List<SkillLibrary.Skill> active = enabledSkillsFor(sessionId);
         List<SkillLibrary.Skill> picks = PlanLifecycle.selectForStage(stage, lifecycle, active, planText, 2);
         if (picks.isEmpty()) return "";
+        lastLifecycle.put(stage.id(), PlanLifecycle.appliedNames(picks));
         StringBuilder sb = new StringBuilder("\n\n--- Plan-lifecycle skills (" + stage.id() + ") ---\n");
         for (SkillLibrary.Skill s : picks) {
             sb.append(SkillLibrary.format(s, maxBody)).append("\n");
@@ -386,6 +389,16 @@ public class SkillService {
     /** Diagnostics: the configured stage -> bound skill-name bindings (only non-empty stages). */
     public synchronized Map<String, List<String>> lifecycleBindings() {
         return lifecycle.asIdMap();
+    }
+
+    /** Diagnostics: which stages fired and which skills were applied during the most recent plan run. */
+    public synchronized Map<String, List<String>> lifecycleLastApplied() {
+        return new java.util.LinkedHashMap<>(lastLifecycle);
+    }
+
+    /** Clear the per-run lifecycle record (called at the start of a plan run). */
+    public synchronized void resetLifecycleRecord() {
+        lastLifecycle.clear();
     }
 
     private synchronized SkillLibrary.Skill byName(String name) {

@@ -85,6 +85,15 @@ jobs:
           done
           curl -fs http://127.0.0.1:8081/health || (echo "::error::llama-server did not start"; tail -n 50 llama.log; exit 1)
 
+      - name: Verify plan-lifecycle hooks against the live model
+        run: |
+          set -euxo pipefail
+          # The model is up at 127.0.0.1:8081; run the model-gated lifecycle e2e (self-skips without a model).
+          IMINI_REQUIRE_MODEL=1 ./mvnw -B -ntp \
+            -Dtest=PlanLifecycleLiveTest \
+            -Dllama.manage-server=false -Dllama.client-host=127.0.0.1 -Dllama.port=8081 \
+            test
+
       - name: Start imini
         run: |
           set -euxo pipefail
