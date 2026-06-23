@@ -67,7 +67,7 @@ No cloud API key is required.
 | Planning | `todo_write`, plan mode, **plan-then-execute** orchestrator with retry, re-planning, step verification (+ auto-suggested checks), persist/resume, and per-session history, coding profile guidance |
 | Edit trust | auto `git status`/`git diff --stat` verification + structured coding report appended to coding answers |
 | State | SQLite-backed sessions, checkpoints, memory index |
-| Retrieval | `index_workspace` and `search_memory` with lexical scoring and symbol boost |
+| Retrieval | `index_workspace` and `search_memory` with BM25 ranking (configurable `k1`/`b`, IDF + length-normalization; falls back to tf-log lexical) and symbol boost; the same ranker reranks distilled web passages |
 | Skills | reusable `SKILL.md` bundles: auto-indexed, `load_skill`/`save_skill`, read-only remote repos (pinnable) via `refresh_skills`, a provenance registry (`search_skills`/`install_skill`, hash-verified), per-skill enable/disable (persisted global + per-session overrides), and member skill proposals (admin-reviewed, with a "my requests" view) |
 | Extensibility | MCP client (stdio + HTTP; tools, **resources & prompts**), research sub-agent, hooks (`PreToolUse`/`PostToolUse`/**`UserPromptSubmit`/`Stop`**), slash commands |
 | UI/API | Blocking and streaming HTTP endpoints, web UI (live plan w/ per-step edits, plan-history + report viewer, session sharing, integrity-checked export/import w/ preview + skill overrides + sharing, skills toggles + proposals, filterable activity log w/ CSV/JSON export, per-session activity), remote approvals |
