@@ -5638,3 +5638,25 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   `rankerInfo()` reports the active mode (logged at startup). `SearchDistiller.rankAndDedup` ranks distilled
   passages with the same BM25 scorer — verified by the existing `SearchDistillerTest` (relevant passage ranks
   first; near-duplicates deduped) which continues to pass under BM25.
+
+---
+
+# Bundled meta-skills — skill-builder & tool-builder (drop-in, no code change)
+
+## 643. Bundled meta-skills parse, index, and select
+
+- **What:** two bundled skills under `skills/skill-builder/SKILL.md` and `skills/tool-builder/SKILL.md`,
+  authored in the standard SKILL.md format (front-matter `name`/`description`/`when_to_use`/`argument-hint`/
+  `allowed_tools`, then a numbered-step body using `$ARGUMENTS`), like the existing bundled skills
+  (`code-review`, `debug`, …). No code changed; no registry entry (bundled skills are not registry-listed).
+- **Verify (offline, no model):**
+  - `SkillLibrary.parse` reads both files with all front-matter fields populated (`allowed_tools` resolves to
+    `[web_search, web_fetch, search_skills, save_skill, load_skill]` for skill-builder and
+    `[web_search, web_fetch, bash]` for tool-builder).
+  - `SkillLibrary.index` lists both name+description lines (what the model sees in the system prompt).
+  - `SkillLibrary.select` lex-routes "research best practices for a plan" -> `skill-builder` and
+    "install a local tool for this request" -> `tool-builder`.
+- **Note:** these are guidance-grade skills. `skill-builder` is applied deliberately at each plan stage
+  (mini has no plan-lifecycle hooks yet); `tool-builder` installs only with explicit user permission and
+  requires a restart for a newly added MCP server to be discovered (no hot-reload yet). Both are tracked as
+  optional future enhancements in ROADMAP (Later / lower-priority).
