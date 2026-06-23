@@ -154,3 +154,24 @@ The engine set itself is config-driven: `agent.web-search.engines` (default `duc
 chooses the subset and order; names with no configuration (e.g. `searxng` without a base URL) or unknown
 names are skipped gracefully. SearXNG's JSON parsing is pure (`SearxngEngine.parse`), unit-tested offline and
 gated on a real JSON mapper via `IntegrationGate("json", …)`.
+
+## Live smoke test
+
+Every engine is verified offline against recorded fixtures; to exercise the real network path end to end, run
+the `network`-gated live smoke test. It self-skips unless the `network` integration family is required:
+
+```
+# locally
+IMINI_REQUIRE_NETWORK=1 ./mvnw -Dtest=WebSearchLiveTest test
+# include your SearXNG instance in the live run
+IMINI_REQUIRE_NETWORK=1 \
+  ./mvnw -Dtest=WebSearchLiveTest test -Dagent.web-search.searxng-base-url=https://searx.example
+```
+
+When required, it runs a real query through the full default engine set and asserts the fused results are
+non-empty, carry real http(s) URLs and per-result provenance, and that at least one distinct source engine
+answered (also reflected in the `last_engines_answered` field of `GET /admin/web-search`). A second factual
+query checks that a confident, cited instant answer is returned **when available**, degrading gracefully
+(skip, not fail) when none is. In CI the `Integration tests` workflow sets `IMINI_REQUIRE_NETWORK=1`, and
+`scripts/integration-coverage.sh` already requires the `network` family, so a silently-skipping live test
+fails the build.

@@ -41,6 +41,12 @@ public final class WebSearchMetrics {
   private final AtomicLong instantSurfaced = new AtomicLong();
   private final Map<String, long[]> perEngine = new TreeMap<>(); // name -> [ran, skipped]
   private final Deque<Query> recent = new ArrayDeque<>();
+  private volatile List<String> lastAnswered = List.of(); // engines that returned results on the last query
+
+  /** Record which engines actually answered (returned >=1 result) on the most recent query. */
+  public void recordAnswered(java.util.Collection<String> engines) {
+    lastAnswered = engines == null ? List.of() : List.copyOf(engines);
+  }
 
   public synchronized void record(Query q) {
     totalQueries.incrementAndGet();
@@ -78,6 +84,7 @@ public final class WebSearchMetrics {
       engines.put(e.getKey(), v);
     }
     out.put("engines", engines);
+    out.put("last_engines_answered", List.copyOf(lastAnswered));
     List<Map<String, Object>> recentList = new ArrayList<>();
     for (Query q : recent) {
       Map<String, Object> m = new LinkedHashMap<>();

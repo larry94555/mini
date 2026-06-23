@@ -77,5 +77,8 @@ Run the same gates CI runs:
 - **A self-hosted SearXNG engine** (`SearxngEngine`) is config-driven (`agent.web-search.searxng-base-url`,
   absent by default) with pure JSON parsing gated on `json`; the engine set/order is configurable via
   `agent.web-search.engines` and skips unknown/unconfigured engines gracefully.
+- **A network-gated live smoke test** (`WebSearchLiveTest`, `IMINI_REQUIRE_NETWORK`) proves the real engine
+  path end to end and self-skips offline; the per-query "engines that answered" signal
+  (`WebSearchEval.distinctSourceEngines` -> `last_engines_answered`) is pure and offline-tested.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.
