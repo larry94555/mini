@@ -338,8 +338,7 @@ When asked to pick the next task, follow this order:
 
 - **Meta-skill enablers (optional; the `skill-builder`/`tool-builder` skills work without these):**
   (a) plan-lifecycle hooks so a skill can be invoked automatically at the prepare / review / sub-plan /
-  tool-select / goal-eval / post-mortem stages rather than only on relevance match; (b) an MCP hot-reload
-  tool (e.g. `reload_mcp`) so a newly installed MCP server becomes available without restarting mini.
+  tool-select / goal-eval / post-mortem stages rather than only on relevance match; (b) an MCP hot-reload tool (`reload_mcp`) so a newly installed MCP server becomes available without restarting mini — ✅ done (see Recently completed).
 
 These remain valuable but rank below the workflow gaps and the educational core:
 
@@ -353,6 +352,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
   workflow coverage.
 
 ## Recently completed
+
+- MCP hot-reload (unblocks the `tool-builder` skill): a `reload_mcp` tool and `POST /admin/mcp/reload` re-read `mcp.json`, diff it against the running servers via a pure `McpConfig` (normalized `ServerSpec` equal by command+args+env+transport+url; `diff` -> added/removed/restarted/unchanged; pure `serversToStop`/`serversToStart` registry-delta), stop removed/changed servers (pruning their tools/resources/prompts by `<server>_` prefix), launch added/changed ones, re-discover their tools, and republish the live tool set via a reload hook on `ToolRegistry` (`refreshMcpTools`) — without dropping built-ins or in-flight requests. Idempotent (no-op when unchanged); MCP stays off unless an `mcp.json` exists. Alt 1: `GET /admin/mcp` + a retained `last_reload` summary (added/removed/restarted/failed + tool count) make the active MCP state observable. Alt 2: `docs/MCP_HOT_RELOAD.md`, README, golden config-diff fixtures + `McpConfigTest` (TESTING 644-645). The config-diff/spec/registry-delta logic is pure and offline-tested; child-process launches gate on the `node` family. The `tool-builder` skill now calls `reload_mcp` instead of asking for a restart. This completes the first of the two optional meta-skill enablers.
 
 - Bundled two meta-skills (drop-in, no code change): `skill-builder` — when a plan would benefit from external best practices, research them with the `web_search`/`web_fetch` tools and capture them as a new topic-named skill via `save_skill` for reuse across the plan lifecycle; and `tool-builder` — before settling for built-in tools, research a better-fit locally installable tool (MCP-biased), get explicit user permission, install via the sandboxed exec tool, and register it in `mcp.json` for discovery. Placed under `skills/skill-builder/` and `skills/tool-builder/` like the other bundled skills (auto-indexed, `load_skill`/`search_skills`-discoverable; verified to parse, index, and lex-select correctly). Two optional future enhancements would make them first-class (see Later/lower-priority): plan-lifecycle hooks so `skill-builder` is applied at each planning stage, and an MCP hot-reload tool so `tool-builder` does not require a restart after install.
 

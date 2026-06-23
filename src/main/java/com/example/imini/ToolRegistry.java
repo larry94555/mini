@@ -18,6 +18,8 @@ public class ToolRegistry {
 
     private final SubAgent subAgent;
     private final AgentRegistry agents;
+    private final McpManager mcp;
+    private final java.util.Set<String> mcpToolNames = new java.util.LinkedHashSet<>();
 
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
                         McpManager mcp, RetrievalService retrieval, SkillService skills,
@@ -25,6 +27,7 @@ public class ToolRegistry {
                         WorkspaceRootTools workspaceRootTools, ProjectTools projectTools) {
         this.subAgent = subAgent;
         this.agents = agents;
+        this.mcp = mcp;
         for (Tool t : builtins.all()) register(t);
         for (Tool t : codebase.all()) register(t);   // glob, grep, repo_tree, read_many, git_status, git_diff
         for (Tool t : gitWrite.all()) register(t);   // git_stage, git_commit, git_branch (mutating)
@@ -40,7 +43,24 @@ public class ToolRegistry {
         register(skills.refreshSkillsTool());      // refresh_skills (pull remote repos)
         register(skills.searchSkillsTool());       // search_skills (registry, with provenance)
         register(skills.installSkillTool());       // install_skill (hash-verified)
-        for (Tool t : mcp.tools()) register(t);   // external MCP-server tools (off unless mcp.json exists)
+        for (Tool t : mcp.tools()) {           // external MCP-server tools (off unless mcp.json exists)
+            register(t);
+            mcpToolNames.add(t.name);
+        }
+        register(mcp.reloadTool());            // reload_mcp (hot-reload mcp.json without restart)
+        mcp.setReloadHook(this::refreshMcpTools);
+    }
+
+    /** Re-publish the live MCP tool set after a hot-reload: drop the old MCP tools, add the current ones. */
+    public synchronized void refreshMcpTools() {
+        for (String name : mcpToolNames) {
+            tools.remove(name);
+        }
+        mcpToolNames.clear();
+        for (Tool t : mcp.tools()) {
+            register(t);
+            mcpToolNames.add(t.name);
+        }
     }
 
     private void register(Tool t) {

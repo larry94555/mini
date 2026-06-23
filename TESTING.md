@@ -5660,3 +5660,27 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   (mini has no plan-lifecycle hooks yet); `tool-builder` installs only with explicit user permission and
   requires a restart for a newly added MCP server to be discovered (no hot-reload yet). Both are tracked as
   optional future enhancements in ROADMAP (Later / lower-priority).
+
+---
+
+# MCP hot-reload (unblocks tool-builder)
+
+## 644. Pure config diff + reload plan (McpConfigTest)
+
+- **Run:** `./mvnw -Dtest=McpConfigTest test` (offline; pure — no child processes).
+- **Covers:** `McpConfig.diff` classifies servers as added / removed / restarted (changed by
+  command+args+env+transport+url) / unchanged; identical config is a no-op; `ServerSpec` equality considers
+  command, args, env, transport, and url; `serversToStop()` = removed ∪ changed and `serversToStart()` =
+  added ∪ changed (the registry-delta in pure form); and `McpConfig.spec` extracts a normalized spec from a
+  conf map. `parseSpecs` over a recorded `mcp.json` fixture gates on a real mapper
+  (`IntegrationGate("json", …)`) — self-skips under the no-op stub, verified against the vendored mini-mapper.
+
+## 645. Reload wiring (McpManager + ToolRegistry + admin)
+
+- `McpManager.reload()` reads `mcp.json`, diffs against the running servers, stops removed/changed servers
+  (pruning their tools/resources/prompts by `<server>_` prefix), launches added/changed servers, and runs the
+  reload hook to republish tools; it is idempotent (no-op when unchanged) and records a `last_reload` summary
+  for `GET /admin/mcp`. `ToolRegistry.refreshMcpTools()` swaps the live MCP tool set (drop old MCP tool names,
+  add current `mcp.tools()`), keeping built-ins intact. Exposed as the `reload_mcp` tool and
+  `POST /admin/mcp/reload` (admin-gated). Tests that launch a real child MCP server remain gated on the `node`
+  integration family (self-skip offline); the diff/spec/registry-delta logic above is pure and always runs.

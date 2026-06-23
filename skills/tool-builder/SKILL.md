@@ -3,7 +3,7 @@ name: tool-builder
 description: Before settling for built-in tools, research whether a locally installable tool (e.g. an MCP server) would better serve the request, then get permission, install it, and expose it through mini's existing discovery.
 when_to_use: Use before/while selecting a tool to implement a request, when no existing tool fits well and a purpose-built, freely installable tool likely exists (e.g. a specialized data, API, or domain MCP server). Skip when an adequate built-in or already-registered tool exists.
 argument-hint: the capability the request needs a tool for
-allowed_tools: web_search, web_fetch, bash
+allowed_tools: web_search, web_fetch, bash, reload_mcp
 ---
 Find, with permission install, and expose a better-fit local tool for the capability: $ARGUMENTS
 
@@ -33,9 +33,10 @@ Treat installation as privileged: never install anything without explicit user a
    Add (or merge) an entry for the new server. On startup mini launches each configured server, asks it for
    its tools, and registers them alongside the built-ins.
 
-6. Make it live and confirm. IMPORTANT: mini reads `mcp.json` at startup, so a newly added server is not
-   available until mini is restarted — there is no hot-reload yet. Tell the user this plainly and ask them to
-   restart mini, then confirm the new tool appears in the tool list before using it for the request.
+6. Make it live and confirm. Call the `reload_mcp` tool (or POST /admin/mcp/reload) to hot-reload mcp.json:
+   mini launches the newly added server, discovers its tools, and republishes them into the live tool set
+   without a restart. Then confirm the new tool appears in the tool list before using it for the request.
+   (If hot-reload is unavailable in an older build, fall back to restarting mini.)
 
 Safety: only install free, reputable tools from primary sources; never pipe untrusted scripts into a shell;
 keep the granted access as narrow as the task needs; and re-confirm with the user if the install command or
