@@ -5684,3 +5684,24 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
   add current `mcp.tools()`), keeping built-ins intact. Exposed as the `reload_mcp` tool and
   `POST /admin/mcp/reload` (admin-gated). Tests that launch a real child MCP server remain gated on the `node`
   integration family (self-skip offline); the diff/spec/registry-delta logic above is pure and always runs.
+
+---
+
+# MCP hot-reload — live end-to-end (closes the live-path gap)
+
+## 646. End-to-end hot-reload against the stub (McpHotReloadIntegrationTest, node+json-gated)
+
+- **Run locally:** `IMINI_REQUIRE_NODE=1 ./mvnw -Dtest=McpHotReloadIntegrationTest test` (self-skips offline).
+- Drives the production `McpManager.reload()` (read mcp.json -> diff -> stop/prune -> launch/discover ->
+  reload hook) against the bundled MCP stub server, and asserts the **live** tool set — republished through
+  the same `ToolRegistry.republishMcp` used in production: (a) one server's tools present; (b) adding a second
+  server leaves the first's tools intact; (c) removing a server prunes its tools from the live set; (d) an
+  unchanged reload is a byte-identical no-op. Also asserts `GET /admin/mcp` exposes a per-server tool count.
+- Gated on `node` (spawns a child) and `json` (discovery parses JSON-RPC). Verified end-to-end against a real
+  `node` child + the vendored mini-mapper (`(node) ran`, `(json) ran`).
+
+## 647. Pure registry-delta + per-server counts (McpConfigTest additions)
+
+- `ToolRegistry.republishMcp` (pure) removes stale MCP tool names from a live map, adds the current MCP tools,
+  and returns the new name set — built-ins untouched. `McpConfig.toolCountsByServer`/`toolPrefix` (pure)
+  compute per-server tool counts for diagnostics. Both always run offline.

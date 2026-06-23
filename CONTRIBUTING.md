@@ -86,6 +86,6 @@ Run the same gates CI runs:
 - **MCP supports hot-reload**: the config diff (`McpConfig.diff` -> add/remove/restart plan) and the
   registry-delta (`serversToStop`/`serversToStart`, prune by `<server>_` prefix) are pure and offline-tested;
   `reload_mcp` / `POST /admin/mcp/reload` relaunch changed servers without a restart. Tests that spawn a real
-  MCP child gate on the `node` family.
+  MCP child gate on the `node` family. The live reload path is proven end to end by `McpHotReloadIntegrationTest` (node+json-gated), which asserts the live tool set via the production `ToolRegistry.republishMcp`.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

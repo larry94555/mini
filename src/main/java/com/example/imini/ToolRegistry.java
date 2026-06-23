@@ -19,7 +19,7 @@ public class ToolRegistry {
     private final SubAgent subAgent;
     private final AgentRegistry agents;
     private final McpManager mcp;
-    private final java.util.Set<String> mcpToolNames = new java.util.LinkedHashSet<>();
+    private java.util.Set<String> mcpToolNames = new java.util.LinkedHashSet<>();
 
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
                         McpManager mcp, RetrievalService retrieval, SkillService skills,
@@ -53,14 +53,30 @@ public class ToolRegistry {
 
     /** Re-publish the live MCP tool set after a hot-reload: drop the old MCP tools, add the current ones. */
     public synchronized void refreshMcpTools() {
-        for (String name : mcpToolNames) {
-            tools.remove(name);
+        this.mcpToolNames = republishMcp(tools, mcpToolNames, mcp.tools());
+    }
+
+    /**
+     * Pure registry-delta used by the reload hook: remove the previously-published MCP tool names from the
+     * live tool map, add the current MCP tools, and return the new MCP tool-name set. Built-in (non-MCP)
+     * tools are untouched. Returned set preserves insertion order.
+     */
+    static java.util.Set<String> republishMcp(Map<String, Tool> live,
+                                               java.util.Set<String> oldMcpNames,
+                                               java.util.List<Tool> currentMcp) {
+        if (oldMcpNames != null) {
+            for (String n : oldMcpNames) {
+                live.remove(n);
+            }
         }
-        mcpToolNames.clear();
-        for (Tool t : mcp.tools()) {
-            register(t);
-            mcpToolNames.add(t.name);
+        java.util.LinkedHashSet<String> now = new java.util.LinkedHashSet<>();
+        if (currentMcp != null) {
+            for (Tool t : currentMcp) {
+                live.put(t.name, t);
+                now.add(t.name);
+            }
         }
+        return now;
     }
 
     private void register(Tool t) {
