@@ -231,7 +231,7 @@ So this is **not** as good as it can be — there is a clear, free, token-light 
    one is confidently available — falling back to ranked results otherwise.
 5. **Query controls.** Recency/time-range, `site:`/domain scoping, and language/region passthrough, with
    safe operator handling — so the agent can ask precise questions instead of post-filtering.
-6. **Content-distillation pipeline (the biggest answer-quality jump, still token-light).** Optionally fetch
+6. **Content-distillation pipeline (the biggest answer-quality jump, still token-light).** ✅ **Done.** Optionally fetch
    the top-N results via `webFetch` + `HtmlExtractor`, chunk them, rank passages with `RetrievalService`
    (BM25/embeddings — no LLM), and return only the few best passages **with citations**. The model receives
    distilled evidence, not raw pages.
@@ -351,6 +351,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
 
 Keep this section short (newest first). Full history lives in
 [`docs/HISTORY.md`](docs/HISTORY.md).
+
+- Track C step 3 — content distillation: added `SearchDistiller`, which turns the top fused results into the few best cited passages — it fetches each page (reusing `HtmlExtractor.mainText`), splits the text into bounded passages, scores them against the query with `RetrievalService`'s lexical ranker (BM25-style, no LLM tokens), removes near-duplicate passages across sources (token-Jaccard), and returns the best ones tagged with source URLs. Wired into `WebSearchService.searchText` behind `agent.web-search.distill` (+ `distill-top-n`/`distill-max-passages`), off by default so behavior is unchanged; the page fetcher is injected and null offline so distillation self-skips. Split/score/dedup are pure and unit-tested offline (`SearchDistillerTest`, golden page-text fixtures, TESTING 631-632). Alt 1: near-duplicate passage dedup across sources (pure). Alt 2: `docs/WEB_SEARCH.md` "content distillation" note + README. Verified offline: 22 web-search tests pass; distillation returns cited passages and self-skips with no fetcher.
 
 - Track C step 2 — instant answers + live test: added an `InstantAnswerEngine` that queries the free DuckDuckGo Instant Answer API and the Wikipedia REST summary endpoint and parses (purely) a single confident, cited answer into the `SearchResult` shape (`sourceEngine="instant"`); `WebSearchService` surfaces it ahead of the fused ranked results (deduped by canonical URL, behind its own `CircuitBreaker`, falling back to ranked results when not confident; toggle `agent.web-search.instant-answers`). Added a network-gated `WebSearchLiveTest` (new `network` IntegrationGate family; `IMINI_REQUIRE_NETWORK` wired into `integration.yml` + `integration-coverage.sh`). Alt 1: instant-answer parsing uses a real JSON mapper but is gated through `IntegrationGate("json", …)` so it self-skips under the offline no-op mapper. Alt 2: `docs/WEB_SEARCH.md` "instant answers" note, README, and golden JSON fixtures + tests (`InstantAnswerTest`, TESTING cases 629-630). Verified offline against the vendored mini-Jackson: the instant-answer parse tests pass `(json) ran`; integration (prepend/dedup) tests pass with fakes; the live test self-skips offline. No paid API; all parsing in Java.
 
