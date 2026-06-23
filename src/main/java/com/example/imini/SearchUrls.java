@@ -46,9 +46,58 @@ public final class SearchUrls {
     }
   }
 
+  /**
+   * Unwrap common redirect wrappers to the real target URL: DuckDuckGo ({@code uddg=}) and the generic
+   * {@code url=}/{@code q=} redirect params used by Google/Bing/news aggregators. Returns the decoded target
+   * when it is an absolute http(s) URL, else the input (with a protocol-relative prefix fixed up). Pure.
+   */
+  public static String unwrapRedirect(String href) {
+    if (href == null || href.isBlank()) {
+      return "";
+    }
+    String ddg = unwrapDuckDuckGo(href);
+    if (!ddg.equals(href) && (ddg.startsWith("http://") || ddg.startsWith("https://"))) {
+      return ddg;
+    }
+    String candidate = ddg;
+    for (String param : new String[] {"url=", "u=", "q=", "target="}) {
+      int i = indexOfParam(candidate, param);
+      if (i >= 0) {
+        String enc = candidate.substring(i + param.length());
+        int amp = enc.indexOf('&');
+        if (amp >= 0) {
+          enc = enc.substring(0, amp);
+        }
+        try {
+          String dec = URLDecoder.decode(enc, StandardCharsets.UTF_8);
+          if (dec.startsWith("http://") || dec.startsWith("https://")) {
+            return dec;
+          }
+        } catch (Exception ignore) {
+          // fall through to next param
+        }
+      }
+    }
+    return candidate.startsWith("//") ? "https:" + candidate : candidate;
+  }
+
+  private static int indexOfParam(String url, String param) {
+    int q = url.indexOf('?');
+    if (q < 0) {
+      return -1;
+    }
+    // match "?param" or "&param"
+    int i = url.indexOf("?" + param, q - 0);
+    if (i >= 0) {
+      return i + 1;
+    }
+    i = url.indexOf("&" + param, q);
+    return i >= 0 ? i + 1 : -1;
+  }
+
   /** A normalized display URL: redirect-unwrapped, tracking-stripped, with sorted remaining query params. */
   public static String clean(String rawUrl) {
-    String unwrapped = unwrapDuckDuckGo(rawUrl);
+    String unwrapped = unwrapRedirect(rawUrl);
     try {
       URI u = URI.create(unwrapped);
       if (u.getScheme() == null || u.getHost() == null) {

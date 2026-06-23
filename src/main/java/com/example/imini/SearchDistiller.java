@@ -98,6 +98,18 @@ public final class SearchDistiller {
    */
   public static List<Passage> distill(String query, List<SearchResult> results,
                                       Function<String, String> fetcher, int topN, int maxPassages) {
+    return distill(query, results, fetcher, topN, maxPassages, true);
+  }
+
+  /**
+   * As {@link #distill(String, List, Function, int, int)}, but with explicit control over prompt-injection
+   * scrubbing of the fetched passages (default on). When {@code scrubInjections} is true, each passage is run
+   * through {@link SearchSafety#neutralizeInjections} and {@link Redact#scrubPii} before ranking, so untrusted
+   * page text cannot smuggle instructions or secrets into the distilled context.
+   */
+  public static List<Passage> distill(String query, List<SearchResult> results,
+                                      Function<String, String> fetcher, int topN, int maxPassages,
+                                      boolean scrubInjections) {
     List<Passage> all = new ArrayList<>();
     if (fetcher == null || results == null) {
       return all;
@@ -118,7 +130,8 @@ public final class SearchDistiller {
         continue;
       }
       for (String p : splitPassages(text)) {
-        all.add(new Passage(p, r.url()));
+        String passage = scrubInjections ? Redact.scrubPii(SearchSafety.neutralizeInjections(p)) : p;
+        all.add(new Passage(passage, r.url()));
       }
     }
     return rankAndDedup(query, all, maxPassages);
