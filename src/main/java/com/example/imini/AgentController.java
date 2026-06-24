@@ -516,6 +516,16 @@ public class AgentController {
         return mcp.reload(); // republishes MCP tools via the reload hook set by ToolRegistry
     }
 
+    @GetMapping("/admin/capability-provisioning")
+    public Map<String, Object> adminCapabilityProvisioning() {
+        requireAdmin();
+        Map<String, List<String>> applied = skills == null ? Map.of() : skills.lifecycleLastApplied();
+        Object lastReload = (mcp == null) ? null : mcp.diagnostics().get("last_reload");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> reloadMap = (lastReload instanceof Map) ? (Map<String, Object>) lastReload : null;
+        return CapabilityProvisioning.view(applied, reloadMap);
+    }
+
     @GetMapping("/admin/skills/lifecycle")
     public Map<String, Object> adminSkillsLifecycle() {
         requireAdmin();
