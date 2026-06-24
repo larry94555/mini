@@ -54,3 +54,13 @@ In CI the `Integration tests` workflow sets `IMINI_REQUIRE_NODE=1` (and a real J
 live reload path runs there; `scripts/integration-coverage.sh` already requires the `node` family, so a
 silently-skipping test fails the build. `GET /admin/mcp` reports a per-server tool count (`tools_by_server`)
 so a reload's effect on each server is observable.
+
+## tool-builder end-to-end
+
+`reload_mcp` is what the `tool-builder` skill calls after installing a tool. The combined
+`GET /admin/capability-provisioning` view links the `tool-select` lifecycle stage (and the `tool-builder`
+skill it applied) to the MCP server(s) the reload provisioned. The full path — a step needs a capability ->
+`tool-select` applies `tool-builder` -> the stub is added to `mcp.json` -> `reload_mcp` brings its tools into
+the live set — is proven by the node+json-gated `ToolBuilderProvisioningIntegrationTest`
+(`IMINI_REQUIRE_NODE=1 ./mvnw -Dtest=ToolBuilderProvisioningIntegrationTest test`). See
+[`docs/PLAN_LIFECYCLE.md`](PLAN_LIFECYCLE.md).

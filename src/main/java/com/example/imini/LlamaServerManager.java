@@ -53,6 +53,7 @@ public class LlamaServerManager {
     @Value("${llama.extra-args:}") private String extraArgs;
     @Value("${llama.auto-restart:true}") private boolean autoRestart;
     @Value("${llama.health-interval-seconds:15}") private int healthInterval;
+    @Value("${llama.ready-timeout-seconds:600}") private int readyTimeoutSeconds;
     @Value("${llama.cache-reuse:256}") private int cacheReuse;            // KV-cache chunk reuse (latency)
     @Value("${llama.draft-hf-model:}") private String draftHf;            // speculative decoding (HF draft)
     @Value("${llama.draft-model-path:}") private String draftPath;        // speculative decoding (local draft)
@@ -152,9 +153,16 @@ public class LlamaServerManager {
     }
 
     private void waitUntilReady() {
-        for (int i = 0; i < 600; i++) {
+        int limit = readyTimeoutSeconds > 0 ? readyTimeoutSeconds : 600;
+        for (int i = 0; i < limit; i++) {
             if (healthy()) {
                 log.info("[llama] ready.");
+                return;
+            }
+            // Fast-fail: if the server never launched (missing binary) or has already exited, there is
+            // nothing to wait for — don't block for the full timeout.
+            if (proc == null || !proc.isAlive()) {
+                log.warn("[llama] server process is not running; aborting readiness wait (check llama-server.log).");
                 return;
             }
             try {
@@ -164,7 +172,7 @@ public class LlamaServerManager {
                 return;
             }
         }
-        log.warn("[llama] not ready after 600s; check llama-server.log");
+        log.warn("[llama] not ready after " + limit + "s; check llama-server.log");
     }
 
     private void startWatchdog() {

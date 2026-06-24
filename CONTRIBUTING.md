@@ -90,5 +90,9 @@ Run the same gates CI runs:
 - **Plan-lifecycle hooks** bind skills to planning stages via `skills.lifecycle`; the stage model, binding
   parser, and selector (`PlanLifecycle`) are pure and offline-tested, an empty registry is a no-op, and the
   selector reuses `SkillLibrary.select`. See [`docs/PLAN_LIFECYCLE.md`](docs/PLAN_LIFECYCLE.md). The live wiring is proven by a model-gated `PlanLifecycleLiveTest` (drives real `runPlan`, asserts a bound marker skill reaches the run vs. an empty-registry control); the deterministic injection is proven offline in `PlanLifecycleTest`.
+- **tool-builder -> reload is proven end to end** by the node+json-gated `ToolBuilderProvisioningIntegrationTest`
+  (tool-select applies tool-builder, then the production reload provisions the stub's tools into the live set);
+  `CapabilityProvisioning` (pure) links the stage to the reloaded server. `@SpringBootTest`s set
+  `llama.manage-server=false` so CI never blocks on a llama server.
 - If scripts show up non-executable in git after an archive import, run `sh scripts/git-mark-exec.sh` and
   commit.

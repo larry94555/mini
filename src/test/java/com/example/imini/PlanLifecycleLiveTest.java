@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * touch it; CI's eval-gate job provisions a tiny model and sets the flag. The deterministic, offline
  * counterpart is {@link PlanLifecycleTest#boundMarkerSkillBodyReachesStageAddendum()}.
  */
-@SpringBootTest
+@SpringBootTest(properties = "llama.manage-server=false")
 public class PlanLifecycleLiveTest {
 
     static final String MARKER = "LIFECYCLE_MARKER_7Q";

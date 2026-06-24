@@ -61,3 +61,19 @@ Two layers prove the hooks work:
   CI's opt-in eval-gate job provisions a tiny model and runs this test (it sets `IMINI_REQUIRE_MODEL=1`).
   `GET /admin/skills/lifecycle` reports which stages fired and which skills were applied on the last plan run
   (`last_applied`), so the hooks' effect is observable.
+
+## tool-builder end-to-end
+
+When `tool-builder` is bound to the `tool-select` stage (`skills.lifecycle=tool-select=tool-builder`), a plan
+step that needs a capability no built-in covers triggers the skill, which researches, installs, and registers
+a tool in `mcp.json`, then calls `reload_mcp`. `GET /admin/capability-provisioning` links the `tool-select`
+stage (and the skill it applied) to the MCP server(s) the reload brought online, so the whole
+"step needed a capability -> a tool was provisioned" path is observable in one place.
+
+This path is proven by `ToolBuilderProvisioningIntegrationTest` (node+json-gated): bound to `tool-select`, it
+applies `tool-builder`, then reloads the bundled MCP stub as the "installed" tool and asserts its tools appear
+in the live set — with a control run (no binding) surfacing nothing. Run locally:
+
+```
+IMINI_REQUIRE_NODE=1 ./mvnw -Dtest=ToolBuilderProvisioningIntegrationTest test
+```

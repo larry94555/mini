@@ -5752,3 +5752,31 @@ so its links and references are validated too; `bash scripts/check-docs.sh` stay
 - `SkillService` records which stages fired and which skills were applied during the most recent plan run
   (reset at the start of each `runPlan`), exposed as `last_applied` in `GET /admin/skills/lifecycle`
   alongside the configured `bindings`.
+
+---
+
+# tool-builder -> MCP hot-reload, end to end (CI speed fix included)
+
+## 653. CI build-test no longer blocks on a llama server
+
+- The `@SpringBootTest` (`PlanLifecycleLiveTest`) now boots with `llama.manage-server=false`, so the context
+  does not try to launch/await a llama server during the unit-test job. `LlamaServerManager.waitUntilReady`
+  is also capped by `llama.ready-timeout-seconds` (default 600) and **fast-fails** when the server process
+  never launched or has exited (missing binary) instead of polling for the full timeout — so a misconfigured
+  `manage-server=true` can no longer silently burn ~10 minutes.
+
+## 654. Capability-provisioning view (CapabilityProvisioningTest, pure)
+
+- `CapabilityProvisioning.view(lastApplied, lastReload)` links the `tool-select` stage (and the skill it
+  applied) to the MCP servers a reload brought online; `serversProvisioned` combines added+restarted;
+  `provisioned` is true only when a tool-select skill fired AND a server was reloaded. Pure, fakes-only.
+
+## 655. tool-builder -> reload end-to-end (ToolBuilderProvisioningIntegrationTest, node+json-gated)
+
+- **Run locally:** `IMINI_REQUIRE_NODE=1 ./mvnw -Dtest=ToolBuilderProvisioningIntegrationTest test`.
+- With `skills.lifecycle=tool-select=tool-builder`, a step needing a capability applies the `tool-builder`
+  skill (observable in `lifecycleLastApplied`); writing the bundled MCP stub into `mcp.json` and driving the
+  production `McpManager.reload` then makes the stub's tools appear in the LIVE set via the same
+  `ToolRegistry.republishMcp` hook; the combined `CapabilityProvisioning.view` reports `provisioned=true`. A
+  control run with no binding surfaces no tool-builder guidance. Verified end-to-end against a real node child
+  + the vendored mini-mapper (`(node) ran`, `(json) ran`).
