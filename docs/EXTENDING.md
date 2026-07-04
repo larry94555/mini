@@ -4,8 +4,14 @@ This document answers one question: **how should a user add their own code to `i
 the harness — from a small skill or tool all the way up to a deep, `pi`-style extension that changes
 how the loop itself behaves — without forking the core?**
 
-It is a *recommendation*, not a shipped feature. The current state is assessed honestly first, then a
-staged design is proposed. The companion roadmap entry is **Track L — User-extensible harness**.
+The current state is assessed honestly first, then a staged design is proposed. The companion roadmap
+entry is **Track L — User-extensible harness**.
+
+> **Update — the in-process Extension SPI is now implemented (Tier 2, tools/agents/commands/events).**
+> A hands-on walkthrough with runnable examples lives in
+> [`EXTENDING_GETTING_STARTED.md`](EXTENDING_GETTING_STARTED.md). The external-`*.jar` `ServiceLoader`
+> path and the GraalJS scripting bridge (Tiers 2d–3) remain proposed. See "Recommended rollout" below for
+> exactly what shipped.
 
 ---
 
@@ -204,17 +210,24 @@ no separate server. **That** is the bar the recommendation sets.
 
 ## 5. Recommended rollout (first PRs)
 
-1. **Tier 1 example + `extensions/` bundle** — extend `PluginPack` to carry `mcp.json`/`hooks.json`
-   fragments; add `extensions/notes-app/` + docs. (Small, high on-ramp value.)
-2. **`Extension` interface + Spring-bean discovery for tools only** — replace `ToolRegistry`'s hard-coded
-   `register` calls with a provider loop; prove an in-process bean can add a validated tool. Default-empty,
+1. **`Extension` interface + Spring-bean discovery for tools** — ✅ **Shipped.** Replaced `ToolRegistry`'s
+   hard-coded `register` calls' boundary with a provider loop over `ExtensionRegistry.tools()`; an
+   in-process bean adds a validated, permission-gated tool that can't shadow a core/MCP name. Default-empty,
    byte-identical. (The seam that unlocks everything.)
-3. **Extend the SPI to agents/commands + `LoopEvent` observation** — the typed successor to hooks.
-4. **`wrapContext` + `route` extension points** — context engineering and model routing (pairs directly
-   with roadmap Track G's router and Track E's caching experiments).
-5. **`extensions/*.jar` ServiceLoader + isolated classloader + manifest/capability gating + audit** — the
-   default-closed, signed, sandboxed external-code path.
-6. **GraalJS scripting bridge + `/extensions` admin view + docs + golden tests.**
+2. **Extend the SPI to agents/commands + `LoopEvent` observation** — ✅ **Shipped.** `Extension.agents()`
+   merge into `AgentRegistry` (disk still wins), `Extension.commands()` into `SlashCommands`, and
+   `PRE_TOOL_USE`/`POST_TOOL_USE` events fan out via `ExtensionRegistry.emit(...)` from `AgentEngine` (the
+   typed, observe-only successor to shell hooks). `GET /admin/extensions` + `extensions.enabled` kill-switch.
+   Covered by `ExtensionRegistryTest` + `ExtensionToolTraceTest`; six runnable `examples/` verified as live
+   beans. See [`EXTENDING_GETTING_STARTED.md`](EXTENDING_GETTING_STARTED.md).
+3. **`wrapContext` + `route` extension points** — *proposed.* Context engineering and model routing (pairs
+   directly with roadmap Track G's router and Track E's caching experiments).
+4. **`extensions/*.jar` ServiceLoader + isolated classloader + manifest/capability gating + audit** —
+   *proposed.* The default-closed, signed, sandboxed external-code path (today extensions are in-process
+   Spring beans compiled into the app).
+5. **GraalJS scripting bridge + docs + golden tests** — *proposed.* The no-build-step script path.
+6. **Tier 1 `extensions/` bundle** — *proposed.* Extend `PluginPack` to carry `mcp.json`/`hooks.json`
+   fragments so a mixed file-based + in-process app installs/removes as one unit.
 
 Each PR is independently shippable with a deterministic test, and every one is byte-identical to today
 when no extension is present — the same discipline the rest of the roadmap holds to.

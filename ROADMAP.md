@@ -1529,12 +1529,17 @@ any one guardrail turns exactly one gauntlet row red — proving the defenses ar
    `hooks.json` fragments so a skill+agent+command+tool app installs/removes as one unit; ship
    `extensions/notes-app/` + a copy-me README and a `/extensions` admin view. High on-ramp value, almost
    no engine change.
-2. **Tier 2a — `Extension` interface + Spring-bean discovery for tools.** Replace `ToolRegistry`'s
-   hard-coded `register` calls with a provider loop; prove an in-process bean adds a validated,
-   permission-gated tool. This is the seam that unlocks everything; default-empty is byte-identical.
-3. **Tier 2b — agents/commands + typed `LoopEvent` observation.** The in-process, typed successor to
-   shell hooks (`preToolUse`/`postToolUse`/`userPromptSubmit`/`stop`/`sessionStart` + `preModelCall`/
-   `route`/`contextAssembled`); `HookService` becomes one subscriber to the same event stream.
+2. **Tier 2a — `Extension` interface + Spring-bean discovery for tools.** ✅ **Shipped.** `Extension` +
+   `ExtensionRegistry` (Spring injects `List<Extension>`); `ToolRegistry` registers extension tools through
+   the same validation/permission path and refuses to shadow a core/MCP name. This is the seam that unlocks
+   everything; default-empty is byte-identical.
+3. **Tier 2b — agents/commands + typed `LoopEvent` observation.** ✅ **Shipped.** `Extension.agents()` merge
+   into `AgentRegistry` (disk still wins), `Extension.commands()` into `SlashCommands`, and
+   `PRE_TOOL_USE`/`POST_TOOL_USE` events fanned out from `AgentEngine` via `ExtensionRegistry.emit(...)` —
+   the observe-only, typed successor to shell hooks. `GET /admin/extensions` + `extensions.enabled`
+   kill-switch; `ExtensionRegistryTest` + `ExtensionToolTraceTest`; six runnable `examples/` and
+   `docs/EXTENDING_GETTING_STARTED.md`. (Broader event types + `HookService` sharing the stream are a
+   follow-up.)
 4. **Tier 2c — `wrapContext` + `route` extension points.** Context engineering and model routing from user
    code — pairs directly with Track G's router and Track E's caching experiments.
 5. **Tier 2d — `extensions/*.jar` via `ServiceLoader`, isolated classloader, manifest + capability gating +
@@ -1640,6 +1645,8 @@ These remain valuable but rank below the workflow gaps and the educational core:
   workflow coverage.
 
 ## Recently completed
+
+- Track L Tier 2 — in-process Extension SPI (tools/agents/commands/events): shipped the load-bearing slice of the user-extensible harness. A new `Extension` interface (empty-default `tools`/`agents`/`commands`/`onEvent`) discovered by `ExtensionRegistry` (Spring injects `List<Extension>`; contributions collected once, per-extension isolated, name-deduped) lets a user drop a `@Component` into `com.example.imini.ext` and add a **validated, permission-gated in-process tool** without an MCP server or a core edit. Wired at the existing seams: `ToolRegistry` registers extension tools (refusing to shadow a core/MCP name), `AgentRegistry` merges extension subagents (disk still wins), `SlashCommands` expands extension commands, and `AgentEngine` fans `PRE_TOOL_USE`/`POST_TOOL_USE` `LoopEvent`s to observers (null-guarded field injection, so the engine constructor and every trace test are unchanged). Master kill-switch `extensions.enabled` (default true) + `GET /admin/extensions` diagnostics. Default-empty is byte-identical to before (verified: full Spring context boots; the golden traces are unaffected). Covered by `ExtensionRegistryTest` (7) + `ExtensionToolTraceTest` (end-to-end through the real engine); six runnable samples in `examples/` (custom tool, config-driven domain tool, subagent, slash command, lifecycle observer, combined mini-app) — all six verified as live beans — plus a `docs/EXTENDING_GETTING_STARTED.md` walkthrough and `docs/EXTENDING.md`/Track L updates. Tiers 2c–3 (context/route hooks, `*.jar` ServiceLoader + isolated classloader, GraalJS) remain proposed.
 
 - ROADMAP direction — AI-engineering curriculum axis (Tracks E–K) + user-extensible harness (Track L): added a second roadmap axis that grows the harness *downward* into the inference stack and the AI-engineering disciplines (framed as "harness/context engineering, not prompt engineering") rather than outward like Tracks B/C. Seven curriculum tracks, each carrying the standard assessment/principles/ranked-changes plus a **concept-by-concept lesson plan** and **runnable exercise prompts**, and each honestly grounded in the current source: **E** inference-stack literacy (prompt vs semantic caching, KV cache, prefill/decode, batching, spec-decode/quant/distillation — the `llama.*` serving knobs exist but aren't measured); **F** structured output & function-calling reliability (repair loops, fallback chains, idempotency atop `SchemaValidator`/`GrammarBuilder`); **G** guardrails, model routing & degraded-mode (per-run budgets + a router + user-visible degraded state atop `AgentEngine`/`CircuitBreaker`); **H** RAG architecture & retrieval evals (swappable chunking/hybrid/rerank + recall/precision/grounding over `RetrievalService`/`Bm25`); **I** evals, observability & cost attribution (baseline/regression diff, LLM-as-judge, per-workflow cost on `EvalHarness`/`Tracer`/`CostService`); **J** safety & multi-tenant isolation (measured injection catch-rate, two-tenant no-bleed, tenant-scoped cache keys — flags `RetrievalService.embed_cache` is content-addressed without a tenant scope); **K** the capstone decision guide + a production failure-mode gauntlet. A companion **Track L** proposes a `pi`-style in-process **Extension SPI** (discovery over `ToolRegistry`'s hard-wired sources, capability-gated + audited, `extensions/*.jar`/GraalJS), with the full analysis in the new `docs/EXTENDING.md`. Docs-only; no code yet — the reconciliation with the "decline OPS/HARDENING" rule is written into the framing (these appear as *subjects to understand and measure on a laptop*, held to the same free/token-light/deterministic bar as Track C).
 

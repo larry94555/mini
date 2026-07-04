@@ -21,6 +21,9 @@ public class AgentRegistry {
     @Value("${agents.enabled:true}") private boolean enabled;
     @Value("${agents.dir:agents}") private String dir;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ExtensionRegistry extensions;
+
     private final Path root = Path.of("").toAbsolutePath().normalize();
 
     // Built-in agents. Tools are READ-ONLY by default so a delegated sub-run is safe under AUTO mode.
@@ -51,10 +54,14 @@ public class AgentRegistry {
                     + "two, and write a concise answer that addresses the task and names the sources. No "
                     + "questions; finish with plain text."));
 
-    /** All agents: built-ins merged with on-disk definitions (disk wins by name). */
+    /**
+     * All agents: built-ins, then extension-contributed agents, then on-disk definitions. Later sources
+     * win by name, so disk overrides an extension which overrides a built-in.
+     */
     public List<AgentLibrary.AgentDef> list() {
         if (!enabled) return List.of();
-        return AgentLibrary.merge(BUILTINS, fromDisk());
+        List<AgentLibrary.AgentDef> ext = (extensions == null) ? List.of() : extensions.agents();
+        return AgentLibrary.merge(AgentLibrary.merge(BUILTINS, ext), fromDisk());
     }
 
     public AgentLibrary.AgentDef byName(String name) {

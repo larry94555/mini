@@ -52,6 +52,11 @@ public class AgentEngine {
     private final ToolRateLimiter toolRateLimiter;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    // Optional: in-process user extensions observe loop lifecycle events. Field-injected so the
+    // constructor (and every test that builds the engine directly) is unchanged; null when absent.
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ExtensionRegistry extensions;
+
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "imini-tool");
         t.setDaemon(true);
@@ -344,6 +349,7 @@ public class AgentEngine {
                 sink.log("[hook:pre] blocked " + name);
                 return block;
             }
+            if (extensions != null) extensions.emit(LoopEvent.preTool(sessionId, name, args));
             String result = safeExec(tool, args);
             if (result != null && (result.startsWith("ERROR") || result.startsWith("DENIED")
                     || result.startsWith("INVALID_ARGS") || result.startsWith("BLOCKED"))) {
@@ -353,6 +359,7 @@ public class AgentEngine {
             if (postOut != null && !postOut.isBlank()) {
                 result = result + "\n[post-hook]\n" + postOut;
             }
+            if (extensions != null) extensions.emit(LoopEvent.postTool(sessionId, name, args, result));
             recorder.record(sessionId, name, tool.mutating, args, result);
             return result;
         } finally {
