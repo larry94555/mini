@@ -82,6 +82,8 @@ public class AgentController {
     private WebSearchService webSearch;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private McpManager mcp;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ExtensionRegistry extensions;
     private final CostService cost;
     private final EvalHarness eval;
     private final CapabilityService capabilities;
@@ -542,6 +544,16 @@ public class AgentController {
             return Map.of("enabled", false);
         }
         return mcp.diagnostics();
+    }
+
+    /** What in-process user extensions loaded and what each contributed (tools/agents/commands). */
+    @GetMapping("/admin/extensions")
+    public Map<String, Object> adminExtensions() {
+        requireAdmin();
+        if (extensions == null) {
+            return Map.of("enabled", false, "count", 0, "extensions", java.util.List.of());
+        }
+        return extensions.diagnostics();
     }
 
     @GetMapping("/admin/web-search")

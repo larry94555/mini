@@ -24,7 +24,8 @@ public class ToolRegistry {
     public ToolRegistry(BuiltinTools builtins, CodebaseTools codebase, SubAgent subAgent,
                         McpManager mcp, RetrievalService retrieval, SkillService skills,
                         AgentRegistry agents, MemoryStore memory, GitWriteTools gitWrite,
-                        WorkspaceRootTools workspaceRootTools, ProjectTools projectTools) {
+                        WorkspaceRootTools workspaceRootTools, ProjectTools projectTools,
+                        ExtensionRegistry extensions) {
         this.subAgent = subAgent;
         this.agents = agents;
         this.mcp = mcp;
@@ -49,7 +50,22 @@ public class ToolRegistry {
         }
         register(mcp.reloadTool());            // reload_mcp (hot-reload mcp.json without restart)
         mcp.setReloadHook(this::refreshMcpTools);
+        // In-process user extensions: contribute tools that go through the SAME validation + permission
+        // path as built-ins. An extension may NOT shadow a core/MCP tool name (skipped + warned), so
+        // extensions can add capability but never silently redefine an existing tool.
+        if (extensions != null) {
+            for (Tool t : extensions.tools()) {
+                if (t == null || t.name == null || t.name.isBlank()) continue;
+                if (tools.containsKey(t.name)) {
+                    log.warn("[extensions] tool \"" + t.name + "\" collides with an existing tool; not registered.");
+                    continue;
+                }
+                register(t);
+            }
+        }
     }
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ToolRegistry.class);
 
     /** Re-publish the live MCP tool set after a hot-reload: drop the old MCP tools, add the current ones. */
     public synchronized void refreshMcpTools() {

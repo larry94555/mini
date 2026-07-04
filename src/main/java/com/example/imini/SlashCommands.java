@@ -25,6 +25,9 @@ public class SlashCommands {
     private static final Path DIR = Path.of("commands");
     private final Map<String, String> templates = new LinkedHashMap<>();
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ExtensionRegistry extensions;
+
     @PostConstruct
     public void load() {
         if (!Files.isDirectory(DIR)) {
@@ -66,10 +69,19 @@ public class SlashCommands {
             for (String name : templates.keySet()) sb.append("  /").append(name).append(" <args>\n");
             sb.append("\nEach expands to its template with $ARGS replaced by the text after the command.");
         }
+        Map<String, Extension.Command> ext = extensionCommands();
+        if (!ext.isEmpty()) {
+            sb.append("\nFrom extensions:\n");
+            for (Extension.Command c : ext.values()) {
+                sb.append("  /").append(c.name()).append(" <args>");
+                if (c.description() != null && !c.description().isBlank()) sb.append("  - ").append(c.description());
+                sb.append("\n");
+            }
+        }
         return sb.toString();
     }
 
-    /** Expand "/name args" via commands/name.md; non-slash or unknown commands pass through. */
+    /** Expand "/name args" via commands/name.md (disk wins) or an extension command; else pass through. */
     public String expand(String msg) {
         if (msg == null || !msg.trim().startsWith("/")) return msg;
         String trimmed = msg.trim();
@@ -77,7 +89,15 @@ public class SlashCommands {
         String name = (sp < 0 ? trimmed.substring(1) : trimmed.substring(1, sp)).trim();
         String args = sp < 0 ? "" : trimmed.substring(sp + 1).trim();
         String template = templates.get(name);
+        if (template == null) {
+            Extension.Command c = extensionCommands().get(name);
+            if (c != null) template = c.template();
+        }
         if (template == null) return msg;
         return template.replace("$ARGS", args).replace("$ARGUMENTS", args);
+    }
+
+    private Map<String, Extension.Command> extensionCommands() {
+        return extensions == null ? Map.of() : extensions.commands();
     }
 }
