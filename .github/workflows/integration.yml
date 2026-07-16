@@ -37,7 +37,7 @@ jobs:
           java-version: "21"
           cache: maven
       - name: Set up Node.js (so the stdio MCP integration tests run instead of self-skipping)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Make the Maven wrapper executable
