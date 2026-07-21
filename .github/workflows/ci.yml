@@ -11,7 +11,7 @@ jobs:
     name: Build & unit tests (JDK 21)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -40,6 +40,6 @@ jobs:
     name: Docker image builds
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the imini image (validates the Dockerfile + packaging)
         run: docker build -t imini:ci .

@@ -19,7 +19,7 @@ jobs:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -49,7 +49,7 @@ jobs:
       contents: read
       security-events: write   # upload SARIF to code scanning
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 1) Report HIGH+CRITICAL into the Security tab (non-blocking, full visibility).
       - name: Trivy scan -> SARIF (report)
         uses: aquasecurity/trivy-action@v0.36.0
