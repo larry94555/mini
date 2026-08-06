@@ -11,7 +11,7 @@ RUN mvn -q -DskipTests package
 # with <finalName>imini</finalName> in pom.xml this is target/imini.jar
 
 # ---- run stage: small JRE image that just runs the jar ----
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:24-jre
 WORKDIR /app
 # curl is used by the container HEALTHCHECK to poll the readiness probe
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
